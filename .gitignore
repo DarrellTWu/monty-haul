@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+*/node_modules/
+**/node_modules/
+
+# Build outputs
+client/dist/
+dist/
+build/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables (contain URLs/keys — recreate per machine)
+.env
+.env.local
+.env.*.local
+client/.env.development
+client/.env.production
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code local state (if any)
+.claude/
+
+# Test coverage
+coverage/
+*.lcov
+
+# Temporary files
+*.tmp
+tmp/
