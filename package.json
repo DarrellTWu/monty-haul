@@ -4,6 +4,7 @@
   "workspaces": ["client", "server", "shared"],
   "scripts": {
     "dev": "npm run dev --workspace=client",
-    "server": "npm run start --workspace=server"
+    "server": "npm run start --workspace=server",
+    "test": "node shared/tests/combat.test.js"
   }
 }
