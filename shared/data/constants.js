@@ -23,8 +23,11 @@ export const COMBAT_DETECTION_RADIUS = 200; // Px — enemy within this = in com
 
 // COMBAT
 export const ATTACK_COOLDOWN_MS = 3000;  // Player attack timer cooldown
-export const MELEE_ATTACK_RANGE_PX = 25; // Melee hit radius in pixels
-export const CRIT_MULTIPLIER = 2;        // Weapon dice are rolled this many times on a natural 20
+export const MELEE_ATTACK_RANGE_PX = 25; // Weapon reach in pixels (from attacker edge)
+export const MELEE_HIT_RANGE_PX = 64;   // Center-to-center distance for melee hit check.
+                                          // Generous for placeholder graphics; tune when real
+                                          // sprite collision radii are known.
+export const CRIT_MULTIPLIER = 2;        // Total damage multiplier on a natural 20
 
 // MOVEMENT
 export const BASE_SPEED_PX_PER_SEC = 150; // 30 ft at 5 px/ft

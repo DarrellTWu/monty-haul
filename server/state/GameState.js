@@ -1,0 +1,20 @@
+// server/state/GameState.js
+import { createRequire } from 'module';
+const { Schema, MapSchema, defineTypes } = createRequire(import.meta.url)('@colyseus/schema');
+import { PlayerState } from './PlayerState.js';
+import { EnemyState } from './EnemyState.js';
+
+export class GameState extends Schema {
+  constructor() {
+    super();
+    this.players = new MapSchema();
+    this.enemies = new MapSchema();
+    this.phase = 'playing';
+  }
+}
+
+defineTypes(GameState, {
+  players: { map: PlayerState },
+  enemies: { map: EnemyState },
+  phase: 'string',
+});
