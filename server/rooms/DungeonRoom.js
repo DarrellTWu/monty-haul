@@ -7,7 +7,6 @@ import { PlayerState } from '../state/PlayerState.js';
 import { EnemyState } from '../state/EnemyState.js';
 import { FIGHTER } from '../../shared/data/classes/fighter.js';
 import { GOBLIN } from '../../shared/data/enemies/tier1.js';
-import { LONGSWORD } from '../../shared/data/weapons/melee.js';
 import { getModifier } from '../../shared/logic/combat.js';
 import { SERVER_TICK_RATE_HZ, MELEE_HIT_RANGE_PX } from '../../shared/data/constants.js';
 import * as MovementSystem from '../systems/MovementSystem.js';
@@ -45,7 +44,20 @@ export class DungeonRoom extends Room {
     });
 
     this.onMessage('attack', (client) => {
-      playerAttack(this.state, client.sessionId, LONGSWORD);
+      playerAttack(this.state, client.sessionId);
+    });
+
+    // Equip a weapon by id. Client is responsible for only sending valid ids
+    // from the player's own inventory — server trusts the id only if it matches
+    // a known weapon in CombatSystem's registry.
+    this.onMessage('equip', (client, { itemId }) => {
+      const player = this.state.players.get(client.sessionId);
+      if (player) player.equippedWeaponId = String(itemId);
+    });
+
+    this.onMessage('unequip', (client, { slot }) => {
+      const player = this.state.players.get(client.sessionId);
+      if (player && slot === 'weapon') player.equippedWeaponId = '';
     });
 
     this.setSimulationInterval(
@@ -66,6 +78,7 @@ export class DungeonRoom extends Room {
     player.ac = FIGHTER.baseAC;
     player.level = 1;
     player.alive = true;
+    player.equippedWeaponId = 'longsword'; // fighter starts with longsword equipped
 
     this.state.players.set(client.sessionId, player);
     console.log(`[DungeonRoom] ${client.sessionId} joined — HP ${maxHp} AC ${FIGHTER.baseAC}`);

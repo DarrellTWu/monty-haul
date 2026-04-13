@@ -48,6 +48,22 @@ export function sendAttack() {
   _room?.send('attack');
 }
 
+/**
+ * Equip a weapon by id.
+ * @param {string} itemId - weapon id matching server's WEAPON_REGISTRY
+ */
+export function sendEquip(itemId) {
+  _room?.send('equip', { itemId });
+}
+
+/**
+ * Unequip the weapon in a given slot.
+ * @param {'weapon'} slot
+ */
+export function sendUnequip(slot) {
+  _room?.send('unequip', { slot });
+}
+
 /** Cleanly leave the current room. */
 export async function leave() {
   if (_room) {

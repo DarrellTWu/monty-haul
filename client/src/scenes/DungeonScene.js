@@ -79,9 +79,13 @@ export class DungeonScene extends Phaser.Scene {
 
     // Wire up keyboard input.
     this._input = new InputHandler(this);
+    this._input.onTabDown = () => this._toggleInventory();
 
     // Camera: follow own player, clamped to room.
     this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
+
+    // Launch persistent HUD overlay (attack timer, future HUD elements).
+    this.scene.launch('HUDScene');
 
     // Phase-complete message handler.
     this._room.state.onChange(() => {
@@ -128,6 +132,16 @@ export class DungeonScene extends Phaser.Scene {
       } else {
         this._updateHpBar(gfx.hpBar, enemy.x, enemy.y, enemy.hp, enemy.maxHp);
       }
+    }
+  }
+
+  _toggleInventory() {
+    if (this.scene.isActive('InventoryScene')) {
+      this.scene.stop('InventoryScene');
+      this._input.enabled = true;
+    } else {
+      this.scene.launch('InventoryScene');
+      this._input.enabled = false;
     }
   }
 

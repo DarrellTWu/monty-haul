@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
-import { DungeonScene } from './scenes/DungeonScene.js';
+import { DungeonScene }   from './scenes/DungeonScene.js';
+import { HUDScene }       from './scenes/HUDScene.js';
+import { InventoryScene } from './scenes/InventoryScene.js';
 
 const config = {
   type: Phaser.AUTO,
@@ -10,7 +12,9 @@ const config = {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [DungeonScene],
+  // Scene order = render order. DungeonScene renders first (world),
+  // HUDScene on top (always-on HUD), InventoryScene topmost (modal overlay).
+  scene: [DungeonScene, HUDScene, InventoryScene],
 };
 
 new Phaser.Game(config);

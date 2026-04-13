@@ -15,6 +15,7 @@ export class PlayerState extends Schema {
     this.vy = 0;
     this.attackCooldownMs = 0;
     this.alive = true;
+    this.equippedWeaponId = ''; // weapon id string; '' = unarmed
   }
 }
 
@@ -29,4 +30,5 @@ defineTypes(PlayerState, {
   vy: 'number',
   attackCooldownMs: 'number',
   alive: 'boolean',
+  equippedWeaponId: 'string',
 });

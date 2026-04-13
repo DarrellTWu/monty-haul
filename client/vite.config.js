@@ -6,6 +6,9 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   server: {
     port: 5173,
+    // Allow Vite to serve files from the monorepo root so client scenes can
+    // import from shared/ via relative paths (e.g. '../../../shared/data/...').
+    fs: { allow: ['..'] },
   },
   build: {
     outDir: 'dist',

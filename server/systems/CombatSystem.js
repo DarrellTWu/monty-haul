@@ -1,21 +1,32 @@
 // server/systems/CombatSystem.js
 // Multiplayer wrapper around shared/logic/combat.js.
-// Translates Colyseus state objects into the plain-object shapes combat.js
-// expects, calls resolveAttack / applyDamage, and writes results back to state.
 
 import { resolveAttack, applyDamage } from '../../shared/logic/combat.js';
 import { ATTACK_COOLDOWN_MS, MELEE_HIT_RANGE_PX } from '../../shared/data/constants.js';
+import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, UNARMED } from '../../shared/data/weapons/melee.js';
+
+// All weapons the server recognises. Add new weapons here as they're designed.
+const WEAPON_REGISTRY = {
+  longsword: LONGSWORD,
+  shortsword: SHORTSWORD,
+  handaxe: HANDAXE,
+  greataxe: GREATAXE,
+  unarmed: UNARMED,
+};
+
+function getWeapon(equippedWeaponId) {
+  return WEAPON_REGISTRY[equippedWeaponId] ?? UNARMED;
+}
 
 /**
  * Attempt a player attack against the nearest living enemy in melee range.
- * Called by DungeonRoom when it receives an 'attack' message from a client.
+ * Weapon is resolved from player.equippedWeaponId — no weapon param needed.
  *
  * @param {import('../state/GameState.js').GameState} state
- * @param {string} sessionId - attacking player's session
- * @param {import('../../shared/types/weapon.js').Weapon} weapon - equipped weapon
+ * @param {string} sessionId
  * @returns {{ hit: boolean, crit: boolean, damage: number, targetId: string | null }}
  */
-export function playerAttack(state, sessionId, weapon) {
+export function playerAttack(state, sessionId) {
   const player = state.players.get(sessionId);
   if (!player || !player.alive) return { hit: false, crit: false, damage: 0, targetId: null };
   if (player.attackCooldownMs > 0) return { hit: false, crit: false, damage: 0, targetId: null };
@@ -23,7 +34,7 @@ export function playerAttack(state, sessionId, weapon) {
   const target = nearestLivingEnemy(state, player);
   if (!target) return { hit: false, crit: false, damage: 0, targetId: null };
 
-  // Build the attacker shape combat.js expects
+  const weapon = getWeapon(player.equippedWeaponId);
   const attacker = playerToAttacker(player);
 
   const result = resolveAttack({ attacker, target: enemyToTarget(target.state), weapon });
@@ -44,7 +55,6 @@ export function playerAttack(state, sessionId, weapon) {
   }
 
   player.attackCooldownMs = ATTACK_COOLDOWN_MS;
-
   return { ...result, targetId: target.id };
 }
 
@@ -53,7 +63,7 @@ export function playerAttack(state, sessionId, weapon) {
  *
  * @param {import('../state/GameState.js').GameState} state
  * @param {import('../state/EnemyState.js').EnemyState} enemyState
- * @param {object} enemyDef - the static enemy data object from shared/data/enemies/
+ * @param {object} enemyDef
  * @param {import('../state/PlayerState.js').PlayerState} targetPlayer
  */
 export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
@@ -67,11 +77,7 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
     conditions: [],
   };
 
-  const result = resolveAttack({
-    attacker,
-    target: playerToTarget(targetPlayer),
-    weapon: null,
-  });
+  const result = resolveAttack({ attacker, target: playerToTarget(targetPlayer), weapon: null });
 
   if (result.hit) {
     const applied = applyDamage({
@@ -96,7 +102,6 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
 function nearestLivingEnemy(state, player) {
   let nearest = null;
   let nearestDist = Infinity;
-
   for (const [id, enemy] of state.enemies) {
     if (!enemy.alive) continue;
     const dist = dist2d(player.x, player.y, enemy.x, enemy.y);
@@ -105,38 +110,24 @@ function nearestLivingEnemy(state, player) {
       nearest = { id, state: enemy };
     }
   }
-
   return nearest;
 }
 
-/** Maps PlayerState → plain attacker object for combat.js */
 function playerToAttacker(player) {
   return {
-    // combat.js checks for abilityScores to determine player vs. enemy path.
-    // For the prototype, fighter stats are hardcoded here.
-    // TODO: derive from player.abilityScores when that field is in schema.
+    // TODO: derive from player.abilityScores once that field is in schema.
     abilityScores: { str: 16, dex: 14, con: 16, int: 10, wis: 10, cha: 10 },
     level: player.level,
     conditions: [],
   };
 }
 
-/** Maps PlayerState → plain target object for combat.js */
 function playerToTarget(player) {
-  return {
-    ac: player.ac,
-    hp: player.hp,
-    resistances: [],
-  };
+  return { ac: player.ac, hp: player.hp, resistances: [] };
 }
 
-/** Maps EnemyState → plain target object for combat.js */
 function enemyToTarget(enemy) {
-  return {
-    ac: enemy.ac,
-    hp: enemy.hp,
-    resistances: [],
-  };
+  return { ac: enemy.ac, hp: enemy.hp, resistances: [] };
 }
 
 function dist2d(x1, y1, x2, y2) {
