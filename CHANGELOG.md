@@ -5,6 +5,70 @@ Entries are newest-first within each session.
 
 ---
 
+## Session 4 — 2026-04-12
+
+### Completed
+
+#### SRD correctness: armor-derived AC and weapon damage display
+
+**Problem 1 — Magic-number AC:** `FIGHTER.baseAC = 16` had no armor data behind it.
+**Fix:** Created `shared/data/armor/armor.js` with all SRD armor definitions and `computeAC(armorDef, dexMod, hasShield)`. Added `startingArmorId: 'chain_mail'` to `FIGHTER`. Server now calls `computeAC(ARMOR_REGISTRY['chain_mail'], dexMod)` on join to derive `player.ac = 16`.
+
+**Decision:** Chain Mail (heavy armor, baseAC 16, STR 13 requirement) is the SRD item that produces AC 16 with no DEX contribution. Heavy armor was chosen over medium + shield (Breastplate 14 + DEX +2 + shield = 18 would be too high) or half-plate because it matches a starting fighter loadout and the exact AC value of 16.
+
+**Problem 2 — Weapon damage label:** `WEAPON_DISPLAY.longsword.detail` was `'1d8+3 slashing'`, presenting the STR modifier as if it were a weapon property.
+**Fix:** Changed to `'1d8 slashing'`. The STR modifier is now computed from `FIGHTER_SCORES.STR` in `_refresh()` and appended as a separate label (`+3 STR`) on the equipped weapon button.
+
+**Files changed:**
+- `shared/data/armor/armor.js` — new file; all SRD armors + `computeAC` + `ARMOR_REGISTRY`
+- `shared/data/classes/fighter.js` — removed `baseAC: 16`, added `startingArmorId: 'chain_mail'`
+- `server/state/PlayerState.js` — added `equippedArmorId: 'string'` to schema
+- `server/rooms/DungeonRoom.js` — imports `ARMOR_REGISTRY` + `computeAC`; computes AC on join; sets `player.equippedArmorId`
+- `client/src/scenes/InventoryScene.js` — fixed weapon detail string; STR modifier displayed separately; armor row added to equipment panel reading from `player.equippedArmorId`
+
+---
+
+## Session 3 — 2026-04-11
+
+### Completed
+
+#### Playable room: Fighter vs. two Goblins
+
+Built the full server-authoritative game loop to prove out the engine.
+
+**Server:**
+- `server/state/PlayerState.js` / `EnemyState.js` / `GameState.js` — Colyseus `@Schema` classes using `createRequire` + `defineTypes` pattern (required because `colyseus` and `@colyseus/schema` are CJS builds that Node.js ESM named-export synthesis cannot analyze statically)
+- `server/systems/MovementSystem.js` — applies player velocity (normalized direction × `BASE_SPEED_PX_PER_SEC`) and enemy velocity (px/sec stored directly in `vx/vy`) to positions each tick; clamps to room bounds
+- `server/systems/AISystem.js` — idle→aggro transition on `COMBAT_DETECTION_RADIUS`; moves toward nearest player at `def.speed` px/sec; triggers `enemyAttack` when within `MELEE_HIT_RANGE_PX`
+- `server/systems/CombatSystem.js` — `playerAttack` reads weapon from `WEAPON_REGISTRY[player.equippedWeaponId]`; `enemyAttack` constructs weapon-shaped object from enemy def fields; both call `resolveAttack` + `applyDamage` from `shared/logic/combat.js`
+- `server/rooms/DungeonRoom.js` — full `onCreate`/`onJoin`/`onLeave`; spawns fighter at (800,600) and two goblins at (300,300) and (1300,900); handles `move`, `stop`, `attack`, `equip`, `unequip` messages; `setSimulationInterval` ticks at `SERVER_TICK_RATE_HZ.tier1`
+
+**Client:**
+- `client/src/network/ColyseusClient.js` — singleton module; `joinDungeon()`, `sendMove()`, `sendStop()`, `sendAttack()`, `sendEquip()`, `sendUnequip()`, `getRoom()`
+- `client/src/input/InputHandler.js` — WASD + arrows → move, Space → attack (keydown only), Tab → `onTabDown` callback; `this.enabled` flag suppresses move/attack while inventory is open; Tab fires through disabled state
+- `client/src/scenes/DungeonScene.js` — async `create()`, joins room, renders players and enemies as colored circles (`Phaser.add.arc`) with `Graphics` HP bars; camera follows own player (gold tint); launches `HUDScene`; `_toggleInventory()` manages `InventoryScene`
+- `client/src/scenes/HUDScene.js` — fixed-camera overlay; attack timer ring (circumference drawn clockwise over 3-second cooldown); color shifts orange → yellow → lime → green as ready; "ATK" label and countdown/READY text
+- `client/src/scenes/InventoryScene.js` — Tab to open/close; left panel: name, level, HP, AC, ability scores; right panel: weapon slot (click = unequip) + bag (click = equip); refreshes from server state each frame
+
+**Decisions:**
+- Placeholder graphics (colored circles) used throughout; sprite replacement will be a separate pass
+- Placeholder room (bordered rectangle); tilemap system (pre-built rooms + procedural combination) is a future task
+- Enemy velocity stored as px/sec in `vx/vy` so `MovementSystem` applies it uniformly; player velocity stored as normalized direction and scaled in `MovementSystem`
+- `vite.config.js` updated with `server: { fs: { allow: ['..'] } }` so client scenes can import from `shared/` via relative paths
+
+**Known deferred issue:**
+- Canvas appears blurry on high-DPI displays because Phaser does not set `devicePixelRatio` on the canvas by default. Fix: set `resolution: window.devicePixelRatio` in Phaser config and update scale mode accordingly. Deferred until more UI/graphics are in place.
+
+---
+
+#### Weapon and armor data
+
+- `shared/data/weapons/melee.js` — `LONGSWORD`, `SHORTSWORD`, `HANDAXE`, `GREATAXE`, `UNARMED`; `damageBonus: 0` on all (ability modifier added at call site in `resolveAttack`, not baked into weapon)
+- `shared/data/enemies/tier1.js` — `GOBLIN` (hp 7, ac 15, flat attackBonus 4)
+- `shared/data/classes/fighter.js` — `FIGHTER` with base ability scores, `getStartingHp(conMod)`, proficiency via `getProficiencyBonus(level)` in `combat.js`
+
+---
+
 ## Session 2 — 2026-04-10
 
 ### Completed
