@@ -25,8 +25,9 @@ export const FIGHTER = {
     return Math.floor((this.hitDie + conMod) * HP_MULTIPLIER);
   },
 
-  // AC with chain mail (no DEX bonus). TODO: derive from equipped armor.
-  baseAC: 16,
+  // Starting armor. Chain Mail is heavy (baseAC 16, no DEX bonus, STR 13 req).
+  // AC is computed via computeAC() in shared/data/armor/armor.js — not stored here.
+  startingArmorId: 'chain_mail',
 
   // Proficiency bonus at level 1 is computed by getProficiencyBonus(level)
   // in combat.js — not stored here.

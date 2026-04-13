@@ -33,9 +33,9 @@ function modStr(score) { const m = mod(score); return (m >= 0 ? '+' : '') + m; }
 const STARTING_BAG = ['longsword'];
 
 const WEAPON_DISPLAY = {
-  longsword: { label: 'Longsword',   detail: '1d8+3  slashing' },
-  shortsword:{ label: 'Shortsword',  detail: '1d6    piercing' },
-  unarmed:   { label: 'Unarmed',     detail: '1d4    bludgeoning' },
+  longsword: { label: 'Longsword',   detail: '1d8  slashing' },
+  shortsword:{ label: 'Shortsword',  detail: '1d6  piercing' },
+  unarmed:   { label: 'Unarmed',     detail: '1d4  bludgeoning' },
 };
 
 const STYLE_HEADER   = { fontSize: '18px', color: '#ffffff',  fontFamily: 'monospace', fontStyle: 'bold' };
@@ -109,6 +109,12 @@ export class InventoryScene extends Phaser.Scene {
     this._equippedBtn.on('pointerdown', () => this._onEquippedClick());
     ry += 36;
 
+    // Armor slot row (display only — no equip/unequip UI yet).
+    this.add.text(rx, ry, 'Armor', { ...STYLE_MUTED });
+    ry += 18;
+    this._armorText = this.add.text(rx, ry, '—  (none)', STYLE_BODY);
+    ry += 28;
+
     // Bag section.
     this.add.text(rx, ry, 'BAG', STYLE_SUBHEAD);
     ry += 20;
@@ -158,15 +164,26 @@ export class InventoryScene extends Phaser.Scene {
     const equipped = player.equippedWeaponId;
     const bagContainsLongsword = !equipped || equipped === '';
 
-    // Equipped slot button.
+    // Equipped slot button — weapon label + ability modifier shown separately.
     if (equipped) {
+      const strMod = mod(FIGHTER_SCORES.STR);
+      const modLabel = (strMod >= 0 ? '+' : '') + strMod + ' STR';
       this._equippedBtn
-        .setText(`⚔  ${this._weaponLabel(equipped)}`)
+        .setText(`⚔  ${this._weaponLabel(equipped)}   ${modLabel}`)
         .setStyle({ ...STYLE_ITEM, backgroundColor: '#1a1a2e' });
     } else {
       this._equippedBtn
         .setText('—  (empty)')
         .setStyle({ ...STYLE_MUTED, backgroundColor: '#111118' });
+    }
+
+    // Armor slot — read from server state.
+    const armorId = player.equippedArmorId;
+    if (armorId) {
+      const ARMOR_LABEL = { chain_mail: 'Chain Mail — AC 16  (heavy, STR 13)' };
+      this._armorText.setText(ARMOR_LABEL[armorId] || armorId);
+    } else {
+      this._armorText.setText('—  (none)');
     }
 
     // Bag buttons — hide items that are currently equipped.

@@ -8,6 +8,7 @@ import { EnemyState } from '../state/EnemyState.js';
 import { FIGHTER } from '../../shared/data/classes/fighter.js';
 import { GOBLIN } from '../../shared/data/enemies/tier1.js';
 import { getModifier } from '../../shared/logic/combat.js';
+import { ARMOR_REGISTRY, computeAC } from '../../shared/data/armor/armor.js';
 import { SERVER_TICK_RATE_HZ, MELEE_HIT_RANGE_PX } from '../../shared/data/constants.js';
 import * as MovementSystem from '../systems/MovementSystem.js';
 import * as AISystem from '../systems/AISystem.js';
@@ -75,13 +76,18 @@ export class DungeonRoom extends Room {
     player.y = FIGHTER_SPAWN.y;
     player.hp = maxHp;
     player.maxHp = maxHp;
-    player.ac = FIGHTER.baseAC;
+    const startingArmor = ARMOR_REGISTRY[FIGHTER.startingArmorId];
+    const dexMod = getModifier(FIGHTER.baseAbilityScores.dex);
+    const ac = computeAC(startingArmor, dexMod);
+
+    player.ac = ac;
     player.level = 1;
     player.alive = true;
     player.equippedWeaponId = 'longsword'; // fighter starts with longsword equipped
+    player.equippedArmorId = FIGHTER.startingArmorId;
 
     this.state.players.set(client.sessionId, player);
-    console.log(`[DungeonRoom] ${client.sessionId} joined — HP ${maxHp} AC ${FIGHTER.baseAC}`);
+    console.log(`[DungeonRoom] ${client.sessionId} joined — HP ${maxHp} AC ${ac}`);
   }
 
   onLeave(client) {
