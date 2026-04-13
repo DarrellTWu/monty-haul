@@ -102,7 +102,15 @@ export function resolveAttack({ attacker, target, weapon, conditions, rng = Math
   let abilityModForDamage = 0;
 
   if (attacker.abilityScores !== undefined && weapon !== null && weapon !== undefined) {
-    const abilityMod = getModifier(attacker.abilityScores[weapon.attackAbility]);
+    // Finesse weapons (dagger, rapier, etc.) use whichever of STR/DEX gives
+    // the higher modifier for both attack and damage rolls (SRD rule).
+    let attackAbility = weapon.attackAbility;
+    if (weapon.properties?.includes('finesse')) {
+      const strMod = getModifier(attacker.abilityScores.str ?? 10);
+      const dexMod = getModifier(attacker.abilityScores.dex ?? 10);
+      attackAbility = strMod >= dexMod ? 'str' : 'dex';
+    }
+    const abilityMod = getModifier(attacker.abilityScores[attackAbility]);
     abilityModForDamage = abilityMod;
     attackBonus = abilityMod + getProficiencyBonus(attacker.level) + (weapon.enhancement ?? 0);
   } else {

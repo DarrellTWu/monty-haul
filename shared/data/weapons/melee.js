@@ -47,6 +47,17 @@ export const GREATAXE = {
 };
 
 /** @type {import('../../types/weapon.js').Weapon} */
+export const DAGGER = {
+  id: 'dagger',
+  damageDice: { count: 1, sides: 4 },
+  damageBonus: 0,
+  damageType: 'piercing',
+  enhancement: 0,
+  attackAbility: 'str', // finesse — resolveAttack picks higher of STR/DEX automatically
+  properties: ['finesse', 'light', 'thrown'],
+};
+
+/** @type {import('../../types/weapon.js').Weapon} */
 export const UNARMED = {
   id: 'unarmed',
   damageDice: { count: 1, sides: 4 }, // TODO: derive from class/level (Monk martial arts die)

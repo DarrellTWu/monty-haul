@@ -3,12 +3,14 @@ import { createRequire } from 'module';
 const { Schema, MapSchema, defineTypes } = createRequire(import.meta.url)('@colyseus/schema');
 import { PlayerState } from './PlayerState.js';
 import { EnemyState } from './EnemyState.js';
+import { ChestState } from './ChestState.js';
 
 export class GameState extends Schema {
   constructor() {
     super();
     this.players = new MapSchema();
     this.enemies = new MapSchema();
+    this.chests = new MapSchema();
     this.phase = 'playing';
   }
 }
@@ -16,5 +18,6 @@ export class GameState extends Schema {
 defineTypes(GameState, {
   players: { map: PlayerState },
   enemies: { map: EnemyState },
+  chests: { map: ChestState },
   phase: 'string',
 });

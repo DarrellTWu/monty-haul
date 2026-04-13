@@ -57,11 +57,19 @@ export function sendEquip(itemId) {
 }
 
 /**
- * Unequip the weapon in a given slot.
- * @param {'weapon'} slot
+ * Unequip the item in a given slot.
+ * @param {'weapon'|'shield'} slot
  */
 export function sendUnequip(slot) {
   _room?.send('unequip', { slot });
+}
+
+/**
+ * Loot a chest by id.
+ * @param {string} chestId
+ */
+export function sendLoot(chestId) {
+  _room?.send('loot', { chestId });
 }
 
 /** Cleanly leave the current room. */

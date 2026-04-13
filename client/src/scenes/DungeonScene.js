@@ -10,8 +10,9 @@
 // PLACEHOLDER ROOM: the room boundary is a simple rectangle.
 // When tilemaps arrive, replace _drawRoom() with a Tilemap layer.
 
-import { joinDungeon } from '../network/ColyseusClient.js';
+import { joinDungeon, sendLoot } from '../network/ColyseusClient.js';
 import { InputHandler } from '../input/InputHandler.js';
+import { CHEST_LOOT_RANGE_PX } from '../../../shared/data/constants.js';
 
 // Visual config — swap these out when sprites land.
 const PLAYER_RADIUS = 16;
@@ -38,6 +39,7 @@ export class DungeonScene extends Phaser.Scene {
     this._room = null;
     this._playerGfx = new Map();  // sessionId → { circle, hpBar }
     this._enemyGfx = new Map();   // enemyId   → { circle, hpBar }
+    this._chestGfx = new Map();   // chestId   → { gfx, hint, chestState }
     this._input = null;
 
     // Draw the static room background.
@@ -77,9 +79,15 @@ export class DungeonScene extends Phaser.Scene {
       this._createEntityGfx(id, enemy, 'enemy');
     });
 
+    // Register chest handlers.
+    this._room.state.chests.onAdd((chest, id) => {
+      this._createChestGfx(id, chest);
+    });
+
     // Wire up keyboard input.
     this._input = new InputHandler(this);
     this._input.onTabDown = () => this._toggleInventory();
+    this._input.onInteract = () => this._tryLootNearbyChest();
 
     // Camera: follow own player, clamped to room.
     this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
@@ -120,6 +128,22 @@ export class DungeonScene extends Phaser.Scene {
       }
     }
 
+    // Update chest visuals — show loot prompt when player is nearby.
+    const myPlayer = state.players.get(this._room.sessionId);
+    for (const [id, { gfx, hint, chestState }] of this._chestGfx) {
+      if (chestState.open) {
+        gfx.clear();
+        gfx.lineStyle(2, 0x664422);
+        gfx.strokeRect(chestState.x - 20, chestState.y - 14, 40, 28);
+        hint.setVisible(false);
+      } else if (myPlayer) {
+        const dx = myPlayer.x - chestState.x;
+        const dy = myPlayer.y - chestState.y;
+        const near = Math.sqrt(dx * dx + dy * dy) < CHEST_LOOT_RANGE_PX;
+        hint.setVisible(near);
+      }
+    }
+
     // Update enemy visuals from server state.
     for (const [id, enemy] of state.enemies) {
       const gfx = this._enemyGfx.get(id);
@@ -135,6 +159,21 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
+  _tryLootNearbyChest() {
+    if (!this._room) return;
+    const myPlayer = this._room.state.players.get(this._room.sessionId);
+    if (!myPlayer) return;
+    for (const [id, { chestState }] of this._chestGfx) {
+      if (chestState.open) continue;
+      const dx = myPlayer.x - chestState.x;
+      const dy = myPlayer.y - chestState.y;
+      if (Math.sqrt(dx * dx + dy * dy) < CHEST_LOOT_RANGE_PX) {
+        sendLoot(id);
+        break;
+      }
+    }
+  }
+
   _toggleInventory() {
     if (this.scene.isActive('InventoryScene')) {
       this.scene.stop('InventoryScene');
@@ -146,6 +185,29 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────
+
+  _createChestGfx(id, chestState) {
+    const { x, y } = chestState;
+
+    const gfx = this.add.graphics();
+    gfx.fillStyle(0xaa6600);
+    gfx.fillRect(x - 20, y - 14, 40, 28);
+    gfx.lineStyle(2, 0xffcc44);
+    gfx.strokeRect(x - 20, y - 14, 40, 28);
+    gfx.setDepth(1);
+
+    // Label above chest.
+    this.add.text(x, y - 26, 'Chest', {
+      fontSize: '11px', color: '#ccaa55', fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(1);
+
+    // Loot prompt — shown only when player is in range.
+    const hint = this.add.text(x, y + 22, 'F: Loot', {
+      fontSize: '11px', color: '#aaffaa', fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(1).setVisible(false);
+
+    this._chestGfx.set(id, { gfx, hint, chestState });
+  }
 
   _drawRoom() {
     const gfx = this.add.graphics();

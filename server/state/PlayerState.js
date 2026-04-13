@@ -1,6 +1,6 @@
 // server/state/PlayerState.js
 import { createRequire } from 'module';
-const { Schema, defineTypes } = createRequire(import.meta.url)('@colyseus/schema');
+const { Schema, ArraySchema, defineTypes } = createRequire(import.meta.url)('@colyseus/schema');
 
 export class PlayerState extends Schema {
   constructor() {
@@ -17,6 +17,8 @@ export class PlayerState extends Schema {
     this.alive = true;
     this.equippedWeaponId = ''; // weapon id string; '' = unarmed
     this.equippedArmorId = '';  // armor id string; '' = unarmored
+    this.equippedShieldId = ''; // shield id string; '' = no shield
+    this.inventory = new ArraySchema(); // unequipped item ids
   }
 }
 
@@ -33,4 +35,6 @@ defineTypes(PlayerState, {
   alive: 'boolean',
   equippedWeaponId: 'string',
   equippedArmorId: 'string',
+  equippedShieldId: 'string',
+  inventory: { array: 'string' },
 });

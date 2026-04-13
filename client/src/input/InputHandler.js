@@ -18,6 +18,9 @@ export class InputHandler {
     /** Called when Tab is pressed. Wire this up in DungeonScene. */
     this.onTabDown = null;
 
+    /** Called when F is pressed while enabled. Wire to chest/door interaction. */
+    this.onInteract = null;
+
     this._keys = scene.input.keyboard.addKeys({
       up:        Phaser.Input.Keyboard.KeyCodes.W,
       down:      Phaser.Input.Keyboard.KeyCodes.S,
@@ -29,6 +32,7 @@ export class InputHandler {
       rightArrow:Phaser.Input.Keyboard.KeyCodes.RIGHT,
       attack:    Phaser.Input.Keyboard.KeyCodes.SPACE,
       tab:       Phaser.Input.Keyboard.KeyCodes.TAB,
+      interact:  Phaser.Input.Keyboard.KeyCodes.F,
     });
 
     this._wasMoving = false;
@@ -39,6 +43,10 @@ export class InputHandler {
 
     this._keys.tab.on('down', () => {
       this.onTabDown?.();
+    });
+
+    this._keys.interact.on('down', () => {
+      if (this.enabled) this.onInteract?.();
     });
   }
 
@@ -77,5 +85,6 @@ export class InputHandler {
   destroy() {
     this._keys.attack.removeAllListeners();
     this._keys.tab.removeAllListeners();
+    this._keys.interact.removeAllListeners();
   }
 }

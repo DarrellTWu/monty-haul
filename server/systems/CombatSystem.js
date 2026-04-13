@@ -3,7 +3,7 @@
 
 import { resolveAttack, applyDamage } from '../../shared/logic/combat.js';
 import { ATTACK_COOLDOWN_MS, MELEE_HIT_RANGE_PX } from '../../shared/data/constants.js';
-import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, UNARMED } from '../../shared/data/weapons/melee.js';
+import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, DAGGER, UNARMED } from '../../shared/data/weapons/melee.js';
 
 // All weapons the server recognises. Add new weapons here as they're designed.
 const WEAPON_REGISTRY = {
@@ -11,11 +11,27 @@ const WEAPON_REGISTRY = {
   shortsword: SHORTSWORD,
   handaxe: HANDAXE,
   greataxe: GREATAXE,
+  dagger: DAGGER,
   unarmed: UNARMED,
 };
 
 function getWeapon(equippedWeaponId) {
   return WEAPON_REGISTRY[equippedWeaponId] ?? UNARMED;
+}
+
+/**
+ * Returns the effective weapon considering SRD property interactions.
+ * Versatile weapons deal 1d10 (instead of 1d8) when no shield is equipped —
+ * the player is gripping the weapon two-handed.
+ *
+ * @param {object} weapon
+ * @param {import('../state/PlayerState.js').PlayerState} player
+ */
+function getEffectiveWeapon(weapon, player) {
+  if (weapon.properties?.includes('versatile') && !player.equippedShieldId) {
+    return { ...weapon, damageDice: { count: 1, sides: 10 } };
+  }
+  return weapon;
 }
 
 /**
@@ -34,7 +50,7 @@ export function playerAttack(state, sessionId) {
   const target = nearestLivingEnemy(state, player);
   if (!target) return { hit: false, crit: false, damage: 0, targetId: null };
 
-  const weapon = getWeapon(player.equippedWeaponId);
+  const weapon = getEffectiveWeapon(getWeapon(player.equippedWeaponId), player);
   const attacker = playerToAttacker(player);
 
   const result = resolveAttack({ attacker, target: enemyToTarget(target.state), weapon });

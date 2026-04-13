@@ -40,6 +40,9 @@ export const RITUAL_RADIUS_PX = 120;     // Player must remain within this px of
 // LEVER MECHANIC
 export const LEVER_RESET_MS = 4000;      // First lever resets after this ms — calibrate to exceed max crossing time
 
+// INTERACTION
+export const CHEST_LOOT_RANGE_PX = 80;  // Player must be within this px of a chest to loot it
+
 // META
 export const BANK_SLOTS_PER_RUN = 2;     // Max items a player can bank mid-run
 export const LONG_REST_ON_LEVEL_UP = true; // Full HP/resource restore on each floor clear
