@@ -2,51 +2,60 @@
 import { createRequire } from 'module';
 const { Room } = createRequire(import.meta.url)('colyseus');
 
-import { GameState } from '../state/GameState.js';
+import { GameState }  from '../state/GameState.js';
 import { PlayerState } from '../state/PlayerState.js';
-import { EnemyState } from '../state/EnemyState.js';
-import { ChestState } from '../state/ChestState.js';
-import { FIGHTER } from '../../shared/data/classes/fighter.js';
-import { GOBLIN } from '../../shared/data/enemies/tier1.js';
-import { getModifier } from '../../shared/logic/combat.js';
+import { EnemyState }  from '../state/EnemyState.js';
+import { ChestState }  from '../state/ChestState.js';
+import { TrapState }   from '../state/TrapState.js';
+
+import { FIGHTER }                   from '../../shared/data/classes/fighter.js';
+import { GOBLIN }                    from '../../shared/data/enemies/tier1.js';
+import { getModifier, resolveSave, rollDice } from '../../shared/logic/combat.js';
 import { ARMOR_REGISTRY, computeAC } from '../../shared/data/armor/armor.js';
 import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, DAGGER } from '../../shared/data/weapons/melee.js';
-import { SHIELD_REGISTRY } from '../../shared/data/items/shields.js';
-import { SERVER_TICK_RATE_HZ, MELEE_HIT_RANGE_PX, CHEST_LOOT_RANGE_PX } from '../../shared/data/constants.js';
-import * as MovementSystem from '../systems/MovementSystem.js';
-import * as AISystem from '../systems/AISystem.js';
-import { playerAttack } from '../systems/CombatSystem.js';
+import { SHIELD_REGISTRY }           from '../../shared/data/items/shields.js';
+import { CONSUMABLE_REGISTRY }       from '../../shared/data/items/consumables.js';
+import {
+  SERVER_TICK_RATE_HZ, MELEE_HIT_RANGE_PX, CHEST_LOOT_RANGE_PX,
+  TRAP_DAMAGE, TRAP_SAVE_DC, TRAP_RADIUS_PX, TRAP_COOLDOWN_MS,
+} from '../../shared/data/constants.js';
 
-// All equippable items the server recognises, split by slot type.
+import * as MovementSystem from '../systems/MovementSystem.js';
+import * as AISystem       from '../systems/AISystem.js';
+import { playerAttack, enemyAttack, applySecondWind } from '../systems/CombatSystem.js';
+
 const WEAPON_REGISTRY = {
   longsword: LONGSWORD, shortsword: SHORTSWORD,
   handaxe: HANDAXE, greataxe: GREATAXE, dagger: DAGGER,
 };
 
-const ROOM_WIDTH = 1600;
+const ROOM_WIDTH  = 1600;
 const ROOM_HEIGHT = 1200;
-const WALL = 40;
+const WALL        = 40;
 const BOUNDS = { minX: WALL, maxX: ROOM_WIDTH - WALL, minY: WALL, maxY: ROOM_HEIGHT - WALL };
 
-const FIGHTER_SPAWN = { x: 800, y: 600 };
-const GOBLIN_SPAWNS = [
-  { x: 300, y: 300 },
-  { x: 1300, y: 900 },
-];
+const FIGHTER_SPAWN  = { x: 800, y: 600 };
+const GOBLIN_SPAWNS  = [{ x: 300, y: 300 }, { x: 1300, y: 900 }];
+const CHEST_SPAWN    = { x: 880, y: 600 };
+const TRAP_SPAWN     = { x: 1380, y: 160 };
 
 export class DungeonRoom extends Room {
   onCreate(options) {
     this.setState(new GameState());
-    this._enemyDefs = new Map();
+    this._enemyDefs       = new Map();
+    this._conditionTimers = new Map(); // `${sessionId}_${condition}` → remainingMs
+
     this._spawnGoblins();
     this._spawnChest();
+    this._spawnTrap();
 
+    // ── Movement ──────────────────────────────────────────────────────────────
     this.onMessage('move', (client, { dx, dy }) => {
       const player = this.state.players.get(client.sessionId);
       if (!player || !player.alive) return;
       const len = Math.sqrt(dx * dx + dy * dy);
       if (len === 0) { player.vx = 0; player.vy = 0; }
-      else { player.vx = dx / len; player.vy = dy / len; }
+      else           { player.vx = dx / len; player.vy = dy / len; }
     });
 
     this.onMessage('stop', (client) => {
@@ -54,34 +63,45 @@ export class DungeonRoom extends Room {
       if (player) { player.vx = 0; player.vy = 0; }
     });
 
+    // ── Combat ────────────────────────────────────────────────────────────────
     this.onMessage('attack', (client) => {
-      playerAttack(this.state, client.sessionId);
+      const result = playerAttack(this.state, client.sessionId);
+      if (result.log) this.broadcast('combat_log', { message: result.log });
     });
 
-    // Equip an item from the player's inventory into the appropriate slot.
-    // Server validates: item must be in inventory, SRD constraints must hold.
-    // Two-handed weapons auto-unequip the shield (player made a deliberate choice).
-    this.onMessage('equip', (client, { itemId }) => {
+    // ── Equip / unequip ───────────────────────────────────────────────────────
+    // 'equip' message: { itemId, slot? }
+    //   slot = 'weapon' | 'offhand' | undefined (auto-detect by item type)
+    // Server validates: item in inventory, SRD constraints respected.
+    // Two-handed weapons auto-unequip offhand; offhand weapons do NOT block shields.
+    this.onMessage('equip', (client, { itemId, slot }) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
-      const id = String(itemId);
+      const id  = String(itemId);
       const idx = player.inventory.indexOf(id);
       if (idx === -1) return; // must be in inventory
 
-      if (SHIELD_REGISTRY[id]) {
-        // ── Shield slot ───────────────────────────────────────────────────────
-        const currentWeapon = WEAPON_REGISTRY[player.equippedWeaponId];
-        if (currentWeapon?.properties?.includes('two-handed')) return; // blocked by SRD
-        if (player.equippedShieldId) player.inventory.push(player.equippedShieldId);
-        player.inventory.splice(idx, 1);
-        player.equippedShieldId = id;
-      } else if (WEAPON_REGISTRY[id]) {
-        // ── Weapon slot ───────────────────────────────────────────────────────
+      const isShield = !!SHIELD_REGISTRY[id];
+      const isWeapon = !!WEAPON_REGISTRY[id];
+
+      // Auto-detect target slot if not specified.
+      const targetSlot = slot || (isShield ? 'offhand' : 'weapon');
+
+      if (targetSlot === 'offhand') {
+        // Offhand accepts one-handed weapons OR shields. Blocks two-handed weapons.
+        if (isWeapon && WEAPON_REGISTRY[id]?.properties?.includes('two-handed')) return;
+        if (player.offhandId) player.inventory.push(player.offhandId);
+        player.inventory.splice(player.inventory.indexOf(id), 1);
+        player.offhandId = id;
+
+      } else { // weapon slot
+        if (isShield) return; // shields go to offhand only
         const newWeapon = WEAPON_REGISTRY[id];
-        if (newWeapon.properties?.includes('two-handed') && player.equippedShieldId) {
-          // Two-handed weapon chosen — auto-unequip shield so the player can proceed.
-          player.inventory.push(player.equippedShieldId);
-          player.equippedShieldId = '';
+        if (!newWeapon) return;
+        // Two-handed weapon: auto-unequip offhand (player chose to go two-handed).
+        if (newWeapon.properties?.includes('two-handed') && player.offhandId) {
+          player.inventory.push(player.offhandId);
+          player.offhandId = '';
         }
         if (player.equippedWeaponId) player.inventory.push(player.equippedWeaponId);
         player.inventory.splice(player.inventory.indexOf(id), 1);
@@ -96,18 +116,17 @@ export class DungeonRoom extends Room {
       if (slot === 'weapon' && player.equippedWeaponId) {
         player.inventory.push(player.equippedWeaponId);
         player.equippedWeaponId = '';
-      } else if (slot === 'shield' && player.equippedShieldId) {
-        player.inventory.push(player.equippedShieldId);
-        player.equippedShieldId = '';
+      } else if (slot === 'offhand' && player.offhandId) {
+        player.inventory.push(player.offhandId);
+        player.offhandId = '';
         this._recomputeAC(player);
       }
     });
 
-    // Loot a chest — moves all items to the player's inventory.
-    // Server validates range and that the chest hasn't already been looted.
+    // ── Chest looting ─────────────────────────────────────────────────────────
     this.onMessage('loot', (client, { chestId }) => {
       const player = this.state.players.get(client.sessionId);
-      const chest = this.state.chests.get(String(chestId));
+      const chest  = this.state.chests.get(String(chestId));
       if (!player || !chest || chest.open) return;
       const dx = player.x - chest.x;
       const dy = player.y - chest.y;
@@ -118,6 +137,34 @@ export class DungeonRoom extends Room {
       console.log(`[DungeonRoom] ${client.sessionId} looted chest ${chestId}`);
     });
 
+    // ── Hotbar management ─────────────────────────────────────────────────────
+    this.onMessage('assign_hotbar', (client, { itemId, slot }) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const s  = Math.max(0, Math.min(9, Math.floor(Number(slot))));
+      const id = String(itemId);
+      if (id === 'second_wind' || CONSUMABLE_REGISTRY[id]) {
+        player.hotbar[s] = id;
+      }
+    });
+
+    this.onMessage('use_hotbar', (client, { slot }) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player || !player.alive) return;
+      const s       = Math.max(0, Math.min(9, Math.floor(Number(slot))));
+      const binding = player.hotbar[s] ?? '';
+      if (!binding) return;
+
+      if (binding === 'second_wind') {
+        const heal = applySecondWind(this.state, client.sessionId);
+        if (heal !== null) {
+          this.broadcast('combat_log', { message: `Second Wind: Fighter recovers ${heal} HP` });
+        }
+      } else if (CONSUMABLE_REGISTRY[binding]) {
+        this._useConsumable(player, client.sessionId, binding);
+      }
+    });
+
     this.setSimulationInterval(
       (dt) => this._tick(dt),
       1000 / SERVER_TICK_RATE_HZ.tier1,
@@ -125,24 +172,26 @@ export class DungeonRoom extends Room {
   }
 
   onJoin(client) {
-    const conMod = getModifier(FIGHTER.baseAbilityScores.con);
-    const maxHp = FIGHTER.getStartingHp(conMod);
+    const conMod       = getModifier(FIGHTER.baseAbilityScores.con);
+    const maxHp        = FIGHTER.getStartingHp(conMod);
+    const startingArmor = ARMOR_REGISTRY[FIGHTER.startingArmorId];
+    const dexMod       = getModifier(FIGHTER.baseAbilityScores.dex);
+    const ac           = computeAC(startingArmor, dexMod, false);
 
     const player = new PlayerState();
-    player.x = FIGHTER_SPAWN.x;
-    player.y = FIGHTER_SPAWN.y;
-    player.hp = maxHp;
+    player.x    = FIGHTER_SPAWN.x;
+    player.y    = FIGHTER_SPAWN.y;
+    player.hp   = maxHp;
     player.maxHp = maxHp;
-    const startingArmor = ARMOR_REGISTRY[FIGHTER.startingArmorId];
-    const dexMod = getModifier(FIGHTER.baseAbilityScores.dex);
-    const ac = computeAC(startingArmor, dexMod, false);
-
-    player.ac = ac;
+    player.ac   = ac;
     player.level = 1;
     player.alive = true;
-    player.equippedWeaponId = 'longsword'; // fighter starts with longsword equipped
-    player.equippedArmorId = FIGHTER.startingArmorId;
-    // inventory starts empty — loot the nearby chest for shield, dagger, greataxe
+    player.equippedWeaponId = 'longsword';
+    player.equippedArmorId  = FIGHTER.startingArmorId;
+    // offhandId starts empty; secondWindAvailable starts true
+    // hotbar defaults: slot 0 = second_wind
+    player.hotbar.push('second_wind');
+    for (let i = 1; i < 10; i++) player.hotbar.push('');
 
     this.state.players.set(client.sessionId, player);
     console.log(`[DungeonRoom] ${client.sessionId} joined — HP ${maxHp} AC ${ac}`);
@@ -156,28 +205,30 @@ export class DungeonRoom extends Room {
     console.log('[DungeonRoom] disposed');
   }
 
+  // ── Spawn helpers ─────────────────────────────────────────────────────────────
+
   _spawnChest() {
     const chest = new ChestState();
-    chest.id = 'chest_0';
-    chest.x = 880;  // just right of fighter spawn (800, 600)
-    chest.y = 600;
+    chest.id   = 'chest_0';
+    chest.x    = CHEST_SPAWN.x;
+    chest.y    = CHEST_SPAWN.y;
     chest.open = false;
-    chest.items.push('shield', 'dagger', 'greataxe');
+    chest.items.push('shield', 'dagger', 'greataxe', 'healing_potion', 'bless_potion');
     this.state.chests.set('chest_0', chest);
-    console.log('[DungeonRoom] Spawned chest with shield, dagger, greataxe');
+    console.log('[DungeonRoom] Spawned chest with shield, dagger, greataxe, healing potion, bless potion');
   }
 
   _spawnGoblins() {
     GOBLIN_SPAWNS.forEach((pos, i) => {
-      const id = `goblin_${i}`;
+      const id    = `goblin_${i}`;
       const enemy = new EnemyState();
-      enemy.id = id;
-      enemy.type = 'goblin';
-      enemy.x = pos.x;
-      enemy.y = pos.y;
-      enemy.hp = GOBLIN.hp;
+      enemy.id    = id;
+      enemy.type  = 'goblin';
+      enemy.x     = pos.x;
+      enemy.y     = pos.y;
+      enemy.hp    = GOBLIN.hp;
       enemy.maxHp = GOBLIN.hp;
-      enemy.ac = GOBLIN.ac;
+      enemy.ac    = GOBLIN.ac;
       enemy.alive = true;
       enemy.aiState = 'idle';
       this.state.enemies.set(id, enemy);
@@ -186,21 +237,119 @@ export class DungeonRoom extends Room {
     console.log('[DungeonRoom] Spawned 2 goblins');
   }
 
-  /** Recompute player.ac from current armor + shield. Call after any equip/unequip. */
-  _recomputeAC(player) {
-    const armorDef = ARMOR_REGISTRY[player.equippedArmorId];
-    const dexMod = getModifier(FIGHTER.baseAbilityScores.dex);
-    player.ac = computeAC(armorDef, dexMod, !!player.equippedShieldId);
+  _spawnTrap() {
+    const trap = new TrapState();
+    trap.id    = 'trap_0';
+    trap.x     = TRAP_SPAWN.x;
+    trap.y     = TRAP_SPAWN.y;
+    trap.cooldownMs = 0;
+    this.state.traps.set('trap_0', trap);
+    console.log(`[DungeonRoom] Spawned spike trap at (${TRAP_SPAWN.x}, ${TRAP_SPAWN.y})`);
   }
+
+  // ── Per-tick logic ────────────────────────────────────────────────────────────
 
   _tick(dt) {
     MovementSystem.update(this.state, dt, BOUNDS);
-    AISystem.update(this.state, dt, this._enemyDefs, MELEE_HIT_RANGE_PX);
+
+    const aiLogs = AISystem.update(this.state, dt, this._enemyDefs, MELEE_HIT_RANGE_PX);
+    for (const msg of aiLogs) this.broadcast('combat_log', { message: msg });
+
+    for (const [sessionId, player] of this.state.players) {
+      if (player.alive) this._checkTraps(player, sessionId);
+    }
+
+    this._tickTraps(dt);
+    this._tickConditions(dt);
 
     const allDead = [...this.state.enemies.values()].every(e => !e.alive);
     if (allDead && this.state.phase === 'playing') {
       this.state.phase = 'complete';
       console.log('[DungeonRoom] All enemies defeated');
     }
+  }
+
+  _checkTraps(player, sessionId) {
+    for (const [, trap] of this.state.traps) {
+      if (trap.cooldownMs > 0) continue;
+      const dx = player.x - trap.x;
+      const dy = player.y - trap.y;
+      if (Math.sqrt(dx * dx + dy * dy) > TRAP_RADIUS_PX) continue;
+
+      const creature = {
+        abilityScores: FIGHTER.baseAbilityScores,
+        level:         player.level,
+        saveProfs:     FIGHTER.saveProficiencies,
+      };
+      const save        = resolveSave({ creature, ability: 'dex', dc: TRAP_SAVE_DC });
+      const finalDamage = save.success ? Math.floor(TRAP_DAMAGE / 2) : TRAP_DAMAGE;
+
+      player.hp = Math.max(0, player.hp - Math.max(1, finalDamage));
+      if (player.hp <= 0) { player.hp = 0; player.alive = false; }
+      trap.cooldownMs = TRAP_COOLDOWN_MS;
+
+      const outcome = save.success
+        ? `saved (${save.total} vs DC ${TRAP_SAVE_DC}) — ${finalDamage} dmg (half)`
+        : `failed (${save.total} vs DC ${TRAP_SAVE_DC}) — ${finalDamage} dmg`;
+      this.broadcast('combat_log', { message: `⚠ Spike Trap  DEX save: ${outcome}, piercing` });
+    }
+  }
+
+  _tickTraps(dt) {
+    for (const [, trap] of this.state.traps) {
+      if (trap.cooldownMs > 0) trap.cooldownMs = Math.max(0, trap.cooldownMs - dt);
+    }
+  }
+
+  _tickConditions(dt) {
+    for (const [sessionId, player] of this.state.players) {
+      for (const condition of [...player.conditions]) {
+        const key       = `${sessionId}_${condition}`;
+        const remaining = (this._conditionTimers.get(key) ?? 0) - dt;
+        if (remaining <= 0) {
+          this._conditionTimers.delete(key);
+          const idx = player.conditions.indexOf(condition);
+          if (idx !== -1) player.conditions.splice(idx, 1);
+        } else {
+          this._conditionTimers.set(key, remaining);
+        }
+      }
+    }
+  }
+
+  // ── Item / ability helpers ────────────────────────────────────────────────────
+
+  _useConsumable(player, sessionId, consumableId) {
+    const idx = player.inventory.indexOf(consumableId);
+    if (idx === -1) return;
+    const c = CONSUMABLE_REGISTRY[consumableId];
+
+    if (c.type === 'healing') {
+      const heal = rollDice(c.damageDice.count, c.damageDice.sides) + c.diceBonus;
+      player.hp  = Math.min(player.maxHp, player.hp + heal);
+      this.broadcast('combat_log', { message: `${c.label}: Fighter recovers ${heal} HP` });
+    } else if (c.type === 'bless') {
+      if (!player.conditions.includes('bless')) {
+        player.conditions.push('bless');
+        this._conditionTimers.set(`${sessionId}_bless`, c.conditionDurationMs);
+        this.broadcast('combat_log', {
+          message: `${c.label}: Fighter gains Bless (+1d4 to attacks, ${c.conditionDurationMs / 1000}s)`,
+        });
+      }
+    }
+
+    player.inventory.splice(idx, 1);
+    // Clear from hotbar after consumption so slot visually empties.
+    for (let i = 0; i < player.hotbar.length; i++) {
+      if (player.hotbar[i] === consumableId) { player.hotbar[i] = ''; break; }
+    }
+  }
+
+  /** Recompute player.ac from armor + offhand (shield gives +2, weapon does not). */
+  _recomputeAC(player) {
+    const armorDef = ARMOR_REGISTRY[player.equippedArmorId];
+    const dexMod   = getModifier(FIGHTER.baseAbilityScores.dex);
+    const hasShield = !!SHIELD_REGISTRY[player.offhandId];
+    player.ac = computeAC(armorDef, dexMod, hasShield);
   }
 }

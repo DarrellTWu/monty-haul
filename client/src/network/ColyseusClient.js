@@ -49,27 +49,42 @@ export function sendAttack() {
 }
 
 /**
- * Equip a weapon by id.
- * @param {string} itemId - weapon id matching server's WEAPON_REGISTRY
+ * Equip an item from inventory into a slot.
+ * @param {string} itemId
+ * @param {'weapon'|'offhand'|null} [slot] - null lets the server auto-detect
  */
-export function sendEquip(itemId) {
-  _room?.send('equip', { itemId });
+export function sendEquip(itemId, slot = null) {
+  _room?.send('equip', { itemId, slot });
 }
 
 /**
  * Unequip the item in a given slot.
- * @param {'weapon'|'shield'} slot
+ * @param {'weapon'|'offhand'} slot
  */
 export function sendUnequip(slot) {
   _room?.send('unequip', { slot });
 }
 
-/**
- * Loot a chest by id.
- * @param {string} chestId
- */
+/** Loot a chest by id. */
 export function sendLoot(chestId) {
   _room?.send('loot', { chestId });
+}
+
+/**
+ * Assign an item or ability to a hotbar slot.
+ * @param {string} itemId - consumable id or 'second_wind'
+ * @param {number} slot   - 0-9
+ */
+export function sendAssignHotbar(itemId, slot) {
+  _room?.send('assign_hotbar', { itemId, slot });
+}
+
+/**
+ * Use whatever is bound to a hotbar slot.
+ * @param {number} slot - 0-9
+ */
+export function sendUseHotbar(slot) {
+  _room?.send('use_hotbar', { slot });
 }
 
 /** Cleanly leave the current room. */

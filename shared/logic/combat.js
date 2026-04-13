@@ -161,6 +161,28 @@ export function resolveAttack({ attacker, target, weapon, conditions, rng = Math
   return { hit: true, crit: isCrit, damage, roll: totalRoll };
 }
 
+// ─── Saving Throws ────────────────────────────────────────────────────────────
+
+/**
+ * Resolve a saving throw against a DC.
+ *
+ * @param {{
+ *   creature: { abilityScores?: object, level?: number, saveProfs?: string[] },
+ *   ability: 'str'|'dex'|'con'|'int'|'wis'|'cha',
+ *   dc: number,
+ *   rng?: () => number
+ * }} params
+ * @returns {{ success: boolean, roll: number, total: number }}
+ */
+export function resolveSave({ creature, ability, dc, rng = Math.random }) {
+  const d20 = rollDice(1, 20, rng);
+  const abilityMod = getModifier(creature.abilityScores?.[ability] ?? 10);
+  const isProf = creature.saveProfs?.includes(ability) ?? false;
+  const profBonus = isProf ? getProficiencyBonus(creature.level ?? 1) : 0;
+  const total = d20 + abilityMod + profBonus;
+  return { success: total >= dc, roll: d20, total };
+}
+
 // ─── Damage Application ───────────────────────────────────────────────────────
 
 /**

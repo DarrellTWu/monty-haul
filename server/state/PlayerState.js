@@ -15,10 +15,13 @@ export class PlayerState extends Schema {
     this.vy = 0;
     this.attackCooldownMs = 0;
     this.alive = true;
-    this.equippedWeaponId = ''; // weapon id string; '' = unarmed
-    this.equippedArmorId = '';  // armor id string; '' = unarmored
-    this.equippedShieldId = ''; // shield id string; '' = no shield
-    this.inventory = new ArraySchema(); // unequipped item ids
+    this.equippedWeaponId = '';  // weapon slot; '' = unarmed
+    this.equippedArmorId = '';   // armor slot; '' = unarmored
+    this.offhandId = '';         // offhand slot: weapon or shield; '' = empty
+    this.secondWindAvailable = true;
+    this.inventory  = new ArraySchema(); // unequipped item ids
+    this.conditions = new ArraySchema(); // active condition ids (e.g. 'bless')
+    this.hotbar     = new ArraySchema(); // 10 slots: ability/consumable id or ''
   }
 }
 
@@ -35,6 +38,9 @@ defineTypes(PlayerState, {
   alive: 'boolean',
   equippedWeaponId: 'string',
   equippedArmorId: 'string',
-  equippedShieldId: 'string',
-  inventory: { array: 'string' },
+  offhandId: 'string',
+  secondWindAvailable: 'boolean',
+  inventory:  { array: 'string' },
+  conditions: { array: 'string' },
+  hotbar:     { array: 'string' },
 });

@@ -12,7 +12,12 @@ import { enemyAttack } from './CombatSystem.js';
  * @param {Map<string, object>} enemyDefs - map of enemyId → static enemy def
  * @param {number} melee - center-to-center melee range in px
  */
+/**
+ * @returns {string[]} combat log messages generated this tick
+ */
 export function update(state, dt, enemyDefs, melee) {
+  const logs = [];
+
   for (const [id, enemy] of state.enemies) {
     if (!enemy.alive) continue;
 
@@ -29,7 +34,6 @@ export function update(state, dt, enemyDefs, melee) {
     const dist = nearest.dist;
     const detectionRadius = def.detectionRadius ?? COMBAT_DETECTION_RADIUS;
 
-    // Transition to aggro once player enters detection radius (never resets).
     if (dist <= detectionRadius) {
       enemy.aiState = 'aggro';
     }
@@ -41,12 +45,11 @@ export function update(state, dt, enemyDefs, melee) {
     }
 
     if (dist <= melee) {
-      // In melee range: stop moving and attack if cooldown is ready.
       enemy.vx = 0;
       enemy.vy = 0;
-      enemyAttack(state, enemy, def, nearest.player);
+      const result = enemyAttack(state, enemy, def, nearest.player);
+      if (result?.log) logs.push(result.log);
     } else {
-      // Move toward nearest player at enemy's speed (px/sec).
       const dx = nearest.player.x - enemy.x;
       const dy = nearest.player.y - enemy.y;
       const len = Math.sqrt(dx * dx + dy * dy);
@@ -54,6 +57,8 @@ export function update(state, dt, enemyDefs, melee) {
       enemy.vy = (dy / len) * def.speed;
     }
   }
+
+  return logs;
 }
 
 function nearestLivingPlayer(state, enemy) {

@@ -43,6 +43,12 @@ export const LEVER_RESET_MS = 4000;      // First lever resets after this ms —
 // INTERACTION
 export const CHEST_LOOT_RANGE_PX = 80;  // Player must be within this px of a chest to loot it
 
+// TRAPS
+export const TRAP_DAMAGE      = 4;     // Spike trap base damage (DEX save for half)
+export const TRAP_SAVE_DC     = 12;    // DEX save difficulty class
+export const TRAP_RADIUS_PX   = 40;    // Trigger radius (center-to-center)
+export const TRAP_COOLDOWN_MS = 5000;  // Cooldown before trap can trigger again
+
 // META
 export const BANK_SLOTS_PER_RUN = 2;     // Max items a player can bank mid-run
 export const LONG_REST_ON_LEVEL_UP = true; // Full HP/resource restore on each floor clear

@@ -4,6 +4,7 @@ const { Schema, MapSchema, defineTypes } = createRequire(import.meta.url)('@coly
 import { PlayerState } from './PlayerState.js';
 import { EnemyState } from './EnemyState.js';
 import { ChestState } from './ChestState.js';
+import { TrapState } from './TrapState.js';
 
 export class GameState extends Schema {
   constructor() {
@@ -11,6 +12,7 @@ export class GameState extends Schema {
     this.players = new MapSchema();
     this.enemies = new MapSchema();
     this.chests = new MapSchema();
+    this.traps = new MapSchema();
     this.phase = 'playing';
   }
 }
@@ -19,5 +21,6 @@ defineTypes(GameState, {
   players: { map: PlayerState },
   enemies: { map: EnemyState },
   chests: { map: ChestState },
+  traps: { map: TrapState },
   phase: 'string',
 });

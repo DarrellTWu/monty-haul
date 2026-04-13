@@ -1,18 +1,19 @@
 // server/systems/CombatSystem.js
 // Multiplayer wrapper around shared/logic/combat.js.
 
-import { resolveAttack, applyDamage } from '../../shared/logic/combat.js';
+import { resolveAttack, applyDamage, rollDice } from '../../shared/logic/combat.js';
 import { ATTACK_COOLDOWN_MS, MELEE_HIT_RANGE_PX } from '../../shared/data/constants.js';
 import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, DAGGER, UNARMED } from '../../shared/data/weapons/melee.js';
+import { SHIELD_REGISTRY } from '../../shared/data/items/shields.js';
+import { FIGHTER } from '../../shared/data/classes/fighter.js';
 
-// All weapons the server recognises. Add new weapons here as they're designed.
 const WEAPON_REGISTRY = {
-  longsword: LONGSWORD,
+  longsword:  LONGSWORD,
   shortsword: SHORTSWORD,
-  handaxe: HANDAXE,
-  greataxe: GREATAXE,
-  dagger: DAGGER,
-  unarmed: UNARMED,
+  handaxe:    HANDAXE,
+  greataxe:   GREATAXE,
+  dagger:     DAGGER,
+  unarmed:    UNARMED,
 };
 
 function getWeapon(equippedWeaponId) {
@@ -20,38 +21,45 @@ function getWeapon(equippedWeaponId) {
 }
 
 /**
- * Returns the effective weapon considering SRD property interactions.
- * Versatile weapons deal 1d10 (instead of 1d8) when no shield is equipped —
- * the player is gripping the weapon two-handed.
- *
- * @param {object} weapon
- * @param {import('../state/PlayerState.js').PlayerState} player
+ * Versatile weapons deal 1d10 (instead of 1d8) when no offhand item is equipped —
+ * the player is gripping two-handed.
  */
 function getEffectiveWeapon(weapon, player) {
-  if (weapon.properties?.includes('versatile') && !player.equippedShieldId) {
+  if (weapon.properties?.includes('versatile') && !player.offhandId) {
     return { ...weapon, damageDice: { count: 1, sides: 10 } };
   }
   return weapon;
 }
 
 /**
+ * Dueling fighting style: +2 damage when wielding a one-handed melee weapon
+ * and offhand holds no weapon (empty or shield are both fine — SRD rule).
+ */
+function applyDueling(weapon, player) {
+  if (FIGHTER.fightingStyle !== 'dueling') return weapon;
+  if (weapon.properties?.includes('two-handed')) return weapon;
+  if (weapon.id === 'unarmed') return weapon;
+  // Offhand must be empty or a shield — not another weapon.
+  const offhandIsWeapon = player.offhandId && !SHIELD_REGISTRY[player.offhandId];
+  if (offhandIsWeapon) return weapon;
+  return { ...weapon, damageBonus: (weapon.damageBonus ?? 0) + 2 };
+}
+
+/**
  * Attempt a player attack against the nearest living enemy in melee range.
- * Weapon is resolved from player.equippedWeaponId — no weapon param needed.
- *
- * @param {import('../state/GameState.js').GameState} state
- * @param {string} sessionId
- * @returns {{ hit: boolean, crit: boolean, damage: number, targetId: string | null }}
+ * Returns { hit, crit, damage, targetId, log }.
  */
 export function playerAttack(state, sessionId) {
   const player = state.players.get(sessionId);
-  if (!player || !player.alive) return { hit: false, crit: false, damage: 0, targetId: null };
-  if (player.attackCooldownMs > 0) return { hit: false, crit: false, damage: 0, targetId: null };
+  if (!player || !player.alive) return { hit: false, crit: false, damage: 0, targetId: null, log: null };
+  if (player.attackCooldownMs > 0) return { hit: false, crit: false, damage: 0, targetId: null, log: null };
 
   const target = nearestLivingEnemy(state, player);
-  if (!target) return { hit: false, crit: false, damage: 0, targetId: null };
+  if (!target) return { hit: false, crit: false, damage: 0, targetId: null, log: null };
 
-  const weapon = getEffectiveWeapon(getWeapon(player.equippedWeaponId), player);
-  const attacker = playerToAttacker(player);
+  const baseWeapon  = getWeapon(player.equippedWeaponId);
+  const weapon      = applyDueling(getEffectiveWeapon(baseWeapon, player), player);
+  const attacker    = playerToAttacker(player);
 
   const result = resolveAttack({ attacker, target: enemyToTarget(target.state), weapon });
 
@@ -71,26 +79,27 @@ export function playerAttack(state, sessionId) {
   }
 
   player.attackCooldownMs = ATTACK_COOLDOWN_MS;
-  return { ...result, targetId: target.id };
+
+  const tLabel = target.state.type || 'enemy';
+  const log = result.hit
+    ? `Fighter → ${tLabel}: hit ${result.roll} vs AC ${target.state.ac}, ${result.damage}${result.crit ? ' (CRIT!)' : ''} ${weapon.damageType}`
+    : `Fighter → ${tLabel}: miss (${result.roll} vs AC ${target.state.ac})`;
+
+  return { ...result, targetId: target.id, log };
 }
 
 /**
- * Enemy attacks the nearest living player. Called by AISystem each tick.
- *
- * @param {import('../state/GameState.js').GameState} state
- * @param {import('../state/EnemyState.js').EnemyState} enemyState
- * @param {object} enemyDef
- * @param {import('../state/PlayerState.js').PlayerState} targetPlayer
+ * Enemy attacks the nearest living player. Returns { log }.
  */
 export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
-  if (!enemyState.alive || !targetPlayer.alive) return;
-  if (enemyState.attackCooldownMs > 0) return;
+  if (!enemyState.alive || !targetPlayer.alive) return { log: null };
+  if (enemyState.attackCooldownMs > 0) return { log: null };
 
   const attacker = {
     attackBonus: enemyDef.attackBonus,
-    damageDice: enemyDef.damageDice,
+    damageDice:  enemyDef.damageDice,
     damageBonus: enemyDef.damageBonus,
-    conditions: [],
+    conditions:  [],
   };
 
   const result = resolveAttack({ attacker, target: playerToTarget(targetPlayer), weapon: null });
@@ -111,6 +120,25 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
   }
 
   enemyState.attackCooldownMs = ATTACK_COOLDOWN_MS;
+
+  const tLabel = enemyState.type || 'enemy';
+  const log = result.hit
+    ? `${tLabel} → Fighter: hit ${result.roll} vs AC ${targetPlayer.ac}, ${result.damage} ${enemyDef.damageType}`
+    : `${tLabel} → Fighter: miss (${result.roll} vs AC ${targetPlayer.ac})`;
+
+  return { log };
+}
+
+/**
+ * Use the Second Wind class feature. Returns HP healed, or null if unavailable.
+ */
+export function applySecondWind(state, sessionId) {
+  const player = state.players.get(sessionId);
+  if (!player || !player.alive || !player.secondWindAvailable) return null;
+  const heal = rollDice(1, 10) + player.level;
+  player.hp = Math.min(player.maxHp, player.hp + heal);
+  player.secondWindAvailable = false;
+  return heal;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -131,10 +159,10 @@ function nearestLivingEnemy(state, player) {
 
 function playerToAttacker(player) {
   return {
-    // TODO: derive from player.abilityScores once that field is in schema.
+    // TODO: derive from player.abilityScores once schema carries it.
     abilityScores: { str: 16, dex: 14, con: 16, int: 10, wis: 10, cha: 10 },
     level: player.level,
-    conditions: [],
+    conditions: [...player.conditions],
   };
 }
 

@@ -29,6 +29,20 @@ export const FIGHTER = {
   // AC is computed via computeAC() in shared/data/armor/armor.js — not stored here.
   startingArmorId: 'chain_mail',
 
+  // Saving throw proficiencies (SRD Fighter: STR and CON).
+  saveProficiencies: ['str', 'con'],
+
+  // Fighting style chosen at level 1.
+  // Dueling: +2 damage when wielding a melee weapon in one hand with no weapon in offhand
+  // (a shield in offhand is permitted — SRD rule).
+  fightingStyle: 'dueling',
+
+  // Level 1 class features.
+  classFeatures: ['second_wind'],
+
+  // Human variant feat.
+  feat: 'alert', // +5 to initiative, can't be surprised
+
   // Proficiency bonus at level 1 is computed by getProficiencyBonus(level)
   // in combat.js — not stored here.
 };

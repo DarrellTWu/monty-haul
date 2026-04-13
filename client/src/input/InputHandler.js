@@ -1,25 +1,43 @@
 // client/src/input/InputHandler.js
 // Translates keyboard state into server messages.
-// WASD / arrow keys → move messages sent every frame while held.
-// Space → attack message sent on keydown (not held).
-// Tab → calls this.onTabDown() callback (DungeonScene wires this to toggle inventory).
 //
-// Set handler.enabled = false to suppress all movement and attack input
-// (used while inventory is open). Tab still works when disabled so the
-// player can close the inventory from within the scene.
+// WASD / arrow keys → move (held)
+// Space             → attack (keydown only)
+// I                 → inventory toggle (onInventoryDown callback)
+// F                 → world interaction / chest loot (onInteract callback)
+// 1-9, 0           → use hotbar slot 0-9 (onHotbar(slot) callback)
+//
+// Set handler.enabled = false to suppress movement, attack, interact, and
+// hotbar input. I still fires when disabled so the player can close inventory.
 
 import { sendMove, sendStop, sendAttack } from '../network/ColyseusClient.js';
+
+const HOTBAR_CODES = [
+  Phaser.Input.Keyboard.KeyCodes.ONE,
+  Phaser.Input.Keyboard.KeyCodes.TWO,
+  Phaser.Input.Keyboard.KeyCodes.THREE,
+  Phaser.Input.Keyboard.KeyCodes.FOUR,
+  Phaser.Input.Keyboard.KeyCodes.FIVE,
+  Phaser.Input.Keyboard.KeyCodes.SIX,
+  Phaser.Input.Keyboard.KeyCodes.SEVEN,
+  Phaser.Input.Keyboard.KeyCodes.EIGHT,
+  Phaser.Input.Keyboard.KeyCodes.NINE,
+  Phaser.Input.Keyboard.KeyCodes.ZERO,
+];
 
 export class InputHandler {
   /** @param {Phaser.Scene} scene */
   constructor(scene) {
     this.enabled = true;
 
-    /** Called when Tab is pressed. Wire this up in DungeonScene. */
-    this.onTabDown = null;
+    /** Called when I is pressed (regardless of enabled state). */
+    this.onInventoryDown = null;
 
-    /** Called when F is pressed while enabled. Wire to chest/door interaction. */
+    /** Called when F is pressed while enabled. */
     this.onInteract = null;
+
+    /** Called with slot index 0-9 when a hotbar key is pressed while enabled. */
+    this.onHotbar = null;
 
     this._keys = scene.input.keyboard.addKeys({
       up:        Phaser.Input.Keyboard.KeyCodes.W,
@@ -31,8 +49,15 @@ export class InputHandler {
       leftArrow: Phaser.Input.Keyboard.KeyCodes.LEFT,
       rightArrow:Phaser.Input.Keyboard.KeyCodes.RIGHT,
       attack:    Phaser.Input.Keyboard.KeyCodes.SPACE,
-      tab:       Phaser.Input.Keyboard.KeyCodes.TAB,
+      inventory: Phaser.Input.Keyboard.KeyCodes.I,
       interact:  Phaser.Input.Keyboard.KeyCodes.F,
+    });
+
+    // Hotbar keys registered separately so we can iterate them.
+    this._hotbarKeys = HOTBAR_CODES.map((code, i) => {
+      const key = scene.input.keyboard.addKey(code);
+      key.on('down', () => { if (this.enabled) this.onHotbar?.(i); });
+      return key;
     });
 
     this._wasMoving = false;
@@ -41,8 +66,9 @@ export class InputHandler {
       if (this.enabled) sendAttack();
     });
 
-    this._keys.tab.on('down', () => {
-      this.onTabDown?.();
+    // I fires regardless of enabled so player can close inventory from inside scene.
+    this._keys.inventory.on('down', () => {
+      this.onInventoryDown?.();
     });
 
     this._keys.interact.on('down', () => {
@@ -53,7 +79,6 @@ export class InputHandler {
   /** Call every frame from DungeonScene.update(). */
   update() {
     if (!this.enabled) {
-      // Ensure the server knows we stopped if we were mid-move.
       if (this._wasMoving) {
         sendStop();
         this._wasMoving = false;
@@ -84,7 +109,8 @@ export class InputHandler {
 
   destroy() {
     this._keys.attack.removeAllListeners();
-    this._keys.tab.removeAllListeners();
+    this._keys.inventory.removeAllListeners();
     this._keys.interact.removeAllListeners();
+    for (const key of this._hotbarKeys) key.removeAllListeners();
   }
 }

@@ -10,25 +10,24 @@
 // PLACEHOLDER ROOM: the room boundary is a simple rectangle.
 // When tilemaps arrive, replace _drawRoom() with a Tilemap layer.
 
-import { joinDungeon, sendLoot } from '../network/ColyseusClient.js';
+import { joinDungeon, sendLoot, sendUseHotbar } from '../network/ColyseusClient.js';
 import { InputHandler } from '../input/InputHandler.js';
-import { CHEST_LOOT_RANGE_PX } from '../../../shared/data/constants.js';
+import { CHEST_LOOT_RANGE_PX, TRAP_RADIUS_PX } from '../../../shared/data/constants.js';
 
 // Visual config — swap these out when sprites land.
-const PLAYER_RADIUS = 16;
-const ENEMY_RADIUS = 12;
-const PLAYER_COLOR = 0x4488ff;   // blue
-const ENEMY_COLOR = 0x44cc44;    // green (goblins)
-const DEAD_COLOR = 0x444444;     // gray
-const HP_BAR_WIDTH = 32;
-const HP_BAR_HEIGHT = 5;
-const HP_BAR_OFFSET_Y = 22;      // px above entity center
+const PLAYER_RADIUS   = 16;
+const ENEMY_RADIUS    = 12;
+const PLAYER_COLOR    = 0x4488ff;
+const ENEMY_COLOR     = 0x44cc44;
+const DEAD_COLOR      = 0x444444;
+const HP_BAR_WIDTH    = 32;
+const HP_BAR_HEIGHT   = 5;
+const HP_BAR_OFFSET_Y = 22;
 
 // Room dimensions must match DungeonRoom.js server constants.
-// TODO: receive these from server state once room metadata is implemented.
-const ROOM_WIDTH = 1600;
+const ROOM_WIDTH  = 1600;
 const ROOM_HEIGHT = 1200;
-const WALL = 40;
+const WALL        = 40;
 
 export class DungeonScene extends Phaser.Scene {
   constructor() {
@@ -36,16 +35,15 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   async create() {
-    this._room = null;
+    this._room     = null;
     this._playerGfx = new Map();  // sessionId → { circle, hpBar }
-    this._enemyGfx = new Map();   // enemyId   → { circle, hpBar }
-    this._chestGfx = new Map();   // chestId   → { gfx, hint, chestState }
-    this._input = null;
+    this._enemyGfx  = new Map();  // enemyId   → { circle, hpBar }
+    this._chestGfx  = new Map();  // chestId   → { gfx, hint, chestState }
+    this._trapGfx   = new Map();  // trapId    → { gfx, trapState }
+    this._input     = null;
 
-    // Draw the static room background.
     this._drawRoom();
 
-    // Status text while connecting.
     this._statusText = this.add.text(ROOM_WIDTH / 2, ROOM_HEIGHT / 2, 'Connecting…', {
       fontSize: '24px', color: '#ffffff',
     }).setOrigin(0.5);
@@ -60,14 +58,12 @@ export class DungeonScene extends Phaser.Scene {
       return;
     }
 
-    // Register handlers for entities being added/removed.
+    // Entity add/remove handlers.
     this._room.state.players.onAdd((player, sessionId) => {
       this._createEntityGfx(sessionId, player, 'player');
-
-      // Track own player with a different tint.
       if (sessionId === this._room.sessionId) {
         const gfx = this._playerGfx.get(sessionId);
-        if (gfx) gfx.circle.setFillStyle(0xffcc00); // gold for self
+        if (gfx) gfx.circle.setFillStyle(0xffcc00);
       }
     });
 
@@ -79,23 +75,29 @@ export class DungeonScene extends Phaser.Scene {
       this._createEntityGfx(id, enemy, 'enemy');
     });
 
-    // Register chest handlers.
     this._room.state.chests.onAdd((chest, id) => {
       this._createChestGfx(id, chest);
     });
 
-    // Wire up keyboard input.
+    this._room.state.traps.onAdd((trap, id) => {
+      this._createTrapGfx(id, trap);
+    });
+
+    // Relay combat log messages to HUDScene.
+    this._room.onMessage('combat_log', ({ message }) => {
+      const hud = this.scene.get('HUDScene');
+      if (hud?.addLog) hud.addLog(message);
+    });
+
+    // Input.
     this._input = new InputHandler(this);
-    this._input.onTabDown = () => this._toggleInventory();
-    this._input.onInteract = () => this._tryLootNearbyChest();
+    this._input.onInventoryDown = () => this._toggleInventory();
+    this._input.onInteract      = () => this._tryLootNearbyChest();
+    this._input.onHotbar        = (slot) => sendUseHotbar(slot);
 
-    // Camera: follow own player, clamped to room.
     this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
-
-    // Launch persistent HUD overlay (attack timer, future HUD elements).
     this.scene.launch('HUDScene');
 
-    // Phase-complete message handler.
     this._room.state.onChange(() => {
       if (this._room.state.phase === 'complete' && !this._victoryText) {
         this._victoryText = this.add.text(ROOM_WIDTH / 2, ROOM_HEIGHT / 2, 'All enemies defeated!', {
@@ -110,45 +112,47 @@ export class DungeonScene extends Phaser.Scene {
 
     this._input?.update();
 
-    const state = this._room.state;
+    const state    = this._room.state;
+    const myPlayer = state.players.get(this._room.sessionId);
 
-    // Update player visuals from server state.
+    // Player visuals.
     for (const [sessionId, player] of state.players) {
       const gfx = this._playerGfx.get(sessionId);
       if (!gfx) continue;
-
       gfx.circle.setPosition(player.x, player.y);
       if (!player.alive) gfx.circle.setFillStyle(DEAD_COLOR);
-
       this._updateHpBar(gfx.hpBar, player.x, player.y, player.hp, player.maxHp);
-
-      // Make camera follow own player.
       if (sessionId === this._room.sessionId) {
         this.cameras.main.centerOn(player.x, player.y);
       }
     }
 
-    // Update chest visuals — show loot prompt when player is nearby.
-    const myPlayer = state.players.get(this._room.sessionId);
-    for (const [id, { gfx, hint, chestState }] of this._chestGfx) {
+    // Chest visuals.
+    for (const [, { gfx, hint, chestState }] of this._chestGfx) {
       if (chestState.open) {
         gfx.clear();
         gfx.lineStyle(2, 0x664422);
         gfx.strokeRect(chestState.x - 20, chestState.y - 14, 40, 28);
         hint.setVisible(false);
       } else if (myPlayer) {
-        const dx = myPlayer.x - chestState.x;
-        const dy = myPlayer.y - chestState.y;
-        const near = Math.sqrt(dx * dx + dy * dy) < CHEST_LOOT_RANGE_PX;
-        hint.setVisible(near);
+        const dx   = myPlayer.x - chestState.x;
+        const dy   = myPlayer.y - chestState.y;
+        hint.setVisible(Math.sqrt(dx * dx + dy * dy) < CHEST_LOOT_RANGE_PX);
       }
     }
 
-    // Update enemy visuals from server state.
+    // Trap visuals — diamond flashes red when active, dims on cooldown.
+    for (const [, { gfx, warnText, trapState }] of this._trapGfx) {
+      const active = trapState.cooldownMs <= 0;
+      gfx.clear();
+      this._drawTrapDiamond(gfx, trapState.x, trapState.y, active);
+      warnText.setAlpha(active ? 1 : 0.3);
+    }
+
+    // Enemy visuals.
     for (const [id, enemy] of state.enemies) {
       const gfx = this._enemyGfx.get(id);
       if (!gfx) continue;
-
       gfx.circle.setPosition(enemy.x, enemy.y);
       if (!enemy.alive) {
         gfx.circle.setFillStyle(DEAD_COLOR);
@@ -186,94 +190,82 @@ export class DungeonScene extends Phaser.Scene {
 
   // ── Private helpers ──────────────────────────────────────────────────────────
 
+  _drawRoom() {
+    const gfx = this.add.graphics();
+    gfx.fillStyle(0x2a2a3a);
+    gfx.fillRect(WALL, WALL, ROOM_WIDTH - WALL * 2, ROOM_HEIGHT - WALL * 2);
+    gfx.fillStyle(0x111118);
+    gfx.fillRect(0, 0, ROOM_WIDTH, WALL);
+    gfx.fillRect(0, ROOM_HEIGHT - WALL, ROOM_WIDTH, WALL);
+    gfx.fillRect(0, 0, WALL, ROOM_HEIGHT);
+    gfx.fillRect(ROOM_WIDTH - WALL, 0, WALL, ROOM_HEIGHT);
+    gfx.lineStyle(2, 0x5555aa);
+    gfx.strokeRect(WALL, WALL, ROOM_WIDTH - WALL * 2, ROOM_HEIGHT - WALL * 2);
+  }
+
   _createChestGfx(id, chestState) {
     const { x, y } = chestState;
-
     const gfx = this.add.graphics();
     gfx.fillStyle(0xaa6600);
     gfx.fillRect(x - 20, y - 14, 40, 28);
     gfx.lineStyle(2, 0xffcc44);
     gfx.strokeRect(x - 20, y - 14, 40, 28);
     gfx.setDepth(1);
-
-    // Label above chest.
-    this.add.text(x, y - 26, 'Chest', {
-      fontSize: '11px', color: '#ccaa55', fontFamily: 'monospace',
-    }).setOrigin(0.5).setDepth(1);
-
-    // Loot prompt — shown only when player is in range.
-    const hint = this.add.text(x, y + 22, 'F: Loot', {
-      fontSize: '11px', color: '#aaffaa', fontFamily: 'monospace',
-    }).setOrigin(0.5).setDepth(1).setVisible(false);
-
+    this.add.text(x, y - 26, 'Chest', { fontSize: '11px', color: '#ccaa55', fontFamily: 'monospace' }).setOrigin(0.5).setDepth(1);
+    const hint = this.add.text(x, y + 22, 'F: Loot', { fontSize: '11px', color: '#aaffaa', fontFamily: 'monospace' })
+      .setOrigin(0.5).setDepth(1).setVisible(false);
     this._chestGfx.set(id, { gfx, hint, chestState });
   }
 
-  _drawRoom() {
-    const gfx = this.add.graphics();
-
-    // Floor
-    gfx.fillStyle(0x2a2a3a);
-    gfx.fillRect(WALL, WALL, ROOM_WIDTH - WALL * 2, ROOM_HEIGHT - WALL * 2);
-
-    // Walls
-    gfx.fillStyle(0x111118);
-    gfx.fillRect(0, 0, ROOM_WIDTH, WALL);                          // top
-    gfx.fillRect(0, ROOM_HEIGHT - WALL, ROOM_WIDTH, WALL);         // bottom
-    gfx.fillRect(0, 0, WALL, ROOM_HEIGHT);                         // left
-    gfx.fillRect(ROOM_WIDTH - WALL, 0, WALL, ROOM_HEIGHT);         // right
-
-    // Wall border line
-    gfx.lineStyle(2, 0x5555aa);
-    gfx.strokeRect(WALL, WALL, ROOM_WIDTH - WALL * 2, ROOM_HEIGHT - WALL * 2);
+  _createTrapGfx(id, trapState) {
+    const gfx = this.add.graphics().setDepth(1);
+    this._drawTrapDiamond(gfx, trapState.x, trapState.y, true);
+    const warnText = this.add.text(trapState.x, trapState.y - 24, '! Spike Trap', {
+      fontSize: '10px', color: '#ff4444', fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(1);
+    this._trapGfx.set(id, { gfx, warnText, trapState });
   }
 
-  /**
-   * @param {string} id
-   * @param {object} entityState - PlayerState or EnemyState
-   * @param {'player'|'enemy'} kind
-   */
+  _drawTrapDiamond(gfx, x, y, active) {
+    const color = active ? 0xff3333 : 0x552222;
+    const border = active ? 0xff8888 : 0x774444;
+    const s = 13;
+    gfx.fillStyle(color);
+    gfx.fillTriangle(x, y - s, x + s, y, x - s, y);  // top half
+    gfx.fillTriangle(x, y + s, x + s, y, x - s, y);  // bottom half
+    gfx.lineStyle(1, border);
+    gfx.beginPath();
+    gfx.moveTo(x, y - s);
+    gfx.lineTo(x + s, y);
+    gfx.lineTo(x, y + s);
+    gfx.lineTo(x - s, y);
+    gfx.closePath();
+    gfx.strokePath();
+  }
+
   _createEntityGfx(id, entityState, kind) {
     const radius = kind === 'player' ? PLAYER_RADIUS : ENEMY_RADIUS;
-    const color = kind === 'player' ? PLAYER_COLOR : ENEMY_COLOR;
-
+    const color  = kind === 'player' ? PLAYER_COLOR  : ENEMY_COLOR;
     const circle = this.add.arc(entityState.x, entityState.y, radius, 0, 360);
-    circle.setFillStyle(color);
-    circle.setDepth(2);
-
-    const hpBar = this.add.graphics();
-    hpBar.setDepth(3);
-
-    const store = kind === 'player' ? this._playerGfx : this._enemyGfx;
+    circle.setFillStyle(color).setDepth(2);
+    const hpBar = this.add.graphics().setDepth(3);
+    const store  = kind === 'player' ? this._playerGfx : this._enemyGfx;
     store.set(id, { circle, hpBar });
   }
 
   _destroyEntityGfx(id, store) {
     const gfx = store.get(id);
-    if (gfx) {
-      gfx.circle.destroy();
-      gfx.hpBar.destroy();
-      store.delete(id);
-    }
+    if (gfx) { gfx.circle.destroy(); gfx.hpBar.destroy(); store.delete(id); }
   }
 
-  /**
-   * Redraws an HP bar above the given position.
-   * @param {Phaser.GameObjects.Graphics} gfx
-   */
   _updateHpBar(gfx, x, y, hp, maxHp) {
     gfx.clear();
     if (maxHp <= 0) return;
-
     const frac = Math.max(0, hp / maxHp);
-    const bx = x - HP_BAR_WIDTH / 2;
-    const by = y - HP_BAR_OFFSET_Y;
-
-    // Background
+    const bx   = x - HP_BAR_WIDTH / 2;
+    const by   = y - HP_BAR_OFFSET_Y;
     gfx.fillStyle(0x330000);
     gfx.fillRect(bx, by, HP_BAR_WIDTH, HP_BAR_HEIGHT);
-
-    // Health
     const hpColor = frac > 0.5 ? 0x44cc44 : frac > 0.25 ? 0xffaa00 : 0xcc2222;
     gfx.fillStyle(hpColor);
     gfx.fillRect(bx, by, HP_BAR_WIDTH * frac, HP_BAR_HEIGHT);
