@@ -16,18 +16,28 @@ const RING_RADIUS     = 17;
 const RING_THICKNESS  = 3;
 const RING_GAP        = 14; // px gap between ring edges
 
-// Condition rings — stacked to the left of the attack ring.
-const BLESS_CX           = ATK_CX - (RING_RADIUS * 2 + RING_GAP);
-const LONGSTRIDER_CX     = BLESS_CX - (RING_RADIUS * 2 + RING_GAP);
-const FALSE_LIFE_CX      = LONGSTRIDER_CX - (RING_RADIUS * 2 + RING_GAP);
-
-const BLESS_DURATION      = BLESS_POTION.conditionDurationMs;
-const LONGSTRIDER_DURATION = LONGSTRIDER_POTION.conditionDurationMs;
-const FALSE_LIFE_DURATION  = FALSE_LIFE_POTION.conditionDurationMs;
-
-const BLESS_COLOR       = 0xaa55ff;   const BLESS_DIM       = 0x221133;
-const LONGSTRIDER_COLOR = 0x44ddff;   const LONGSTRIDER_DIM = 0x112233;
-const FALSE_LIFE_COLOR  = 0x55eebb;   const FALSE_LIFE_DIM  = 0x113322;
+// Condition ring slot formula: cx(i) = ATK_CX - (i+1) * (RING_RADIUS*2 + RING_GAP)
+// i=0 is the slot immediately left of ATK; filled newest-first from right.
+const CONDITION_META = {
+  bless: {
+    label: 'BLS', color: 0xaa55ff, dimColor: 0x221133, colorHex: '#aa55ff',
+    durationMs:  BLESS_POTION.conditionDurationMs,
+    getRemaining: (p) => p.blessRemainingMs       ?? 0,
+    timerText:    (p) => `${((p.blessRemainingMs ?? 0) / 1000).toFixed(0)}s`,
+  },
+  longstrider: {
+    label: 'SPD', color: 0x44ddff, dimColor: 0x112233, colorHex: '#44ddff',
+    durationMs:  LONGSTRIDER_POTION.conditionDurationMs,
+    getRemaining: (p) => p.longstriderRemainingMs ?? 0,
+    timerText:    (p) => `${((p.longstriderRemainingMs ?? 0) / 1000).toFixed(0)}s`,
+  },
+  false_life: {
+    label: 'THP', color: 0x55eebb, dimColor: 0x113322, colorHex: '#55eebb',
+    durationMs:  FALSE_LIFE_POTION.conditionDurationMs,
+    getRemaining: (p) => p.falseLifeRemainingMs   ?? 0,
+    timerText:    (p) => `${p.tempHp ?? 0}hp`,
+  },
+};
 
 // Hotbar display — to the right of the attack ring.
 const HOTBAR_X      = ATK_CX + RING_RADIUS + RING_GAP;  // 671
@@ -71,37 +81,13 @@ export class HUDScene extends Phaser.Scene {
       fontSize: '10px', color: '#44ff44', fontFamily: 'monospace',
     }).setOrigin(0.5, 0);
 
-    // ── Condition rings (left of attack ring, order: BLS · SPD · THP) ─────────
-    this._blessRingGfx      = this.add.graphics();
-    this._longstriderRingGfx = this.add.graphics();
-    this._falseLifeRingGfx  = this.add.graphics();
-
-    this._blessLabel = this.add.text(BLESS_CX, CY - RING_RADIUS - 8, 'BLS', {
-      fontSize: '10px', color: '#aa55ff', fontFamily: 'monospace',
-    }).setOrigin(0.5, 1);
-    this._blessTimerLabel = this.add.text(BLESS_CX, CY + RING_RADIUS + 5, '', {
-      fontSize: '10px', color: '#aa55ff', fontFamily: 'monospace',
-    }).setOrigin(0.5, 0);
-    this._blessLabel.setVisible(false);
-    this._blessTimerLabel.setVisible(false);
-
-    this._longstriderLabel = this.add.text(LONGSTRIDER_CX, CY - RING_RADIUS - 8, 'SPD', {
-      fontSize: '10px', color: '#44ddff', fontFamily: 'monospace',
-    }).setOrigin(0.5, 1);
-    this._longstriderTimerLabel = this.add.text(LONGSTRIDER_CX, CY + RING_RADIUS + 5, '', {
-      fontSize: '10px', color: '#44ddff', fontFamily: 'monospace',
-    }).setOrigin(0.5, 0);
-    this._longstriderLabel.setVisible(false);
-    this._longstriderTimerLabel.setVisible(false);
-
-    this._falseLifeLabel = this.add.text(FALSE_LIFE_CX, CY - RING_RADIUS - 8, 'THP', {
-      fontSize: '10px', color: '#55eebb', fontFamily: 'monospace',
-    }).setOrigin(0.5, 1);
-    this._falseLifeTimerLabel = this.add.text(FALSE_LIFE_CX, CY + RING_RADIUS + 5, '', {
-      fontSize: '10px', color: '#55eebb', fontFamily: 'monospace',
-    }).setOrigin(0.5, 0);
-    this._falseLifeLabel.setVisible(false);
-    this._falseLifeTimerLabel.setVisible(false);
+    // ── Condition ring pool (dynamically filled left of attack ring) ──────────
+    // Slots are assigned newest-first from right; unused slots are invisible.
+    this._conditionPool = Array.from({ length: 3 }, () => ({
+      gfx:        this.add.graphics(),
+      label:      this.add.text(0, 0, '', { fontSize: '10px', fontFamily: 'monospace' }).setOrigin(0.5, 1).setVisible(false),
+      timerLabel: this.add.text(0, 0, '', { fontSize: '10px', fontFamily: 'monospace' }).setOrigin(0.5, 0).setVisible(false),
+    }));
 
     // ── Hotbar display (right of attack ring) ─────────────────────────────────
     this._hotbarSlotLabels = [];
@@ -163,27 +149,39 @@ export class HUDScene extends Phaser.Scene {
       this._statusLabel.setText(`${(cooldown / 1000).toFixed(1)}s`).setColor('#ffaa44');
     }
 
-    // ── Condition rings ───────────────────────────────────────────────────────
-    this._updateConditionRing({
-      gfx: this._blessRingGfx, label: this._blessLabel, timerLabel: this._blessTimerLabel,
-      cx: BLESS_CX, remainingMs: player.blessRemainingMs ?? 0,
-      durationMs: BLESS_DURATION, color: BLESS_COLOR, dimColor: BLESS_DIM,
-      timerText: (ms) => `${(ms / 1000).toFixed(0)}s`,
-    });
+    // ── Condition rings (dynamic, newest-first from right) ───────────────────
+    // Reverse so index 0 = most recently activated = rightmost slot.
+    const activeConditions = player.conditions ? [...player.conditions].reverse() : [];
+    for (let i = 0; i < this._conditionPool.length; i++) {
+      const { gfx, label, timerLabel } = this._conditionPool[i];
+      const meta = CONDITION_META[activeConditions[i]];
+      if (!meta) {
+        gfx.clear();
+        label.setVisible(false);
+        timerLabel.setVisible(false);
+        continue;
+      }
+      const cx          = ATK_CX - (i + 1) * (RING_RADIUS * 2 + RING_GAP);
+      const remainingMs = meta.getRemaining(player);
+      const progress    = Math.max(0, Math.min(1, remainingMs / meta.durationMs));
+      const startAngle  = -Math.PI / 2;
+      const endAngle    = startAngle + progress * Math.PI * 2;
 
-    this._updateConditionRing({
-      gfx: this._longstriderRingGfx, label: this._longstriderLabel, timerLabel: this._longstriderTimerLabel,
-      cx: LONGSTRIDER_CX, remainingMs: player.longstriderRemainingMs ?? 0,
-      durationMs: LONGSTRIDER_DURATION, color: LONGSTRIDER_COLOR, dimColor: LONGSTRIDER_DIM,
-      timerText: (ms) => `${(ms / 1000).toFixed(0)}s`,
-    });
+      label.setPosition(cx, CY - RING_RADIUS - 8).setText(meta.label).setColor(meta.colorHex).setVisible(true);
+      timerLabel.setPosition(cx, CY + RING_RADIUS + 5).setText(meta.timerText(player)).setColor(meta.colorHex).setVisible(true);
 
-    this._updateConditionRing({
-      gfx: this._falseLifeRingGfx, label: this._falseLifeLabel, timerLabel: this._falseLifeTimerLabel,
-      cx: FALSE_LIFE_CX, remainingMs: player.falseLifeRemainingMs ?? 0,
-      durationMs: FALSE_LIFE_DURATION, color: FALSE_LIFE_COLOR, dimColor: FALSE_LIFE_DIM,
-      timerText: (ms) => `${player.tempHp ?? 0}hp`,
-    });
+      gfx.clear();
+      gfx.lineStyle(RING_THICKNESS, meta.dimColor);
+      gfx.strokeCircle(cx, CY, RING_RADIUS);
+      gfx.lineStyle(RING_THICKNESS, meta.color);
+      gfx.beginPath();
+      gfx.arc(cx, CY, RING_RADIUS, startAngle, endAngle, false);
+      gfx.strokePath();
+      if (progress > 0.02) {
+        gfx.fillStyle(meta.color);
+        gfx.fillCircle(cx + Math.cos(endAngle) * RING_RADIUS, CY + Math.sin(endAngle) * RING_RADIUS, RING_THICKNESS / 2);
+      }
+    }
 
     // ── Hotbar display ────────────────────────────────────────────────────────
     for (let i = 0; i < 10; i++) {
@@ -242,38 +240,4 @@ export class HUDScene extends Phaser.Scene {
     }
   }
 
-  /**
-   * Update one condition ring: show/hide labels, draw drain arc.
-   * @param {{ gfx, label, timerLabel, cx, remainingMs, durationMs, color, dimColor, timerText }} opts
-   */
-  _updateConditionRing({ gfx, label, timerLabel, cx, remainingMs, durationMs, color, dimColor, timerText }) {
-    const active = remainingMs > 0;
-    gfx.clear();
-    label.setVisible(active);
-    timerLabel.setVisible(active);
-
-    // Dim track always drawn so the slot remains visible.
-    gfx.lineStyle(RING_THICKNESS, dimColor);
-    gfx.strokeCircle(cx, CY, RING_RADIUS);
-
-    if (!active) return;
-
-    const progress  = Math.max(0, Math.min(1, remainingMs / durationMs));
-    const startAngle = -Math.PI / 2;
-    const endAngle   = startAngle + progress * Math.PI * 2;
-
-    gfx.lineStyle(RING_THICKNESS, color);
-    gfx.beginPath();
-    gfx.arc(cx, CY, RING_RADIUS, startAngle, endAngle, false);
-    gfx.strokePath();
-
-    if (progress > 0.02) {
-      const dotX = cx + Math.cos(endAngle) * RING_RADIUS;
-      const dotY = CY + Math.sin(endAngle) * RING_RADIUS;
-      gfx.fillStyle(color);
-      gfx.fillCircle(dotX, dotY, RING_THICKNESS / 2);
-    }
-
-    timerLabel.setText(timerText(remainingMs));
-  }
 }
