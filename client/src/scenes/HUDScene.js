@@ -18,6 +18,8 @@ const RING_GAP        = 14; // px gap between ring edges
 
 // Condition ring slot formula: cx(i) = ATK_CX - (i+1) * (RING_RADIUS*2 + RING_GAP)
 // i=0 is the slot immediately left of ATK; filled newest-first from right.
+// Fill the screen: compute how many slots fit before the left edge.
+const MAX_CONDITION_SLOTS = Math.floor((ATK_CX - RING_RADIUS) / (RING_RADIUS * 2 + RING_GAP));
 const CONDITION_META = {
   bless: {
     label: 'BLS', color: 0xaa55ff, dimColor: 0x221133, colorHex: '#aa55ff',
@@ -83,7 +85,7 @@ export class HUDScene extends Phaser.Scene {
 
     // ── Condition ring pool (dynamically filled left of attack ring) ──────────
     // Slots are assigned newest-first from right; unused slots are invisible.
-    this._conditionPool = Array.from({ length: 3 }, () => ({
+    this._conditionPool = Array.from({ length: MAX_CONDITION_SLOTS }, () => ({
       gfx:        this.add.graphics(),
       label:      this.add.text(0, 0, '', { fontSize: '10px', fontFamily: 'monospace' }).setOrigin(0.5, 1).setVisible(false),
       timerLabel: this.add.text(0, 0, '', { fontSize: '10px', fontFamily: 'monospace' }).setOrigin(0.5, 0).setVisible(false),
