@@ -19,6 +19,10 @@ export class PlayerState extends Schema {
     this.equippedArmorId = '';   // armor slot; '' = unarmored
     this.offhandId = '';         // offhand slot: weapon or shield; '' = empty
     this.secondWindAvailable = true;
+    this.blessRemainingMs         = 0; // synced each tick for client HUD ring display
+    this.longstriderRemainingMs   = 0; // synced each tick for client HUD ring display
+    this.falseLifeRemainingMs     = 0; // synced each tick for client HUD ring display
+    this.tempHp                   = 0; // temporary HP (absorbed before regular HP)
     this.inventory  = new ArraySchema(); // unequipped item ids
     this.conditions = new ArraySchema(); // active condition ids (e.g. 'bless')
     this.hotbar     = new ArraySchema(); // 10 slots: ability/consumable id or ''
@@ -39,7 +43,11 @@ defineTypes(PlayerState, {
   equippedWeaponId: 'string',
   equippedArmorId: 'string',
   offhandId: 'string',
-  secondWindAvailable: 'boolean',
+  secondWindAvailable:      'boolean',
+  blessRemainingMs:         'number',
+  longstriderRemainingMs:   'number',
+  falseLifeRemainingMs:     'number',
+  tempHp:                   'number',
   inventory:  { array: 'string' },
   conditions: { array: 'string' },
   hotbar:     { array: 'string' },

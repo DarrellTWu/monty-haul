@@ -58,6 +58,17 @@ export const DAGGER = {
 };
 
 /** @type {import('../../types/weapon.js').Weapon} */
+export const MACE = {
+  id: 'mace',
+  damageDice: { count: 1, sides: 6 },
+  damageBonus: 0,
+  damageType: 'bludgeoning',
+  enhancement: 0,
+  attackAbility: 'str',
+  properties: [], // simple melee — effective vs. skeletons
+};
+
+/** @type {import('../../types/weapon.js').Weapon} */
 export const UNARMED = {
   id: 'unarmed',
   damageDice: { count: 1, sides: 4 }, // TODO: derive from class/level (Monk martial arts die)

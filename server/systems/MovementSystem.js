@@ -7,7 +7,7 @@
 // Enemy vx/vy: actual px/sec components set by AISystem.
 //   Applied directly (AISystem already factored in the enemy's speed).
 
-import { BASE_SPEED_PX_PER_SEC } from '../../shared/data/constants.js';
+import { BASE_SPEED_PX_PER_SEC, LONGSTRIDER_SPEED_BONUS_PX } from '../../shared/data/constants.js';
 
 /**
  * @param {import('../state/GameState.js').GameState} state
@@ -26,16 +26,10 @@ export function update(state, dt, bounds) {
     }
 
     if (player.vx !== 0 || player.vy !== 0) {
-      player.x = clamp(
-        player.x + player.vx * BASE_SPEED_PX_PER_SEC * dtSec,
-        bounds.minX,
-        bounds.maxX,
-      );
-      player.y = clamp(
-        player.y + player.vy * BASE_SPEED_PX_PER_SEC * dtSec,
-        bounds.minY,
-        bounds.maxY,
-      );
+      const speed = BASE_SPEED_PX_PER_SEC +
+        (player.conditions?.includes('longstrider') ? LONGSTRIDER_SPEED_BONUS_PX : 0);
+      player.x = clamp(player.x + player.vx * speed * dtSec, bounds.minX, bounds.maxX);
+      player.y = clamp(player.y + player.vy * speed * dtSec, bounds.minY, bounds.maxY);
     }
   }
 

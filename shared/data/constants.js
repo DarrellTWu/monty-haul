@@ -30,8 +30,9 @@ export const MELEE_HIT_RANGE_PX = 64;   // Center-to-center distance for melee h
 export const CRIT_MULTIPLIER = 2;        // Total damage multiplier on a natural 20
 
 // MOVEMENT
-export const BASE_SPEED_PX_PER_SEC = 150; // 30 ft at 5 px/ft
-export const DASH_SPEED_MULTIPLIER = 2.0; // Speed multiplier while Dashing
+export const BASE_SPEED_PX_PER_SEC       = 150; // 30 ft at 5 px/ft
+export const DASH_SPEED_MULTIPLIER       = 2.0; // Speed multiplier while Dashing
+export const LONGSTRIDER_SPEED_BONUS_PX  = 50;  // Longstrider +10 ft at 5 px/ft
 
 // EXTRACTION
 export const RITUAL_DURATION_MS = 60000; // 60 seconds to complete an extraction ritual

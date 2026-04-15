@@ -5,6 +5,148 @@ Entries are newest-first within each session.
 
 ---
 
+## Session 5 — 2026-04-15
+
+### Completed
+
+#### Enemy roster expansion: Dog and Skeleton (new stat block files)
+
+Refactored `shared/data/enemies/tier1.js` from a monolithic object to a re-export barrel. Each enemy now lives in its own file for per-enemy tuning isolation.
+
+- `shared/data/enemies/goblin.js` — Full SRD Goblin stat block with engine values; `speed: 120` (tuned down from SRD 150 for feel)
+- `shared/data/enemies/dog.js` — SRD Mastiff analog; `speed: 200` (kept at full SRD speed — the speed differential is the defining gameplay trait); Pack Tactics TODO noted
+- `shared/data/enemies/skeleton.js` — SRD Skeleton with DR 5/bludgeoning instead of SRD vulnerability; makes Mace a meaningful counter-pick and exercises the `damageReduction` system
+- `shared/data/enemies/tier1.js` — Now re-exports `GOBLIN`, `DOG`, `SKELETON` from the three individual files
+- `server/rooms/DungeonRoom.js` — Spawns Dog at (1300,300) and Skeleton at (300,900); each at a separate corner from the two Goblins
+
+**Decision:** DR 5/bludgeoning chosen over SRD vulnerability (double damage) because the DR system was already implemented and provides more nuanced player decision-making (mace always better vs. skeleton, not just "double damage on bludgeoning"). The vulnerability path is still a TODO in `applyDamage`.
+
+#### Chest loot system and expanded SRD equipment rules
+
+**Chest looting:**
+- `server/state/ChestState.js` — Schema with `id`, `x`, `y`, `open`, `items: ArraySchema<string>`
+- `server/rooms/DungeonRoom.js` — `loot` message handler; range-checked (`CHEST_LOOT_RANGE_PX`); pushes item ids to `player.inventory`; marks chest open. Chest spawns at (880,600) with `shield`, `dagger`, `greataxe`, `mace`, `half_plate`, `healing_potion`, `bless_potion`
+
+**New weapons:**
+- `shared/data/weapons/melee.js` — Added `DAGGER` (1d4 piercing, finesse+light+thrown) and `MACE` (1d6 bludgeoning, simple; `bludgeoning` type bypasses skeleton DR)
+
+**Shield and offhand slot:**
+- `server/rooms/DungeonRoom.js` — `equip` message handler extended; offhand slot accepts one-handed weapons OR shields; two-handed weapons blocked in offhand
+- `shared/data/items/shields.js` — `SHIELD_REGISTRY` with shield `+2 AC`; used by `_recomputeAC`
+- `server/systems/CombatSystem.js` — `applyDueling` applies Dueling style +2 damage unless offhand holds a weapon (not shield); `getEffectiveWeapon` upgrades longsword to 1d10 when no offhand equipped (versatile rule)
+
+**Armor in bag:**
+- Half Plate (`AC 15 + DEX capped at +2`) added as chest loot; equippable via armor slot
+
+**Consumables:**
+- `shared/data/items/consumables.js` — `CONSUMABLE_REGISTRY` with `healing_potion` (2d4+2) and `bless_potion` (+1d4 to attack rolls, 60s duration)
+- `server/rooms/DungeonRoom.js` — `_useConsumable` handler; `use_hotbar` message triggers it
+
+#### Trap system
+
+- `server/state/TrapState.js` — Schema with `id`, `x`, `y`, `cooldownMs`
+- `server/rooms/DungeonRoom.js` — Spike trap spawns at (1380,160); `_checkTraps` per tick; DEX save vs. DC 15 (`resolveSave`); full damage on fail, half on success; `TRAP_COOLDOWN_MS` prevents re-triggering immediately; combat log message with save result
+
+#### Combat log (HUD)
+
+- `client/src/scenes/HUDScene.js` — 8-line scrolling text log in bottom-right; `addLog(message)` method called by `DungeonScene` on `combat_log` broadcast
+- `server/rooms/DungeonRoom.js` — Broadcasts `combat_log` for: player attacks, enemy attacks, Second Wind, consumable use, trap triggers
+- `server/systems/CombatSystem.js` — `rollStr` helper formats d20 breakdown (`d20:14 +2p +3str = 19 vs AC 15`) for both player and enemy attacks; `_damageTag` appends `(resisted)`, `(DR -5 = 3 dealt)`, `CRIT!` as applicable
+
+#### Hotbar system
+
+- `server/state/PlayerState.js` — `hotbar: ArraySchema<string>` (10 slots); `conditions: ArraySchema<string>`; `blessRemainingMs: number`
+- `server/rooms/DungeonRoom.js` — `assign_hotbar` message handler (validates id is `second_wind` or a known consumable); `use_hotbar` message handler; hotbar slot cleared after consumable is consumed
+- `client/src/scenes/InventoryScene.js` — Hotbar row at panel bottom; drag abilities/items onto numbered slots [1-0]; `sendAssignHotbar`; labels update from server state
+
+#### Inventory UI overhaul
+
+Full equipment panel redesign with:
+- Weapon, Offhand, Armor slots — click to equip-here or unequip; drop zone highlight on drag-over
+- Bag items — single-click selects (then click slot to equip there); double-click auto-equips; drag to slot
+- Saving throws panel (left column); Class Features with draggable Second Wind ability
+- Blocked-item graying (SRD constraint enforcement: two-handed + offhand, shield + two-handed)
+- Hotbar row with drag-to-assign
+
+#### Bless condition HUD ring
+
+- `client/src/scenes/HUDScene.js` — Bless ring immediately left of the attack ring; drain arc over `conditionDurationMs` (60s); hidden when inactive; timer countdown label
+
+#### Two-Weapon Fighting (TWF)
+
+- `server/systems/CombatSystem.js` — Offhand attack fires after main attack when a light weapon is in the offhand; ability mod removed from offhand damage if positive (SRD rule); separate log line for offhand attack
+
+#### Longstrider and False Life potions
+
+Two new timed-condition consumables added to the chest loot table alongside the existing healing and bless potions.
+
+**Longstrider Potion** (`longstrider_potion`):
+- SRD Longstrider: +10 ft speed for 1 hour. Tuned here to 2 minutes.
+- Grants condition `'longstrider'` for 120s; `MovementSystem` adds `LONGSTRIDER_SPEED_BONUS_PX = 50` to player speed while active.
+- `server/state/PlayerState.js` — `longstriderRemainingMs` synced each tick for HUD ring.
+- `server/systems/MovementSystem.js` — reads `player.conditions` to apply bonus; imported `LONGSTRIDER_SPEED_BONUS_PX` from constants.
+- `shared/data/constants.js` — `LONGSTRIDER_SPEED_BONUS_PX = 50` (10 ft × 5 px/ft).
+
+**False Life Potion** (`false_life_potion`):
+- SRD False Life: 1d4+4 temporary HP, tuned to 2-minute duration.
+- Grants `tempHp` (rolled on use; re-applying replaces current value). `tempHp` absorbs damage before regular HP in both `enemyAttack` and trap damage handlers.
+- When the condition expires, `tempHp` is zeroed.
+- `server/state/PlayerState.js` — `falseLifeRemainingMs` and `tempHp` synced each tick.
+- `server/systems/CombatSystem.js` — `enemyAttack` absorbs `finalDamage` through `tempHp` before reducing `hp`.
+- `server/rooms/DungeonRoom.js` — trap damage handler also absorbs through `tempHp` first.
+
+**Files changed:**
+- `shared/data/items/consumables.js` — added `LONGSTRIDER_POTION`, `FALSE_LIFE_POTION`; both in `CONSUMABLE_REGISTRY`
+- `shared/data/constants.js` — `LONGSTRIDER_SPEED_BONUS_PX`
+- `server/state/PlayerState.js` — three new schema fields
+- `server/systems/MovementSystem.js` — longstrider speed check
+- `server/systems/CombatSystem.js` — temp HP absorption in `enemyAttack`
+- `server/rooms/DungeonRoom.js` — chest loot, `_useConsumable` handlers, `_tickConditions` expiry, trap damage
+- `client/src/scenes/InventoryScene.js` — `CONSUMABLE_DISPLAY` entries for bag/hotbar rendering
+
+#### Hotbar HUD display and condition ring system
+
+**Hotbar display (right of attack ring):**
+- 10 compact slots starting at x = 671 (ATK right edge + 14px gap), centered on the ring row (CY = 668).
+- Each slot: dark background, `[N]` key label top-left, short item name center-bottom.
+- Empty slots show `—` in dim color; bound slots show short name in gold (`ffdd88`).
+- Short names: `Heal Pot`, `Bless`, `Stride`, `F.Life`, `2nd Wind`.
+
+**Condition ring system (left of attack ring):**
+- Replaced the old per-condition `_drawBlessRing` with a unified `_updateConditionRing` helper that takes `{ gfx, label, timerLabel, cx, remainingMs, durationMs, color, dimColor, timerText }`. Dim track always drawn; active arc drains clockwise over duration; leading dot on arc end.
+- Three condition rings, left to right: `THP` (False Life, mint `#55eebb`) · `SPD` (Longstrider, cyan `#44ddff`) · `BLS` (Bless, purple `#aa55ff`) · ATK ring.
+- False Life ring timer label shows current `tempHp` as `Nhp` rather than seconds — more actionable information.
+
+**File changed:** `client/src/scenes/HUDScene.js`
+
+---
+
+### Bug fixes (2026-04-15)
+
+#### Enemy names not appearing in combat log
+
+**Problem:** `_spawnEnemy` set `enemy.type = def.type`, but no enemy definition file has a `type` field (they have `id`). Schema defaulted to `''`, causing every log line to read `"enemy → Fighter"` instead of `"goblin → Fighter"`.
+
+**Fix:** Changed `enemy.type = def.type` to `enemy.type = def.id` in `server/rooms/DungeonRoom.js`.
+
+#### Bless potion shows no bonus in combat log
+
+**Problem:** `resolveAttack` computed `conditionBonus` (the Bless 1d4) and added it to `result.roll`, but never returned it. `rollStr` only showed `d20 + prof + ability`, so the math appeared inconsistent (totals didn't add up) and the bonus was invisible.
+
+**Fix:** Added `conditionBonus` to all return paths in `resolveAttack` (`shared/logic/combat.js`). Updated `rollStr` in `CombatSystem.js` to append `+Nbls` when non-zero, producing e.g. `d20:14 +2p +3str +3bls = 22`.
+
+**Files changed:** `shared/logic/combat.js`, `server/systems/CombatSystem.js`
+
+#### Cannot drag items out of equipment slots
+
+**Problem:** Equipment slot zones were registered as drop targets but were not set as draggable, so Phaser never fired `drag` events on them. Equipped items had no drag-out path.
+
+**Fix:** Each slot zone (`_weaponZone`, `_offhandZone`, `_armorZone`) now calls `this.input.setDraggable(zone)`. Added `drag` / `dragend` handlers: during drag the slot's visual button follows the pointer; on `dragend`, if the zone was actually dragged, `sendUnequip(slot)` is called (returning the item to the bag). Click-to-equip/unequip is guarded by a `dragging` flag so it only fires on true clicks.
+
+**File changed:** `client/src/scenes/InventoryScene.js`
+
+---
+
 ## Session 4 — 2026-04-12
 
 ### Completed

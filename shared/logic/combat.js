@@ -91,7 +91,7 @@ export function resolveAttack({ attacker, target, weapon, conditions, rng = Math
 
   // Natural 1 — automatic miss. Return immediately; don't consume rng for bonuses.
   if (d20 === 1) {
-    return { hit: false, crit: false, damage: 0, roll: d20 };
+    return { hit: false, crit: false, damage: 0, roll: d20, rawD20: d20, conditionBonus: 0 };
   }
 
   const isCrit = d20 === 20;
@@ -136,7 +136,7 @@ export function resolveAttack({ attacker, target, weapon, conditions, rng = Math
   const hit = isCrit || totalRoll >= target.ac;
 
   if (!hit) {
-    return { hit: false, crit: false, damage: 0, roll: totalRoll };
+    return { hit: false, crit: false, damage: 0, roll: totalRoll, rawD20: d20, conditionBonus };
   }
 
   // ── Damage ────────────────────────────────────────────────────────────────
@@ -158,7 +158,7 @@ export function resolveAttack({ attacker, target, weapon, conditions, rng = Math
   // receives the raw value and can distinguish "low roll" from "resisted to 0".
   const damage = (diceDamage + flatBonus) * (isCrit ? CRIT_MULTIPLIER : 1);
 
-  return { hit: true, crit: isCrit, damage, roll: totalRoll };
+  return { hit: true, crit: isCrit, damage, roll: totalRoll, rawD20: d20, conditionBonus };
 }
 
 // ─── Saving Throws ────────────────────────────────────────────────────────────
@@ -197,26 +197,45 @@ export function resolveSave({ creature, ability, dc, rng = Math.random }) {
  *   damageType: string
  * }} params
  *
- * @returns {{ newHP: number, overkill: number }}
- *   newHP   — target's HP after damage, clamped to 0
- *   overkill — damage beyond 0 HP (useful for death-save threshold calculations)
+ * @param {{
+ *   target: { hp: number, resistances?: string[], damageReduction?: { value: number, bypass: string|null } | null },
+ *   damage: number,
+ *   damageType: string
+ * }} params
+ * @returns {{ newHP: number, overkill: number, finalDamage: number, resisted: boolean, drApplied: number }}
+ *   newHP       — target's HP after damage, clamped to 0
+ *   overkill    — damage beyond 0 HP
+ *   finalDamage — damage after all reductions (before HP cap), used for logging
+ *   resisted    — true if resistance halved the damage
+ *   drApplied   — amount subtracted by Damage Reduction (0 if none or bypassed)
  */
 export function applyDamage({ target, damage, damageType }) {
   const resistances = target.resistances ?? [];
+  const dr          = target.damageReduction ?? null;
 
   let finalDamage = damage;
 
-  if (resistances.includes(damageType)) {
+  // Resistance halves damage (SRD).
+  const resisted = resistances.includes(damageType);
+  if (resisted) {
     finalDamage = Math.floor(finalDamage / 2);
   }
 
   // TODO: add vulnerability (double damage) here when relevant enemies/conditions are added.
 
+  // Damage Reduction (D&D 3.5 style): subtract DR value unless bypass type matches.
+  // Example: DR 5/bludgeoning — bludgeoning bypasses, all other types reduced by 5.
+  let drApplied = 0;
+  if (dr && dr.value > 0 && damageType !== dr.bypass) {
+    drApplied   = Math.min(finalDamage, dr.value); // don't reduce below 0 pre-minimum
+    finalDamage = Math.max(0, finalDamage - dr.value);
+  }
+
   // Minimum 1 damage on any successful hit.
   finalDamage = Math.max(1, finalDamage);
 
-  const newHP = Math.max(0, target.hp - finalDamage);
+  const newHP    = Math.max(0, target.hp - finalDamage);
   const overkill = Math.max(0, finalDamage - target.hp);
 
-  return { newHP, overkill };
+  return { newHP, overkill, finalDamage, resisted, drApplied };
 }

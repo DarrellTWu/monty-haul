@@ -9,10 +9,10 @@ import { ChestState }  from '../state/ChestState.js';
 import { TrapState }   from '../state/TrapState.js';
 
 import { FIGHTER }                   from '../../shared/data/classes/fighter.js';
-import { GOBLIN }                    from '../../shared/data/enemies/tier1.js';
+import { GOBLIN, DOG, SKELETON }     from '../../shared/data/enemies/tier1.js';
 import { getModifier, resolveSave, rollDice } from '../../shared/logic/combat.js';
 import { ARMOR_REGISTRY, computeAC } from '../../shared/data/armor/armor.js';
-import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, DAGGER } from '../../shared/data/weapons/melee.js';
+import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, DAGGER, MACE } from '../../shared/data/weapons/melee.js';
 import { SHIELD_REGISTRY }           from '../../shared/data/items/shields.js';
 import { CONSUMABLE_REGISTRY }       from '../../shared/data/items/consumables.js';
 import {
@@ -26,7 +26,7 @@ import { playerAttack, enemyAttack, applySecondWind } from '../systems/CombatSys
 
 const WEAPON_REGISTRY = {
   longsword: LONGSWORD, shortsword: SHORTSWORD,
-  handaxe: HANDAXE, greataxe: GREATAXE, dagger: DAGGER,
+  handaxe: HANDAXE, greataxe: GREATAXE, dagger: DAGGER, mace: MACE,
 };
 
 const ROOM_WIDTH  = 1600;
@@ -35,9 +35,13 @@ const WALL        = 40;
 const BOUNDS = { minX: WALL, maxX: ROOM_WIDTH - WALL, minY: WALL, maxY: ROOM_HEIGHT - WALL };
 
 const FIGHTER_SPAWN  = { x: 800, y: 600 };
-const GOBLIN_SPAWNS  = [{ x: 300, y: 300 }, { x: 1300, y: 900 }];
 const CHEST_SPAWN    = { x: 880, y: 600 };
 const TRAP_SPAWN     = { x: 1380, y: 160 };
+
+// Four corners, each enemy type gets a separate corner.
+const GOBLIN_SPAWNS   = [{ x: 300, y: 300 }, { x: 1300, y: 900 }];
+const DOG_SPAWN       = { x: 1300, y: 300 };
+const SKELETON_SPAWN  = { x: 300, y: 900 };
 
 export class DungeonRoom extends Room {
   onCreate(options) {
@@ -46,10 +50,12 @@ export class DungeonRoom extends Room {
     this._conditionTimers = new Map(); // `${sessionId}_${condition}` → remainingMs
 
     this._spawnGoblins();
+    this._spawnDog();
+    this._spawnSkeleton();
     this._spawnChest();
     this._spawnTrap();
 
-    // ── Movement ──────────────────────────────────────────────────────────────
+    // ── Movement ──────────────────────────────────────────────────────────────────
     this.onMessage('move', (client, { dx, dy }) => {
       const player = this.state.players.get(client.sessionId);
       if (!player || !player.alive) return;
@@ -63,39 +69,48 @@ export class DungeonRoom extends Room {
       if (player) { player.vx = 0; player.vy = 0; }
     });
 
-    // ── Combat ────────────────────────────────────────────────────────────────
+    // ── Combat ────────────────────────────────────────────────────────────────────
     this.onMessage('attack', (client) => {
-      const result = playerAttack(this.state, client.sessionId);
-      if (result.log) this.broadcast('combat_log', { message: result.log });
+      const result = playerAttack(this.state, client.sessionId, this._enemyDefs);
+      for (const msg of result.logs) this.broadcast('combat_log', { message: msg });
     });
 
-    // ── Equip / unequip ───────────────────────────────────────────────────────
+    // ── Equip / unequip ───────────────────────────────────────────────────────────
     // 'equip' message: { itemId, slot? }
-    //   slot = 'weapon' | 'offhand' | undefined (auto-detect by item type)
+    //   slot = 'weapon' | 'offhand' | 'armor' | undefined (auto-detect)
     // Server validates: item in inventory, SRD constraints respected.
-    // Two-handed weapons auto-unequip offhand; offhand weapons do NOT block shields.
     this.onMessage('equip', (client, { itemId, slot }) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
       const id  = String(itemId);
       const idx = player.inventory.indexOf(id);
-      if (idx === -1) return; // must be in inventory
+      if (idx === -1) return; // item must be in bag
 
       const isShield = !!SHIELD_REGISTRY[id];
       const isWeapon = !!WEAPON_REGISTRY[id];
+      const isArmor  = !!ARMOR_REGISTRY[id];
 
       // Auto-detect target slot if not specified.
-      const targetSlot = slot || (isShield ? 'offhand' : 'weapon');
+      const targetSlot = slot || (isArmor ? 'armor' : isShield ? 'offhand' : 'weapon');
 
-      if (targetSlot === 'offhand') {
-        // Offhand accepts one-handed weapons OR shields. Blocks two-handed weapons.
+      if (targetSlot === 'armor') {
+        if (!isArmor) return;
+        // Return old armor to bag first.
+        if (player.equippedArmorId) player.inventory.push(player.equippedArmorId);
+        player.inventory.splice(player.inventory.indexOf(id), 1);
+        player.equippedArmorId = id;
+        this._recomputeAC(player);
+
+      } else if (targetSlot === 'offhand') {
+        // Offhand accepts one-handed weapons OR shields. Blocks two-handed.
         if (isWeapon && WEAPON_REGISTRY[id]?.properties?.includes('two-handed')) return;
         if (player.offhandId) player.inventory.push(player.offhandId);
         player.inventory.splice(player.inventory.indexOf(id), 1);
         player.offhandId = id;
+        this._recomputeAC(player);
 
       } else { // weapon slot
-        if (isShield) return; // shields go to offhand only
+        if (isShield || isArmor) return;
         const newWeapon = WEAPON_REGISTRY[id];
         if (!newWeapon) return;
         // Two-handed weapon: auto-unequip offhand (player chose to go two-handed).
@@ -106,8 +121,8 @@ export class DungeonRoom extends Room {
         if (player.equippedWeaponId) player.inventory.push(player.equippedWeaponId);
         player.inventory.splice(player.inventory.indexOf(id), 1);
         player.equippedWeaponId = id;
+        this._recomputeAC(player);
       }
-      this._recomputeAC(player);
     });
 
     this.onMessage('unequip', (client, { slot }) => {
@@ -120,10 +135,14 @@ export class DungeonRoom extends Room {
         player.inventory.push(player.offhandId);
         player.offhandId = '';
         this._recomputeAC(player);
+      } else if (slot === 'armor' && player.equippedArmorId) {
+        player.inventory.push(player.equippedArmorId);
+        player.equippedArmorId = '';
+        this._recomputeAC(player); // unarmored: AC = 10 + DEX
       }
     });
 
-    // ── Chest looting ─────────────────────────────────────────────────────────
+    // ── Chest looting ─────────────────────────────────────────────────────────────
     this.onMessage('loot', (client, { chestId }) => {
       const player = this.state.players.get(client.sessionId);
       const chest  = this.state.chests.get(String(chestId));
@@ -137,7 +156,7 @@ export class DungeonRoom extends Room {
       console.log(`[DungeonRoom] ${client.sessionId} looted chest ${chestId}`);
     });
 
-    // ── Hotbar management ─────────────────────────────────────────────────────
+    // ── Hotbar management ─────────────────────────────────────────────────────────
     this.onMessage('assign_hotbar', (client, { itemId, slot }) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
@@ -172,11 +191,11 @@ export class DungeonRoom extends Room {
   }
 
   onJoin(client) {
-    const conMod       = getModifier(FIGHTER.baseAbilityScores.con);
-    const maxHp        = FIGHTER.getStartingHp(conMod);
+    const conMod        = getModifier(FIGHTER.baseAbilityScores.con);
+    const maxHp         = FIGHTER.getStartingHp(conMod);
     const startingArmor = ARMOR_REGISTRY[FIGHTER.startingArmorId];
-    const dexMod       = getModifier(FIGHTER.baseAbilityScores.dex);
-    const ac           = computeAC(startingArmor, dexMod, false);
+    const dexMod        = getModifier(FIGHTER.baseAbilityScores.dex);
+    const ac            = computeAC(startingArmor, dexMod, false);
 
     const player = new PlayerState();
     player.x    = FIGHTER_SPAWN.x;
@@ -188,8 +207,6 @@ export class DungeonRoom extends Room {
     player.alive = true;
     player.equippedWeaponId = 'longsword';
     player.equippedArmorId  = FIGHTER.startingArmorId;
-    // offhandId starts empty; secondWindAvailable starts true
-    // hotbar defaults: slot 0 = second_wind
     player.hotbar.push('second_wind');
     for (let i = 1; i < 10; i++) player.hotbar.push('');
 
@@ -213,28 +230,43 @@ export class DungeonRoom extends Room {
     chest.x    = CHEST_SPAWN.x;
     chest.y    = CHEST_SPAWN.y;
     chest.open = false;
-    chest.items.push('shield', 'dagger', 'greataxe', 'healing_potion', 'bless_potion');
+    chest.items.push(
+      'shield', 'dagger', 'greataxe', 'mace',
+      'half_plate',
+      'healing_potion', 'bless_potion', 'longstrider_potion', 'false_life_potion',
+    );
     this.state.chests.set('chest_0', chest);
-    console.log('[DungeonRoom] Spawned chest with shield, dagger, greataxe, healing potion, bless potion');
+    console.log('[DungeonRoom] Spawned chest');
   }
 
   _spawnGoblins() {
     GOBLIN_SPAWNS.forEach((pos, i) => {
-      const id    = `goblin_${i}`;
-      const enemy = new EnemyState();
-      enemy.id    = id;
-      enemy.type  = 'goblin';
-      enemy.x     = pos.x;
-      enemy.y     = pos.y;
-      enemy.hp    = GOBLIN.hp;
-      enemy.maxHp = GOBLIN.hp;
-      enemy.ac    = GOBLIN.ac;
-      enemy.alive = true;
-      enemy.aiState = 'idle';
-      this.state.enemies.set(id, enemy);
-      this._enemyDefs.set(id, GOBLIN);
+      this._spawnEnemy(`goblin_${i}`, GOBLIN, pos);
     });
-    console.log('[DungeonRoom] Spawned 2 goblins');
+  }
+
+  _spawnDog() {
+    this._spawnEnemy('dog_0', DOG, DOG_SPAWN);
+  }
+
+  _spawnSkeleton() {
+    this._spawnEnemy('skeleton_0', SKELETON, SKELETON_SPAWN);
+  }
+
+  _spawnEnemy(id, def, pos) {
+    const enemy = new EnemyState();
+    enemy.id      = id;
+    enemy.type    = def.id;
+    enemy.x       = pos.x;
+    enemy.y       = pos.y;
+    enemy.hp      = def.hp;
+    enemy.maxHp   = def.hp;
+    enemy.ac      = def.ac;
+    enemy.alive   = true;
+    enemy.aiState = 'idle';
+    this.state.enemies.set(id, enemy);
+    this._enemyDefs.set(id, def);
+    console.log(`[DungeonRoom] Spawned ${def.type} (${id}) at (${pos.x}, ${pos.y})`);
   }
 
   _spawnTrap() {
@@ -282,9 +314,14 @@ export class DungeonRoom extends Room {
         saveProfs:     FIGHTER.saveProficiencies,
       };
       const save        = resolveSave({ creature, ability: 'dex', dc: TRAP_SAVE_DC });
-      const finalDamage = save.success ? Math.floor(TRAP_DAMAGE / 2) : TRAP_DAMAGE;
-
-      player.hp = Math.max(0, player.hp - Math.max(1, finalDamage));
+      let trapDamage = Math.max(1, save.success ? Math.floor(TRAP_DAMAGE / 2) : TRAP_DAMAGE);
+      // Temp HP absorbs trap damage before regular HP (SRD rule).
+      if (player.tempHp > 0) {
+        const absorbed = Math.min(player.tempHp, trapDamage);
+        player.tempHp -= absorbed;
+        trapDamage    -= absorbed;
+      }
+      player.hp = Math.max(0, player.hp - trapDamage);
       if (player.hp <= 0) { player.hp = 0; player.alive = false; }
       trap.cooldownMs = TRAP_COOLDOWN_MS;
 
@@ -310,8 +347,14 @@ export class DungeonRoom extends Room {
           this._conditionTimers.delete(key);
           const idx = player.conditions.indexOf(condition);
           if (idx !== -1) player.conditions.splice(idx, 1);
+          if (condition === 'bless')       player.blessRemainingMs = 0;
+          if (condition === 'longstrider') player.longstriderRemainingMs = 0;
+          if (condition === 'false_life')  { player.falseLifeRemainingMs = 0; player.tempHp = 0; }
         } else {
           this._conditionTimers.set(key, remaining);
+          if (condition === 'bless')       player.blessRemainingMs = remaining;
+          if (condition === 'longstrider') player.longstriderRemainingMs = remaining;
+          if (condition === 'false_life')  player.falseLifeRemainingMs = remaining;
         }
       }
     }
@@ -331,11 +374,32 @@ export class DungeonRoom extends Room {
     } else if (c.type === 'bless') {
       if (!player.conditions.includes('bless')) {
         player.conditions.push('bless');
+        player.blessRemainingMs = c.conditionDurationMs;
         this._conditionTimers.set(`${sessionId}_bless`, c.conditionDurationMs);
         this.broadcast('combat_log', {
           message: `${c.label}: Fighter gains Bless (+1d4 to attacks, ${c.conditionDurationMs / 1000}s)`,
         });
       }
+    } else if (c.type === 'longstrider') {
+      if (!player.conditions.includes('longstrider')) {
+        player.conditions.push('longstrider');
+      }
+      player.longstriderRemainingMs = c.conditionDurationMs;
+      this._conditionTimers.set(`${sessionId}_longstrider`, c.conditionDurationMs);
+      this.broadcast('combat_log', {
+        message: `${c.label}: Fighter's speed +${c.speedBonusFt}ft (${c.conditionDurationMs / 1000}s)`,
+      });
+    } else if (c.type === 'false_life') {
+      const tempHp = rollDice(c.damageDice.count, c.damageDice.sides) + c.diceBonus;
+      player.tempHp = tempHp;
+      if (!player.conditions.includes('false_life')) {
+        player.conditions.push('false_life');
+      }
+      player.falseLifeRemainingMs = c.conditionDurationMs;
+      this._conditionTimers.set(`${sessionId}_false_life`, c.conditionDurationMs);
+      this.broadcast('combat_log', {
+        message: `${c.label}: Fighter gains ${tempHp} temp HP (${c.conditionDurationMs / 1000}s)`,
+      });
     }
 
     player.inventory.splice(idx, 1);
@@ -347,8 +411,8 @@ export class DungeonRoom extends Room {
 
   /** Recompute player.ac from armor + offhand (shield gives +2, weapon does not). */
   _recomputeAC(player) {
-    const armorDef = ARMOR_REGISTRY[player.equippedArmorId];
-    const dexMod   = getModifier(FIGHTER.baseAbilityScores.dex);
+    const armorDef  = ARMOR_REGISTRY[player.equippedArmorId] ?? null; // null = unarmored
+    const dexMod    = getModifier(FIGHTER.baseAbilityScores.dex);
     const hasShield = !!SHIELD_REGISTRY[player.offhandId];
     player.ac = computeAC(armorDef, dexMod, hasShield);
   }
