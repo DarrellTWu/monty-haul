@@ -326,8 +326,8 @@ export class DungeonRoom extends Room {
       trap.cooldownMs = TRAP_COOLDOWN_MS;
 
       const outcome = save.success
-        ? `saved (${save.total} vs DC ${TRAP_SAVE_DC}) — ${finalDamage} dmg (half)`
-        : `failed (${save.total} vs DC ${TRAP_SAVE_DC}) — ${finalDamage} dmg`;
+        ? `saved (${save.total} vs DC ${TRAP_SAVE_DC}) — ${trapDamage} dmg (half)`
+        : `failed (${save.total} vs DC ${TRAP_SAVE_DC}) — ${trapDamage} dmg`;
       this.broadcast('combat_log', { message: `⚠ Spike Trap  DEX save: ${outcome}, piercing` });
     }
   }
