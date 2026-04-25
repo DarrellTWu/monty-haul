@@ -32,7 +32,7 @@
 - `data/constants.js`, `data/weapons/melee.js`, `data/armor/armor.js`
 - `data/items/consumables.js`, `data/items/shields.js`
 - `data/enemies/tier1.js` (goblin, dog, skeleton)
-- `data/classes/fighter.js`, `data/classes/barbarian.js`, `data/classes/index.js` — CLASS_REGISTRY pattern; add new classes here
+- `data/classes/fighter.js`, `data/classes/barbarian.js`, `data/classes/monk.js`, `data/classes/index.js` — CLASS_REGISTRY pattern; add new classes here
 - `logic/combat.js` — full attack resolution (pure functions)
 - `tests/combat.test.js`
 - `types/player.js`, `types/enemy.js`, `types/weapon.js`

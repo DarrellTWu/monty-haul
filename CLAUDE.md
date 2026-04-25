@@ -94,7 +94,7 @@ Many files in docs/tech_spec.md are planned, not yet built. What actually exists
 - `input/InputHandler.js`
 
 **Shared**
-- `data/` — constants.js, weapons/melee.js, armor/armor.js, items/(consumables+shields), enemies/tier1.js, classes/fighter.js, classes/barbarian.js, classes/index.js (CLASS_REGISTRY)
+- `data/` — constants.js, weapons/melee.js, armor/armor.js, items/(consumables+shields), enemies/tier1.js, classes/fighter.js, classes/barbarian.js, classes/monk.js, classes/index.js (CLASS_REGISTRY)
 - `logic/combat.js` — full attack resolution
 - `tests/combat.test.js`
 - `types/` — player.js, enemy.js, weapon.js
@@ -115,6 +115,20 @@ Before any game logic task, read these files:
   - `rageRemainingMs, rageUsesRemaining` — Barbarian rage tracking (synced for HUD ring + inventory)
 - The specific file being modified
 - A structural reference file if creating something new
+
+## Class Definition Schema
+Each class file exports a const with these fields (see fighter.js / monk.js as reference):
+- `id` — string key matching CLASS_REGISTRY entry
+- `hitDie` — e.g. 10 for fighter, 8 for monk
+- `baseAbilityScores` — `{ str, dex, con, int, wis, cha }` — used for attack rolls, saves, and AC
+- `getStartingHp(conMod)` — function returning starting HP
+- `startingWeaponId`, `startingArmorId` — item ids ('' = none)
+- `unarmoredDefense` — optional string key into baseAbilityScores (e.g. `'wis'` for monk). When set and player has no armor and no shield, AC = 10 + DEX mod + [stat] mod. Handled in DungeonRoom `onJoin` and `_recomputeAC`.
+- `saveProficiencies` — array of ability keys
+- `fightingStyle` — string or null; passed to CombatSystem for Dueling bonus etc.
+- `classFeatures` — array of ability ids seeded into hotbar slots 0–N on join (e.g. `['rage']`)
+- `rageUses` — optional number of rage uses (Barbarian only for now)
+- `feat` — starting feat id string
 
 ## Client-Server Message Protocol
 All messages handled in `DungeonRoom.js` onCreate.
