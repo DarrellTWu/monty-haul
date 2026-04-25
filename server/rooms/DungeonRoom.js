@@ -229,6 +229,7 @@ export class DungeonRoom extends Room {
     for (const feature of classDef.classFeatures) player.hotbar.push(feature);
     for (let i = classDef.classFeatures.length; i < 10; i++) player.hotbar.push('');
     player.rageUsesRemaining = classDef.rageUses ?? 0;
+    for (const id of (options.items ?? [])) player.inventory.push(id);
 
     this.state.players.set(client.sessionId, player);
     console.log(`[DungeonRoom] ${client.sessionId} joined as ${classDef.id} — HP ${maxHp} AC ${ac}`);
