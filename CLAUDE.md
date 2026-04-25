@@ -85,13 +85,15 @@ Many files in docs/tech_spec.md are planned, not yet built. What actually exists
 - `persistence/`, `matchmaking/` — not yet built
 
 **Client** (no `rendering/` or `ui/` subdirectories)
-- `scenes/DungeonScene.js` — gameplay rendering, input wiring
+- `scenes/HubScene.js` — entry point (auto-starts); stub transitions directly to DungeonScene
+- `scenes/DungeonScene.js` — gameplay rendering, input wiring; receives `{ class }` via init(data)
 - `scenes/HUDScene.js` — conditions, cooldown rings, hotbar overlay
 - `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI
-- `network/ColyseusClient.js`, `input/InputHandler.js`
+- `network/ColyseusClient.js` — `joinDungeon(opts)` forwards opts (incl. class) to server
+- `input/InputHandler.js`
 
 **Shared**
-- `data/` — constants.js, weapons/melee.js, armor/armor.js, items/(consumables+shields), enemies/tier1.js, classes/fighter.js
+- `data/` — constants.js, weapons/melee.js, armor/armor.js, items/(consumables+shields), enemies/tier1.js, classes/fighter.js, classes/index.js (CLASS_REGISTRY)
 - `logic/combat.js` — full attack resolution
 - `tests/combat.test.js`
 - `types/` — player.js, enemy.js, weapon.js
@@ -103,6 +105,7 @@ Before any game logic task, read these files:
 - `server/state/PlayerState.js` — authoritative runtime schema. Key fields:
   - `x, y, vx, vy` — position and velocity
   - `hp, maxHp, ac, level, alive`
+  - `class` — class id string (e.g. `'fighter'`); set on join from join options
   - `equippedWeaponId, offhandId, equippedArmorId` — equipment slots ('' = empty)
   - `inventory` — ArraySchema of item id strings
   - `hotbar` — ArraySchema[10] of ability/consumable ids or ''
