@@ -169,6 +169,10 @@ export class DungeonRoom extends Room {
       const s  = Math.max(0, Math.min(9, Math.floor(Number(slot))));
       const id = String(itemId);
       if (id === 'second_wind' || id === 'rage' || CONSUMABLE_REGISTRY[id]) {
+        // Each item may occupy only one hotbar slot — clear any existing binding first.
+        for (let i = 0; i < player.hotbar.length; i++) {
+          if (player.hotbar[i] === id) player.hotbar[i] = '';
+        }
         player.hotbar[s] = id;
       }
     });
