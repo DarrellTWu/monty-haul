@@ -34,6 +34,10 @@ export class DungeonScene extends Phaser.Scene {
     super({ key: 'DungeonScene' });
   }
 
+  init(data) {
+    this._joinOpts = data ?? {};
+  }
+
   async create() {
     this._room     = null;
     this._playerGfx = new Map();  // sessionId → { circle, hpBar }
@@ -49,7 +53,7 @@ export class DungeonScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     try {
-      this._room = await joinDungeon();
+      this._room = await joinDungeon(this._joinOpts);
       this._statusText.destroy();
       this._statusText = null;
     } catch (err) {

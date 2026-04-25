@@ -22,9 +22,9 @@ function getClient() {
  * Join (or create) the dungeon room.
  * @returns {Promise<import('colyseus.js').Room>}
  */
-export async function joinDungeon() {
+export async function joinDungeon(opts = {}) {
   if (_room) return _room;
-  _room = await getClient().joinOrCreate('dungeon');
+  _room = await getClient().joinOrCreate('dungeon', opts);
   console.log('[ColyseusClient] Joined dungeon room:', _room.sessionId);
   return _room;
 }

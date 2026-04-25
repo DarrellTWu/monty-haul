@@ -25,7 +25,9 @@ export const FIGHTER = {
     return Math.floor((this.hitDie + conMod) * HP_MULTIPLIER);
   },
 
-  // Starting armor. Chain Mail is heavy (baseAC 16, no DEX bonus, STR 13 req).
+  // Starting equipment.
+  startingWeaponId: 'longsword',
+  // Chain Mail is heavy (baseAC 16, no DEX bonus, STR 13 req).
   // AC is computed via computeAC() in shared/data/armor/armor.js — not stored here.
   startingArmorId: 'chain_mail',
 

@@ -15,6 +15,7 @@ export class PlayerState extends Schema {
     this.vy = 0;
     this.attackCooldownMs = 0;
     this.alive = true;
+    this.class = '';             // class id (e.g. 'fighter')
     this.equippedWeaponId = '';  // weapon slot; '' = unarmed
     this.equippedArmorId = '';   // armor slot; '' = unarmored
     this.offhandId = '';         // offhand slot: weapon or shield; '' = empty
@@ -40,6 +41,7 @@ defineTypes(PlayerState, {
   vy: 'number',
   attackCooldownMs: 'number',
   alive: 'boolean',
+  class: 'string',
   equippedWeaponId: 'string',
   equippedArmorId: 'string',
   offhandId: 'string',

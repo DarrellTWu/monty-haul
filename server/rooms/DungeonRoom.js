@@ -8,7 +8,7 @@ import { EnemyState }  from '../state/EnemyState.js';
 import { ChestState }  from '../state/ChestState.js';
 import { TrapState }   from '../state/TrapState.js';
 
-import { FIGHTER }                   from '../../shared/data/classes/fighter.js';
+import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.js';
 import { GOBLIN, DOG, SKELETON }     from '../../shared/data/enemies/tier1.js';
 import { getModifier, resolveSave, rollDice } from '../../shared/logic/combat.js';
 import { ARMOR_REGISTRY, computeAC } from '../../shared/data/armor/armor.js';
@@ -182,7 +182,7 @@ export class DungeonRoom extends Room {
       if (binding === 'second_wind') {
         const heal = applySecondWind(this.state, client.sessionId);
         if (heal !== null) {
-          this.broadcast('combat_log', { message: `Second Wind: Fighter recovers ${heal} HP` });
+          this.broadcast('combat_log', { message: `Second Wind: ${player.class[0].toUpperCase() + player.class.slice(1)} recovers ${heal} HP` });
         }
       } else if (CONSUMABLE_REGISTRY[binding]) {
         this._useConsumable(player, client.sessionId, binding);
@@ -195,28 +195,30 @@ export class DungeonRoom extends Room {
     );
   }
 
-  onJoin(client) {
-    const conMod        = getModifier(FIGHTER.baseAbilityScores.con);
-    const maxHp         = FIGHTER.getStartingHp(conMod);
-    const startingArmor = ARMOR_REGISTRY[FIGHTER.startingArmorId];
-    const dexMod        = getModifier(FIGHTER.baseAbilityScores.dex);
+  onJoin(client, options = {}) {
+    const classDef      = CLASS_REGISTRY[options.class] ?? DEFAULT_CLASS;
+    const conMod        = getModifier(classDef.baseAbilityScores.con);
+    const maxHp         = classDef.getStartingHp(conMod);
+    const startingArmor = ARMOR_REGISTRY[classDef.startingArmorId];
+    const dexMod        = getModifier(classDef.baseAbilityScores.dex);
     const ac            = computeAC(startingArmor, dexMod, false);
 
     const player = new PlayerState();
-    player.x    = FIGHTER_SPAWN.x;
-    player.y    = FIGHTER_SPAWN.y;
-    player.hp   = maxHp;
+    player.x     = FIGHTER_SPAWN.x;
+    player.y     = FIGHTER_SPAWN.y;
+    player.hp    = maxHp;
     player.maxHp = maxHp;
-    player.ac   = ac;
+    player.ac    = ac;
     player.level = 1;
     player.alive = true;
-    player.equippedWeaponId = 'longsword';
-    player.equippedArmorId  = FIGHTER.startingArmorId;
-    player.hotbar.push('second_wind');
-    for (let i = 1; i < 10; i++) player.hotbar.push('');
+    player.class            = classDef.id;
+    player.equippedWeaponId = classDef.startingWeaponId;
+    player.equippedArmorId  = classDef.startingArmorId;
+    for (const feature of classDef.classFeatures) player.hotbar.push(feature);
+    for (let i = classDef.classFeatures.length; i < 10; i++) player.hotbar.push('');
 
     this.state.players.set(client.sessionId, player);
-    console.log(`[DungeonRoom] ${client.sessionId} joined — HP ${maxHp} AC ${ac}`);
+    console.log(`[DungeonRoom] ${client.sessionId} joined as ${classDef.id} — HP ${maxHp} AC ${ac}`);
   }
 
   onLeave(client) {
@@ -313,10 +315,11 @@ export class DungeonRoom extends Room {
       const dy = player.y - trap.y;
       if (Math.sqrt(dx * dx + dy * dy) > TRAP_RADIUS_PX) continue;
 
+      const classDef = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
       const creature = {
-        abilityScores: FIGHTER.baseAbilityScores,
+        abilityScores: classDef.baseAbilityScores,
         level:         player.level,
-        saveProfs:     FIGHTER.saveProficiencies,
+        saveProfs:     classDef.saveProficiencies,
       };
       const save        = resolveSave({ creature, ability: 'dex', dc: TRAP_SAVE_DC });
       let trapDamage = Math.max(1, save.success ? Math.floor(TRAP_DAMAGE / 2) : TRAP_DAMAGE);
@@ -370,19 +373,20 @@ export class DungeonRoom extends Room {
   _useConsumable(player, sessionId, consumableId) {
     const idx = player.inventory.indexOf(consumableId);
     if (idx === -1) return;
-    const c = CONSUMABLE_REGISTRY[consumableId];
+    const c         = CONSUMABLE_REGISTRY[consumableId];
+    const className = player.class[0].toUpperCase() + player.class.slice(1);
 
     if (c.type === 'healing') {
       const heal = rollDice(c.damageDice.count, c.damageDice.sides) + c.diceBonus;
       player.hp  = Math.min(player.maxHp, player.hp + heal);
-      this.broadcast('combat_log', { message: `${c.label}: Fighter recovers ${heal} HP` });
+      this.broadcast('combat_log', { message: `${c.label}: ${className} recovers ${heal} HP` });
     } else if (c.type === 'bless') {
       if (!player.conditions.includes('bless')) {
         player.conditions.push('bless');
         player.blessRemainingMs = c.conditionDurationMs;
         this._conditionTimers.set(`${sessionId}_bless`, c.conditionDurationMs);
         this.broadcast('combat_log', {
-          message: `${c.label}: Fighter gains Bless (+1d4 to attacks, ${c.conditionDurationMs / 1000}s)`,
+          message: `${c.label}: ${className} gains Bless (+1d4 to attacks, ${c.conditionDurationMs / 1000}s)`,
         });
       }
     } else if (c.type === 'longstrider') {
@@ -392,7 +396,7 @@ export class DungeonRoom extends Room {
       player.longstriderRemainingMs = c.conditionDurationMs;
       this._conditionTimers.set(`${sessionId}_longstrider`, c.conditionDurationMs);
       this.broadcast('combat_log', {
-        message: `${c.label}: Fighter's speed +${c.speedBonusFt}ft (${c.conditionDurationMs / 1000}s)`,
+        message: `${c.label}: ${className}'s speed +${c.speedBonusFt}ft (${c.conditionDurationMs / 1000}s)`,
       });
     } else if (c.type === 'false_life') {
       const tempHp = rollDice(c.damageDice.count, c.damageDice.sides) + c.diceBonus;
@@ -403,7 +407,7 @@ export class DungeonRoom extends Room {
       player.falseLifeRemainingMs = c.conditionDurationMs;
       this._conditionTimers.set(`${sessionId}_false_life`, c.conditionDurationMs);
       this.broadcast('combat_log', {
-        message: `${c.label}: Fighter gains ${tempHp} temp HP (${c.conditionDurationMs / 1000}s)`,
+        message: `${c.label}: ${className} gains ${tempHp} temp HP (${c.conditionDurationMs / 1000}s)`,
       });
     }
 
@@ -416,8 +420,9 @@ export class DungeonRoom extends Room {
 
   /** Recompute player.ac from armor + offhand (shield gives +2, weapon does not). */
   _recomputeAC(player) {
+    const classDef  = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
     const armorDef  = ARMOR_REGISTRY[player.equippedArmorId] ?? null; // null = unarmored
-    const dexMod    = getModifier(FIGHTER.baseAbilityScores.dex);
+    const dexMod    = getModifier(classDef.baseAbilityScores.dex);
     const hasShield = !!SHIELD_REGISTRY[player.offhandId];
     player.ac = computeAC(armorDef, dexMod, hasShield);
   }
