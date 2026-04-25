@@ -19,7 +19,8 @@ export class HubScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this._makeClassCard(330, 320, 'fighter',   'Fighter',   ['Longsword', 'Chain Mail', 'Second Wind']);
-    this._makeClassCard(950, 320, 'barbarian', 'Barbarian', ['Greatsword', 'Chain Mail']);
+    this._makeClassCard(640, 320, 'monk',      'Monk',      ['Shortsword', 'Unarmored Defense', 'Martial Arts']);
+    this._makeClassCard(950, 320, 'barbarian', 'Barbarian', ['Greatsword', 'Chain Mail', 'Rage (2 uses)']);
 
     this._enterBtn = this.add.text(640, 590, '[ Enter Dungeon ]', {
       fontSize: '20px', color: '#444455', fontFamily: 'monospace',

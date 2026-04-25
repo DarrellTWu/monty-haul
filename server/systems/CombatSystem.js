@@ -21,6 +21,9 @@ const WEAPON_REGISTRY = {
   unarmed:    UNARMED,
 };
 
+// Monk weapons: unarmed strikes and light/simple melee weapons per SRD.
+const MONK_WEAPON_IDS = new Set(['shortsword', 'dagger', 'handaxe', 'mace', 'unarmed', '']);
+
 function getWeapon(equippedWeaponId) {
   return WEAPON_REGISTRY[equippedWeaponId] ?? UNARMED;
 }
@@ -168,6 +171,42 @@ export function playerAttack(state, sessionId, enemyDefs = new Map()) {
     }
   }
 
+  // ── Martial Arts bonus unarmed strike ────────────────────────────────────────
+  // Triggers when monk attacks unarmored, no shield, with a monk weapon.
+  const hasShieldEquipped = !!SHIELD_REGISTRY[player.offhandId];
+  if (
+    player.class === 'monk' &&
+    !player.equippedArmorId &&
+    !hasShieldEquipped &&
+    MONK_WEAPON_IDS.has(player.equippedWeaponId) &&
+    target.state.alive
+  ) {
+    const maWeapon  = { ...UNARMED, properties: [...(UNARMED.properties ?? []), 'finesse'] };
+    const maAbilMod = dexMod > strMod ? dexMod : strMod;
+    const maAbilKey = dexMod > strMod ? 'dex' : 'str';
+
+    const maResult = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon: maWeapon });
+
+    if (maResult.hit) {
+      const applied = applyDamage({
+        target: enemyToTarget(target.state, targetResistances, targetDR),
+        damage: maResult.damage,
+        damageType: maWeapon.damageType,
+      });
+      target.state.hp = applied.newHP;
+      if (target.state.hp <= 0) {
+        target.state.hp    = 0;
+        target.state.alive = false;
+        target.state.vx    = 0;
+        target.state.vy    = 0;
+      }
+      const tag = _damageTag(applied, maResult.crit);
+      logs.push(`${pLabel} [MA] → ${tLabel}: hit (${rollStr(maResult, profBonus, maAbilMod, maAbilKey)} vs AC ${target.state.ac}), ${maResult.damage}${tag} ${maWeapon.damageType}`);
+    } else {
+      logs.push(`${pLabel} [MA] → ${tLabel}: miss (${rollStr(maResult, profBonus, maAbilMod, maAbilKey)} vs AC ${target.state.ac})`);
+    }
+  }
+
   player.attackCooldownMs = ATTACK_COOLDOWN_MS;
   return { hit: result.hit, crit: result.crit, damage: result.damage, targetId: target.id, logs };
 }
@@ -250,9 +289,9 @@ function nearestLivingEnemy(state, player) {
 }
 
 function playerToAttacker(player) {
+  const classDef = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
   return {
-    // TODO: derive from player.abilityScores once schema carries it.
-    abilityScores: { str: 16, dex: 14, con: 16, int: 10, wis: 10, cha: 10 },
+    abilityScores: classDef.baseAbilityScores,
     level: player.level,
     conditions: [...player.conditions],
   };

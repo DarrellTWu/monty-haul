@@ -203,12 +203,17 @@ export class DungeonRoom extends Room {
   }
 
   onJoin(client, options = {}) {
-    const classDef      = CLASS_REGISTRY[options.class] ?? DEFAULT_CLASS;
-    const conMod        = getModifier(classDef.baseAbilityScores.con);
-    const maxHp         = classDef.getStartingHp(conMod);
-    const startingArmor = ARMOR_REGISTRY[classDef.startingArmorId];
-    const dexMod        = getModifier(classDef.baseAbilityScores.dex);
-    const ac            = computeAC(startingArmor, dexMod, false);
+    const classDef = CLASS_REGISTRY[options.class] ?? DEFAULT_CLASS;
+    const conMod   = getModifier(classDef.baseAbilityScores.con);
+    const maxHp    = classDef.getStartingHp(conMod);
+    const dexMod   = getModifier(classDef.baseAbilityScores.dex);
+    let ac;
+    if (!classDef.startingArmorId && classDef.unarmoredDefense) {
+      const udMod = getModifier(classDef.baseAbilityScores[classDef.unarmoredDefense]);
+      ac = 10 + dexMod + udMod;
+    } else {
+      ac = computeAC(ARMOR_REGISTRY[classDef.startingArmorId], dexMod, false);
+    }
 
     const player = new PlayerState();
     player.x     = FIGHTER_SPAWN.x;
@@ -449,9 +454,13 @@ export class DungeonRoom extends Room {
   /** Recompute player.ac from armor + offhand (shield gives +2, weapon does not). */
   _recomputeAC(player) {
     const classDef  = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
-    const armorDef  = ARMOR_REGISTRY[player.equippedArmorId] ?? null; // null = unarmored
     const dexMod    = getModifier(classDef.baseAbilityScores.dex);
     const hasShield = !!SHIELD_REGISTRY[player.offhandId];
-    player.ac = computeAC(armorDef, dexMod, hasShield);
+    if (!player.equippedArmorId && !hasShield && classDef.unarmoredDefense) {
+      const udMod = getModifier(classDef.baseAbilityScores[classDef.unarmoredDefense]);
+      player.ac = 10 + dexMod + udMod;
+    } else {
+      player.ac = computeAC(ARMOR_REGISTRY[player.equippedArmorId] ?? null, dexMod, hasShield);
+    }
   }
 }

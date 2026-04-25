@@ -158,6 +158,13 @@ export class InventoryScene extends Phaser.Scene {
       }
       ly += 13;
       this.add.text(lx, ly, '+2 dmg, resist phys dmg (30s)  drag→hotbar', STYLE_NOTE); ly += 17;
+    } else if (playerClass === 'monk') {
+      this.add.text(lx, ly, 'Unarmored Defense', STYLE_BODY); ly += 13;
+      this.add.text(lx, ly, 'AC = 10 + DEX + WIS  (no armor or shield)', STYLE_NOTE); ly += 17;
+      this.add.text(lx, ly, 'Martial Arts', STYLE_BODY); ly += 13;
+      this.add.text(lx, ly, 'DEX attacks · d4 unarmed · bonus unarmed strike', STYLE_NOTE); ly += 17;
+      this._abilityKey  = null;
+      this._abilityText = null;
     } else {
       this.add.text(lx, ly, 'Fighting Style: Dueling', STYLE_BODY); ly += 13;
       this.add.text(lx, ly, '+2 dmg (one-hand, no weapon offhand)', STYLE_NOTE); ly += 17;
