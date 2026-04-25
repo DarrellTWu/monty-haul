@@ -22,6 +22,9 @@ export const OOC_REGEN_DELAY_MS = 3000;  // Ms after last hit before regen start
 export const COMBAT_DETECTION_RADIUS = 200; // Px — enemy within this = in combat
 
 // COMBAT
+export const RAGE_DURATION_MS  = 30000; // 30s (SRD: 1 minute — shortened for real-time play)
+export const RAGE_DAMAGE_BONUS = 2;     // +2 to STR melee damage while raging
+export const RAGE_USES         = 2;     // activations per run at level 1
 export const ATTACK_COOLDOWN_MS = 3000;  // Player attack timer cooldown
 export const MELEE_ATTACK_RANGE_PX = 25; // Weapon reach in pixels (from attacker edge)
 export const MELEE_HIT_RANGE_PX = 64;   // Center-to-center distance for melee hit check.

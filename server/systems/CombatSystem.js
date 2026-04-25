@@ -5,16 +5,17 @@ import {
   resolveAttack, applyDamage, rollDice,
   getModifier, getProficiencyBonus,
 } from '../../shared/logic/combat.js';
-import { ATTACK_COOLDOWN_MS, MELEE_HIT_RANGE_PX } from '../../shared/data/constants.js';
-import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, DAGGER, MACE, UNARMED } from '../../shared/data/weapons/melee.js';
+import { ATTACK_COOLDOWN_MS, MELEE_HIT_RANGE_PX, RAGE_DAMAGE_BONUS } from '../../shared/data/constants.js';
+import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, GREATSWORD, DAGGER, MACE, UNARMED } from '../../shared/data/weapons/melee.js';
 import { SHIELD_REGISTRY } from '../../shared/data/items/shields.js';
-import { FIGHTER } from '../../shared/data/classes/fighter.js';
+import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.js';
 
 const WEAPON_REGISTRY = {
   longsword:  LONGSWORD,
   shortsword: SHORTSWORD,
   handaxe:    HANDAXE,
   greataxe:   GREATAXE,
+  greatsword: GREATSWORD,
   dagger:     DAGGER,
   mace:       MACE,
   unarmed:    UNARMED,
@@ -39,8 +40,8 @@ function getEffectiveWeapon(weapon, player) {
  * Dueling fighting style: +2 damage when wielding a one-handed melee weapon
  * and offhand holds no weapon (empty or shield are both fine — SRD rule).
  */
-function applyDueling(weapon, player) {
-  if (FIGHTER.fightingStyle !== 'dueling') return weapon;
+function applyDueling(weapon, player, fightingStyle) {
+  if (fightingStyle !== 'dueling') return weapon;
   if (weapon.properties?.includes('two-handed')) return weapon;
   if (weapon.id === 'unarmed') return weapon;
   // Dueling bonus is lost when dual-wielding (another weapon in offhand).
@@ -91,8 +92,14 @@ export function playerAttack(state, sessionId, enemyDefs = new Map()) {
   const targetDR          = enemyDef.damageReduction ?? null;
 
   // ── Main hand attack ────────────────────────────────────────────────────────
-  const baseWeapon = getWeapon(player.equippedWeaponId);
-  const weapon     = applyDueling(getEffectiveWeapon(baseWeapon, player), player);
+  const classDef = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
+  const pLabel   = player.class ? player.class[0].toUpperCase() + player.class.slice(1) : 'Player';
+
+  let baseWeapon = getWeapon(player.equippedWeaponId);
+  if (player.conditions.includes('rage')) {
+    baseWeapon = { ...baseWeapon, damageBonus: (baseWeapon.damageBonus ?? 0) + RAGE_DAMAGE_BONUS };
+  }
+  const weapon = applyDueling(getEffectiveWeapon(baseWeapon, player), player, classDef.fightingStyle);
 
   const isFinesse   = weapon.properties?.includes('finesse');
   const strMod      = getModifier(attacker.abilityScores.str);
@@ -116,9 +123,9 @@ export function playerAttack(state, sessionId, enemyDefs = new Map()) {
       target.state.vy    = 0;
     }
     const tag = _damageTag(applied, result.crit);
-    logs.push(`Fighter → ${tLabel}: hit (${rollStr(result, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac}), ${result.damage}${tag} ${weapon.damageType}`);
+    logs.push(`${pLabel} → ${tLabel}: hit (${rollStr(result, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac}), ${result.damage}${tag} ${weapon.damageType}`);
   } else {
-    logs.push(`Fighter → ${tLabel}: miss (${rollStr(result, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac})`);
+    logs.push(`${pLabel} → ${tLabel}: miss (${rollStr(result, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac})`);
   }
 
   // ── Offhand attack (Two-Weapon Fighting) ────────────────────────────────────
@@ -155,9 +162,9 @@ export function playerAttack(state, sessionId, enemyDefs = new Map()) {
         target.state.vy    = 0;
       }
       const tag = _damageTag(applied, offResult.crit);
-      logs.push(`Fighter [off] → ${tLabel}: hit (${rollStr(offResult, profBonus, offAbilMod, offAbilKey)} vs AC ${target.state.ac}), ${offRawDamage}${tag} ${offWeapon.damageType}`);
+      logs.push(`${pLabel} [off] → ${tLabel}: hit (${rollStr(offResult, profBonus, offAbilMod, offAbilKey)} vs AC ${target.state.ac}), ${offRawDamage}${tag} ${offWeapon.damageType}`);
     } else {
-      logs.push(`Fighter [off] → ${tLabel}: miss (${rollStr(offResult, profBonus, offAbilMod, offAbilKey)} vs AC ${target.state.ac})`);
+      logs.push(`${pLabel} [off] → ${tLabel}: miss (${rollStr(offResult, profBonus, offAbilMod, offAbilKey)} vs AC ${target.state.ac})`);
     }
   }
 
@@ -206,9 +213,10 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
   enemyState.attackCooldownMs = ATTACK_COOLDOWN_MS;
 
   const tLabel = enemyState.type || 'enemy';
+  const pLabel = targetPlayer.class ? targetPlayer.class[0].toUpperCase() + targetPlayer.class.slice(1) : 'Player';
   const log = result.hit
-    ? `${tLabel} → Fighter: hit (d20:${result.rawD20}+${enemyDef.attackBonus}atk = ${result.roll} vs AC ${targetPlayer.ac}), ${result.damage} ${enemyDef.damageType}`
-    : `${tLabel} → Fighter: miss (d20:${result.rawD20}+${enemyDef.attackBonus}atk = ${result.roll} vs AC ${targetPlayer.ac})`;
+    ? `${tLabel} → ${pLabel}: hit (d20:${result.rawD20}+${enemyDef.attackBonus}atk = ${result.roll} vs AC ${targetPlayer.ac}), ${result.damage} ${enemyDef.damageType}`
+    : `${tLabel} → ${pLabel}: miss (d20:${result.rawD20}+${enemyDef.attackBonus}atk = ${result.roll} vs AC ${targetPlayer.ac})`;
 
   return { log };
 }
@@ -267,7 +275,10 @@ function _damageTag(applied, isCrit) {
 }
 
 function playerToTarget(player) {
-  return { ac: player.ac, hp: player.hp, resistances: [], damageReduction: null };
+  const resistances = player.conditions.includes('rage')
+    ? ['bludgeoning', 'piercing', 'slashing']
+    : [];
+  return { ac: player.ac, hp: player.hp, resistances, damageReduction: null };
 }
 
 function enemyToTarget(enemy, resistances = [], damageReduction = null) {

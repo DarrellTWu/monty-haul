@@ -18,6 +18,7 @@ import { CONSUMABLE_REGISTRY }       from '../../shared/data/items/consumables.j
 import {
   SERVER_TICK_RATE_HZ, MELEE_HIT_RANGE_PX, CHEST_LOOT_RANGE_PX,
   TRAP_DAMAGE, TRAP_SAVE_DC, TRAP_RADIUS_PX, TRAP_COOLDOWN_MS,
+  RAGE_DURATION_MS, RAGE_DAMAGE_BONUS,
 } from '../../shared/data/constants.js';
 
 import * as MovementSystem from '../systems/MovementSystem.js';
@@ -167,7 +168,7 @@ export class DungeonRoom extends Room {
       if (!player) return;
       const s  = Math.max(0, Math.min(9, Math.floor(Number(slot))));
       const id = String(itemId);
-      if (id === 'second_wind' || CONSUMABLE_REGISTRY[id]) {
+      if (id === 'second_wind' || id === 'rage' || CONSUMABLE_REGISTRY[id]) {
         player.hotbar[s] = id;
       }
     });
@@ -184,6 +185,8 @@ export class DungeonRoom extends Room {
         if (heal !== null) {
           this.broadcast('combat_log', { message: `Second Wind: ${player.class[0].toUpperCase() + player.class.slice(1)} recovers ${heal} HP` });
         }
+      } else if (binding === 'rage') {
+        this._activateRage(player, client.sessionId);
       } else if (CONSUMABLE_REGISTRY[binding]) {
         this._useConsumable(player, client.sessionId, binding);
       }
@@ -216,6 +219,7 @@ export class DungeonRoom extends Room {
     player.equippedArmorId  = classDef.startingArmorId;
     for (const feature of classDef.classFeatures) player.hotbar.push(feature);
     for (let i = classDef.classFeatures.length; i < 10; i++) player.hotbar.push('');
+    player.rageUsesRemaining = classDef.rageUses ?? 0;
 
     this.state.players.set(client.sessionId, player);
     console.log(`[DungeonRoom] ${client.sessionId} joined as ${classDef.id} — HP ${maxHp} AC ${ac}`);
@@ -323,6 +327,8 @@ export class DungeonRoom extends Room {
       };
       const save        = resolveSave({ creature, ability: 'dex', dc: TRAP_SAVE_DC });
       let trapDamage = Math.max(1, save.success ? Math.floor(TRAP_DAMAGE / 2) : TRAP_DAMAGE);
+      // Rage: resistance to piercing damage (SRD).
+      if (player.conditions.includes('rage')) trapDamage = Math.max(1, Math.floor(trapDamage / 2));
       // Temp HP absorbs trap damage before regular HP (SRD rule).
       if (player.tempHp > 0) {
         const absorbed = Math.min(player.tempHp, trapDamage);
@@ -358,11 +364,17 @@ export class DungeonRoom extends Room {
           if (condition === 'bless')       player.blessRemainingMs = 0;
           if (condition === 'longstrider') player.longstriderRemainingMs = 0;
           if (condition === 'false_life')  { player.falseLifeRemainingMs = 0; player.tempHp = 0; }
+          if (condition === 'rage') {
+            player.rageRemainingMs = 0;
+            const cn = player.class[0].toUpperCase() + player.class.slice(1);
+            this.broadcast('combat_log', { message: `${cn}'s Rage ends.` });
+          }
         } else {
           this._conditionTimers.set(key, remaining);
           if (condition === 'bless')       player.blessRemainingMs = remaining;
           if (condition === 'longstrider') player.longstriderRemainingMs = remaining;
           if (condition === 'false_life')  player.falseLifeRemainingMs = remaining;
+          if (condition === 'rage')        player.rageRemainingMs = remaining;
         }
       }
     }
@@ -416,6 +428,18 @@ export class DungeonRoom extends Room {
     for (let i = 0; i < player.hotbar.length; i++) {
       if (player.hotbar[i] === consumableId) { player.hotbar[i] = ''; break; }
     }
+  }
+
+  _activateRage(player, sessionId) {
+    if (player.rageUsesRemaining <= 0 || player.rageRemainingMs > 0) return;
+    player.rageUsesRemaining -= 1;
+    player.rageRemainingMs = RAGE_DURATION_MS;
+    if (!player.conditions.includes('rage')) player.conditions.push('rage');
+    this._conditionTimers.set(`${sessionId}_rage`, RAGE_DURATION_MS);
+    const cn = player.class[0].toUpperCase() + player.class.slice(1);
+    this.broadcast('combat_log', {
+      message: `💢 ${cn} enters a Rage! (+${RAGE_DAMAGE_BONUS} dmg, resist physical, 30s)`,
+    });
   }
 
   /** Recompute player.ac from armor + offhand (shield gives +2, weapon does not). */

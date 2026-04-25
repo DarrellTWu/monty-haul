@@ -44,6 +44,7 @@ const WEAPON_DISPLAY = {
   shortsword: { label: 'Shortsword', detail: '1d6  piercing',    note: 'finesse, light' },
   dagger:     { label: 'Dagger',     detail: '1d4  piercing',    note: 'finesse · drag to offhand' },
   greataxe:   { label: 'Greataxe',   detail: '1d12 slashing',    note: 'two-handed' },
+  greatsword: { label: 'Greatsword', detail: '2d6  slashing',    note: 'two-handed' },
   handaxe:    { label: 'Handaxe',    detail: '1d6  slashing',    note: 'light, thrown' },
   mace:       { label: 'Mace',       detail: '1d6  bludgeoning', note: 'effective vs. skeletons' },
   unarmed:    { label: 'Unarmed',    detail: '1d4  bludgeoning', note: '' },
@@ -116,7 +117,7 @@ export class InventoryScene extends Phaser.Scene {
 
     this.add.text(lx, ly, 'CHARACTER', STYLE_SUBHEAD); ly += 20;
     this._nameText = this.add.text(lx, ly, 'Fighter', STYLE_HEADER); ly += 24;
-    this.add.text(lx, ly, 'Level 1  Human Fighter', STYLE_BODY); ly += 18;
+    this._classDescText = this.add.text(lx, ly, 'Level 1  Human Fighter', STYLE_BODY); ly += 18;
     this._hpText = this.add.text(lx, ly, 'HP  —', STYLE_BODY); ly += 16;
     this._acText = this.add.text(lx, ly, 'AC  —', STYLE_BODY); ly += 20;
 
@@ -136,28 +137,44 @@ export class InventoryScene extends Phaser.Scene {
     }
     ly += 6;
 
-    // Class features.
-    this.add.text(lx, ly, 'CLASS FEATURES', STYLE_SUBHEAD); ly += 15;
-    this.add.text(lx, ly, 'Fighting Style: Dueling', STYLE_BODY); ly += 13;
-    this.add.text(lx, ly, '+2 dmg (one-hand, no weapon offhand)', STYLE_NOTE); ly += 17;
+    // Class features — read player.class at scene open (set by server on join).
+    const _ir = getRoom();
+    const _ip = _ir?.state.players.get(_ir?.sessionId);
+    const playerClass = _ip?.class ?? 'fighter';
 
-    // Second Wind — draggable to hotbar.
-    this._swText = this.add.text(lx, ly, '⚡ Second Wind  [READY]', STYLE_ITEM);
-    this._swTextY = ly;
-    this._makeDraggable(this._swText, 'second_wind', lx, ly);
-    { let swDragging = false;
-      this._swText.on('pointerdown', () => { swDragging = false; });
-      this._swText.on('drag',        () => { swDragging = true; });
-      this._swText.on('pointerup',   () => {
-        if (!swDragging) {
-          this._selectedItemId = (this._selectedItemId === 'second_wind') ? null : 'second_wind';
-          this._updateSelection();
-        }
-        swDragging = false;
-      });
+    this.add.text(lx, ly, 'CLASS FEATURES', STYLE_SUBHEAD); ly += 15;
+
+    if (playerClass === 'barbarian') {
+      this._abilityKey  = 'rage';
+      this._abilityText = this.add.text(lx, ly, '💢 Rage  [2 uses]', STYLE_ITEM);
+      this._makeDraggable(this._abilityText, 'rage', lx, ly);
+      { let d = false;
+        this._abilityText.on('pointerdown', () => { d = false; });
+        this._abilityText.on('drag',        () => { d = true;  });
+        this._abilityText.on('pointerup',   () => {
+          if (!d) { this._selectedItemId = (this._selectedItemId === 'rage') ? null : 'rage'; this._updateSelection(); }
+          d = false;
+        });
+      }
+      ly += 13;
+      this.add.text(lx, ly, '+2 dmg, resist phys dmg (30s)  drag→hotbar', STYLE_NOTE); ly += 17;
+    } else {
+      this.add.text(lx, ly, 'Fighting Style: Dueling', STYLE_BODY); ly += 13;
+      this.add.text(lx, ly, '+2 dmg (one-hand, no weapon offhand)', STYLE_NOTE); ly += 17;
+      this._abilityKey  = 'second_wind';
+      this._abilityText = this.add.text(lx, ly, '⚡ Second Wind  [READY]', STYLE_ITEM);
+      this._makeDraggable(this._abilityText, 'second_wind', lx, ly);
+      { let d = false;
+        this._abilityText.on('pointerdown', () => { d = false; });
+        this._abilityText.on('drag',        () => { d = true;  });
+        this._abilityText.on('pointerup',   () => {
+          if (!d) { this._selectedItemId = (this._selectedItemId === 'second_wind') ? null : 'second_wind'; this._updateSelection(); }
+          d = false;
+        });
+      }
+      ly += 13;
+      this.add.text(lx, ly, 'Heal 1d10+1 HP (1/short rest)  drag→hotbar', STYLE_NOTE); ly += 17;
     }
-    ly += 13;
-    this.add.text(lx, ly, 'Heal 1d10+1 HP (1/short rest)  drag→hotbar', STYLE_NOTE); ly += 17;
 
     // Feat.
     this.add.text(lx, ly, 'FEAT: Alert  (variant human)', STYLE_FEAT); ly += 13;
@@ -380,13 +397,24 @@ export class InventoryScene extends Phaser.Scene {
       this._armorHint.setText('');
     }
 
-    // Second Wind availability.
-    if (this._swText) {
-      const avail  = player.secondWindAvailable;
-      const swSel  = this._selectedItemId === 'second_wind';
-      this._swText.setText(`⚡ Second Wind  [${avail ? 'READY' : 'USED'}]`)
-        .setColor(swSel ? '#88ddff' : (avail ? '#ffdd88' : '#665533'));
+    // Class ability availability.
+    if (this._abilityText) {
+      const sel = this._selectedItemId === this._abilityKey;
+      if (this._abilityKey === 'second_wind') {
+        const avail = player.secondWindAvailable;
+        this._abilityText.setText(`⚡ Second Wind  [${avail ? 'READY' : 'USED'}]`)
+          .setColor(sel ? '#88ddff' : (avail ? '#ffdd88' : '#665533'));
+      } else if (this._abilityKey === 'rage') {
+        const raging = player.rageRemainingMs > 0;
+        const uses   = player.rageUsesRemaining ?? 0;
+        const status = raging ? 'RAGING' : uses > 0 ? `${uses} uses` : 'SPENT';
+        this._abilityText.setText(`💢 Rage  [${status}]`)
+          .setColor(sel ? '#88ddff' : (raging || uses > 0) ? '#ff8844' : '#665533');
+      }
     }
+    const cn = player.class ? player.class[0].toUpperCase() + player.class.slice(1) : 'Fighter';
+    this._nameText.setText(cn);
+    if (this._classDescText) this._classDescText.setText(`Level ${player.level}  Human ${cn}`);
 
     // Bag — rebuild only when inventory changes.
     const snapshot = [...player.inventory].join(',');
@@ -410,6 +438,8 @@ export class InventoryScene extends Phaser.Scene {
       if (!slot) continue;
       if (binding === 'second_wind') {
         slot.itemLabel.setText('2nd Wind').setColor('#ffdd88');
+      } else if (binding === 'rage') {
+        slot.itemLabel.setText('Rage').setColor('#ff8844');
       } else if (binding && CONSUMABLE_DISPLAY[binding]) {
         slot.itemLabel.setText(CONSUMABLE_DISPLAY[binding].short).setColor('#ffdd88');
       } else {

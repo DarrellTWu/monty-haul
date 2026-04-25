@@ -27,7 +27,8 @@ export const BARBARIAN = {
 
   fightingStyle: 'dueling',
 
-  classFeatures: [], // Rage, Unarmored Defense, etc. — not yet implemented
+  classFeatures: ['rage'],
+  rageUses: 2, // activations per run; restored on long rest
 
   feat: 'alert',
 };

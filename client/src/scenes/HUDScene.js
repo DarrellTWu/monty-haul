@@ -4,7 +4,7 @@
 //        combat log (bottom-right).
 
 import { getRoom } from '../network/ColyseusClient.js';
-import { ATTACK_COOLDOWN_MS } from '../../../shared/data/constants.js';
+import { ATTACK_COOLDOWN_MS, RAGE_DURATION_MS } from '../../../shared/data/constants.js';
 import {
   BLESS_POTION, LONGSTRIDER_POTION, FALSE_LIFE_POTION,
 } from '../../../shared/data/items/consumables.js';
@@ -39,6 +39,12 @@ const CONDITION_META = {
     getRemaining: (p) => p.falseLifeRemainingMs   ?? 0,
     timerText:    (p) => `${p.tempHp ?? 0}hp`,
   },
+  rage: {
+    label: 'RAG', color: 0xff6622, dimColor: 0x331100, colorHex: '#ff6622',
+    durationMs:   RAGE_DURATION_MS,
+    getRemaining: (p) => p.rageRemainingMs         ?? 0,
+    timerText:    (p) => `${((p.rageRemainingMs ?? 0) / 1000).toFixed(0)}s`,
+  },
 };
 
 // Hotbar display — to the right of the attack ring.
@@ -52,6 +58,7 @@ const KEYS          = ['1','2','3','4','5','6','7','8','9','0'];
 // Short display labels for hotbar items.
 const HOTBAR_SHORT = {
   second_wind:        '2nd Wind',
+  rage:               'Rage',
   healing_potion:     'Heal Pot',
   bless_potion:       'Bless',
   longstrider_potion: 'Stride',
