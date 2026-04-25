@@ -112,6 +112,7 @@ Before any game logic task, read these files:
   - `hotbar` — ArraySchema[10] of ability/consumable ids or ''
   - `conditions` — ArraySchema of active condition id strings
   - `secondWindAvailable, blessRemainingMs, longstriderRemainingMs, falseLifeRemainingMs, tempHp`
+  - `rageRemainingMs, rageUsesRemaining` — Barbarian rage tracking (synced for HUD ring + inventory)
 - The specific file being modified
 - A structural reference file if creating something new
 
