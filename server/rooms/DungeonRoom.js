@@ -104,6 +104,11 @@ export class DungeonRoom extends Room {
       } else if (targetSlot === 'offhand') {
         // Offhand accepts one-handed weapons OR shields. Blocks two-handed.
         if (isWeapon && WEAPON_REGISTRY[id]?.properties?.includes('two-handed')) return;
+        // Equipping anything to offhand auto-unequips a two-handed weapon from main hand.
+        if (player.equippedWeaponId && WEAPON_REGISTRY[player.equippedWeaponId]?.properties?.includes('two-handed')) {
+          player.inventory.push(player.equippedWeaponId);
+          player.equippedWeaponId = '';
+        }
         if (player.offhandId) player.inventory.push(player.offhandId);
         player.inventory.splice(player.inventory.indexOf(id), 1);
         player.offhandId = id;

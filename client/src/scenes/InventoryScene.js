@@ -72,8 +72,6 @@ const ARMOR_SLOT_DISPLAY = {
   half_plate: 'Half Plate — AC 17  (medium, DEX capped +2)',
 };
 
-// Two-handed weapons cannot be used with any offhand item.
-const TWO_HANDED_WEAPONS = new Set(['greataxe']);
 
 // Text styles.
 const STYLE_HEADER   = { fontSize: '18px', color: '#ffffff',  fontFamily: 'monospace', fontStyle: 'bold' };
@@ -147,6 +145,17 @@ export class InventoryScene extends Phaser.Scene {
     this._swText = this.add.text(lx, ly, '⚡ Second Wind  [READY]', STYLE_ITEM);
     this._swTextY = ly;
     this._makeDraggable(this._swText, 'second_wind', lx, ly);
+    { let swDragging = false;
+      this._swText.on('pointerdown', () => { swDragging = false; });
+      this._swText.on('drag',        () => { swDragging = true; });
+      this._swText.on('pointerup',   () => {
+        if (!swDragging) {
+          this._selectedItemId = (this._selectedItemId === 'second_wind') ? null : 'second_wind';
+          this._updateSelection();
+        }
+        swDragging = false;
+      });
+    }
     ly += 13;
     this.add.text(lx, ly, 'Heal 1d10+1 HP (1/short rest)  drag→hotbar', STYLE_NOTE); ly += 17;
 
@@ -204,23 +213,29 @@ export class InventoryScene extends Phaser.Scene {
     this._offhandZone = this.add.zone(rx + 130, ry + 13, 260, 26)
       .setRectangleDropZone(260, 26)
       .setData({ zoneType: 'equip', slot: 'offhand' });
-    this.input.setDraggable(this._offhandZone);
+    this.input.setDraggable(this._offhandBtn);
     { let p = false; let dragging = false;
-      this._offhandZone.on('pointerdown', () => { p = true; });
-      this._offhandZone.on('pointerup',   () => { if (p && !dragging) this._onEquipSlotClick('offhand'); p = false; dragging = false; });
-      this._offhandZone.on('drag', (ptr, dragX, dragY) => {
+      this._offhandBtn.on('pointerdown', () => { p = true; dragging = false; });
+      this._offhandBtn.on('drag', (ptr, dragX, dragY) => {
         dragging = true; p = false;
         this._offhandBtn.setPosition(dragX, dragY).setDepth(10);
       });
-      this._offhandZone.on('dragend', () => {
-        const btn = this._offhandBtn;
-        btn.setPosition(btn.getData('originX'), btn.getData('originY')).setDepth(0);
+      this._offhandBtn.on('dragend', () => {
+        this._offhandBtn.setPosition(
+          this._offhandBtn.getData('originX'),
+          this._offhandBtn.getData('originY'),
+        ).setDepth(0);
         if (dragging) {
           dragging = false;
           const room = getRoom();
           const player = room?.state.players.get(room?.sessionId);
           if (player?.offhandId) sendUnequip('offhand');
         }
+      });
+      this._offhandBtn.on('pointerup', () => {
+        if (p && !dragging) this._onEquipSlotClick('offhand');
+        p = false;
+        dragging = false;
       });
     }
     this._offhandZone.on('dragenter', () => {
@@ -367,9 +382,10 @@ export class InventoryScene extends Phaser.Scene {
 
     // Second Wind availability.
     if (this._swText) {
-      const avail = player.secondWindAvailable;
+      const avail  = player.secondWindAvailable;
+      const swSel  = this._selectedItemId === 'second_wind';
       this._swText.setText(`⚡ Second Wind  [${avail ? 'READY' : 'USED'}]`)
-        .setColor(avail ? '#ffdd88' : '#665533');
+        .setColor(swSel ? '#88ddff' : (avail ? '#ffdd88' : '#665533'));
     }
 
     // Bag — rebuild only when inventory changes.
@@ -481,9 +497,7 @@ export class InventoryScene extends Phaser.Scene {
   }
 
   /** Returns true if equipping this item is currently blocked by an SRD rule. */
-  _isBlocked(itemId, player) {
-    if (itemId === 'shield') return TWO_HANDED_WEAPONS.has(player.equippedWeaponId);
-    if (TWO_HANDED_WEAPONS.has(itemId)) return !!player.offhandId;
+  _isBlocked(_itemId, _player) {
     return false;
   }
 
@@ -516,6 +530,18 @@ export class InventoryScene extends Phaser.Scene {
         highlight.clear().lineStyle(2, 0xaaaaff, 0.7).strokeRect(hx, hy, SLOT_W, SLOT_H);
       });
       zone.on('dragleave', () => highlight.clear());
+
+      { let p = false;
+        zone.on('pointerdown', () => { p = true; });
+        zone.on('pointerup', () => {
+          if (p && this._selectedItemId) {
+            sendAssignHotbar(this._selectedItemId, i);
+            this._selectedItemId = null;
+            this._updateSelection();
+          }
+          p = false;
+        });
+      }
 
       slots.push({ itemLabel, zone, highlight });
     }
