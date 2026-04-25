@@ -20,11 +20,12 @@
 - `index.js` — Colyseus server entry point
 
 **client/src/** (no `rendering/` or `ui/` subdirectories yet)
-- `scenes/HubScene.js` — entry point; class selection UI (Fighter / Barbarian); passes `{ class }` to DungeonScene
-- `scenes/DungeonScene.js` — main gameplay: renders server state, wires input; receives class via `init(data)`
+- `scenes/HubScene.js` — entry point; two-panel layout: left cycles sub-screens (Class, Stash), right is persistent Raider Config + Enter Dungeon; passes `{ class, items }` to DungeonScene; auto-opens Stash tab when `init({ view: 'stash' })`
+- `scenes/DungeonScene.js` — main gameplay: renders server state, wires input; receives class+items via `init(data)`; detects run complete/death, shows run summary overlay, calls `setRaiderPack` on exit
 - `scenes/HUDScene.js` — overlay: HP, condition rings, cooldown arc, hotbar, combat log
 - `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI
-- `network/ColyseusClient.js` — room join/leave, all sendX helpers; `joinDungeon(opts)` forwards opts to server
+- `network/ColyseusClient.js` — room join/leave, all sendX helpers; `joinDungeon(opts)` forwards opts (incl. class + items) to server
+- `store/stash.js` — localStorage-backed item store (stash + raider pack); seeded with all items on first load; designed for drop-in Supabase swap
 - `input/InputHandler.js` — WASD/attack/hotbar key bindings
 - `main.js` — Phaser config and scene registration; HubScene is first (auto-starts)
 

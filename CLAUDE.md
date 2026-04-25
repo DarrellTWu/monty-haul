@@ -86,12 +86,13 @@ Many files in docs/tech_spec.md are planned, not yet built. What actually exists
 - `persistence/`, `matchmaking/` — not yet built
 
 **Client** (no `rendering/` or `ui/` subdirectories)
-- `scenes/HubScene.js` — entry point (auto-starts); class selection UI; passes `{ class }` to DungeonScene
-- `scenes/DungeonScene.js` — gameplay rendering, input wiring; receives `{ class }` via init(data)
+- `scenes/HubScene.js` — entry point (auto-starts); two-panel layout: left cycles sub-screens (Class, Stash), right is persistent Raider Config + Enter Dungeon; passes `{ class, items }` to DungeonScene; auto-opens Stash tab when `init({ view: 'stash' })`
+- `scenes/DungeonScene.js` — gameplay rendering, input wiring; receives `{ class, items }` via init(data); detects run complete/death, shows run summary overlay, calls `setRaiderPack` on exit
 - `scenes/HUDScene.js` — conditions, cooldown rings, hotbar overlay
 - `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI
-- `network/ColyseusClient.js` — `joinDungeon(opts)` forwards opts (incl. class) to server
+- `network/ColyseusClient.js` — `joinDungeon(opts)` forwards opts (incl. class + items) to server
 - `input/InputHandler.js`
+- `store/stash.js` — localStorage-backed item store; two containers (stash + raider pack); `getStash`, `getRaiderPack`, `stashToRaider`, `raiderToStash`, `getRaiderPackFlat`, `setRaiderPack`; seeded with all items on first load; designed for drop-in Supabase swap
 
 **Shared**
 - `data/` — constants.js, weapons/melee.js, armor/armor.js, items/(consumables+shields), enemies/tier1.js, classes/fighter.js, classes/barbarian.js, classes/monk.js, classes/index.js (CLASS_REGISTRY)
