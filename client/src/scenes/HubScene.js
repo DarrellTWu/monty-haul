@@ -1,10 +1,14 @@
 // client/src/scenes/HubScene.js
-// Hub entry point. Top-level nav: Class Select | Stash.
-// Stash view reads/writes client/src/store/stash.js — click items to move between containers.
+// Hub layout: left panel cycles through sub-screens (Class, Stash, future additions);
+// right panel is a persistent Raider Config summary. Enter Dungeon lives on the right.
 
 import { getStash, getRaiderPack, stashToRaider, raiderToStash } from '../store/stash.js';
 
-// Display metadata for all known item ids (label + detail line).
+// Panel geometry
+const LP = { x: 30,  y: 70, w: 760, h: 600 }; // left panel
+const RP = { x: 810, y: 70, w: 440, h: 600 }; // right panel (raider config)
+
+// Item display metadata (label + one-line detail).
 const ITEM_META = {
   longsword:           { label: 'Longsword',        detail: '1d8  slashing'    },
   shortsword:          { label: 'Shortsword',       detail: '1d6  piercing'    },
@@ -22,7 +26,6 @@ const ITEM_META = {
   false_life_potion:   { label: 'False Life Pot',   detail: '1d4+4 tmp HP 2m'  },
 };
 
-// Canonical display order within the stash panel.
 const STASH_ORDER = [
   'longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword',
   'chain_mail','half_plate','shield',
@@ -35,6 +38,33 @@ const STASH_SECTIONS = [
   { label: 'Potions',        ids: new Set(['healing_potion','bless_potion','longstrider_potion','false_life_potion']) },
 ];
 
+// Class display metadata for the hub UI.
+const CLASS_DISPLAY = {
+  fighter: {
+    label: 'Fighter',
+    traits: [
+      'Longsword · Chain Mail',
+      'Second Wind — 1d10+level HP (1/rest)',
+      'Fighting Style: Dueling (+2 dmg)',
+    ],
+  },
+  monk: {
+    label: 'Monk',
+    traits: [
+      'Shortsword · Unarmored Defense (AC = 10+DEX+WIS)',
+      'Martial Arts — DEX attacks, d4 unarmed',
+      'Bonus unarmed strike after monk weapon attack',
+    ],
+  },
+  barbarian: {
+    label: 'Barbarian',
+    traits: [
+      'Greatsword · Chain Mail',
+      'Rage — +2 dmg, resist physical dmg (2 uses, 30s)',
+    ],
+  },
+};
+
 export class HubScene extends Phaser.Scene {
   constructor() {
     super({ key: 'HubScene' });
@@ -45,202 +75,271 @@ export class HubScene extends Phaser.Scene {
   }
 
   create() {
-    this._selected  = null;
-    this._cards     = {};
-    this._panelObjs = [];
+    this._selectedClass = null;
+    this._leftView      = this._initData.view === 'stash' ? 'stash' : 'class';
+    this._leftObjs      = [];
+    this._rightObjs     = [];
 
-    this.add.text(640, 55, "MONTY HAUL'S DUNGEON CRAWL", {
+    this.add.text(640, 38, "MONTY HAUL'S DUNGEON CRAWL", {
       fontSize: '26px', color: '#ffdd88', fontFamily: 'monospace',
     }).setOrigin(0.5);
 
-    this._navClass = this._makeNavBtn(450, 108, 'Class Select', () => this._switchView('class'));
-    this._navStash = this._makeNavBtn(790, 108, 'Stash',        () => this._switchView('stash'));
+    this._drawShells();
+    this._buildSubNav();
+    this._showLeftContent();
+    this._buildRaiderPanel();
+  }
 
-    if (this._initData.view === 'stash') {
-      this._view = 'stash';
-      this._updateNav();
-      this._showStash();
+  // ── Permanent shell ───────────────────────────────────────────────────────────
+
+  _drawShells() {
+    const g = this.add.graphics();
+    g.fillStyle(0x12121e, 0.97);
+    g.fillRect(LP.x, LP.y, LP.w, LP.h);
+    g.fillRect(RP.x, RP.y, RP.w, RP.h);
+    g.lineStyle(1, 0x334466);
+    g.strokeRect(LP.x, LP.y, LP.w, LP.h);
+    g.strokeRect(RP.x, RP.y, RP.w, RP.h);
+  }
+
+  // ── Sub-nav (left panel tabs — permanent) ─────────────────────────────────────
+
+  _buildSubNav() {
+    const tabs = [{ id: 'class', label: 'Class' }, { id: 'stash', label: 'Stash' }];
+    this._subNavBtns = {};
+    let tx = LP.x + 16;
+    const ty = LP.y + 14;
+    for (const { id, label } of tabs) {
+      const btn = this.add.text(tx, ty, `[ ${label} ]`, {
+        fontSize: '14px', color: '#8888aa', fontFamily: 'monospace',
+      }).setInteractive();
+      btn.on('pointerdown', () => this._switchLeftView(id));
+      btn.on('pointerover',  () => { if (this._leftView !== id) btn.setColor('#aabbdd'); });
+      btn.on('pointerout',   () => { if (this._leftView !== id) btn.setColor('#8888aa'); });
+      this._subNavBtns[id] = btn;
+      tx += btn.width + 20;
+    }
+    this.add.graphics()
+      .lineStyle(1, 0x223355)
+      .lineBetween(LP.x + 8, LP.y + 40, LP.x + LP.w - 8, LP.y + 40);
+    this._updateSubNav();
+  }
+
+  _updateSubNav() {
+    for (const [id, btn] of Object.entries(this._subNavBtns)) {
+      btn.setColor(id === this._leftView ? '#ffcc44' : '#8888aa');
+    }
+  }
+
+  _switchLeftView(view) {
+    if (this._leftView === view) return;
+    this._leftView = view;
+    this._updateSubNav();
+    for (const obj of this._leftObjs) obj.destroy();
+    this._leftObjs = [];
+    this._showLeftContent();
+  }
+
+  // ── Left panel content ────────────────────────────────────────────────────────
+
+  _showLeftContent() {
+    if (this._leftView === 'class') this._showClassScreen();
+    else                            this._showStashScreen();
+  }
+
+  _showClassScreen() {
+    const x = LP.x + 20;
+    let y = LP.y + 52;
+
+    this._l(this.add.text(x, y, 'SELECT CLASS', {
+      fontSize: '12px', color: '#aaaacc', fontFamily: 'monospace',
+    })); y += 24;
+
+    for (const [id, def] of Object.entries(CLASS_DISPLAY)) {
+      const selected = this._selectedClass === id;
+      const row = this._l(this.add.text(x + 8, y,
+        `${selected ? '► ' : '  '}${def.label}`,
+        { fontSize: '15px', color: selected ? '#ffcc44' : '#8899bb', fontFamily: 'monospace' },
+      ).setInteractive());
+      row.on('pointerover',  () => { if (this._selectedClass !== id) row.setColor('#ccddff'); });
+      row.on('pointerout',   () => { if (this._selectedClass !== id) row.setColor('#8899bb'); });
+      row.on('pointerdown',  () => this._selectClass(id));
+      y += 24;
+    }
+
+    y += 8;
+    this._l(this.add.graphics().lineStyle(1, 0x223355).lineBetween(x, y, LP.x + LP.w - 20, y));
+    y += 14;
+
+    if (this._selectedClass) {
+      const def = CLASS_DISPLAY[this._selectedClass];
+      this._l(this.add.text(x, y, def.label, {
+        fontSize: '14px', color: '#ccddff', fontFamily: 'monospace', fontStyle: 'bold',
+      })); y += 22;
+      for (const trait of def.traits) {
+        this._l(this.add.text(x + 8, y, `· ${trait}`, {
+          fontSize: '12px', color: '#8899bb', fontFamily: 'monospace',
+        })); y += 17;
+      }
     } else {
-      this._view = 'class';
-      this._updateNav();
-      this._showClassSelect();
+      this._l(this.add.text(x + 8, y, 'Select a class to see details.', {
+        fontSize: '12px', color: '#334455', fontFamily: 'monospace',
+      }));
     }
   }
 
-  // ── Navigation ────────────────────────────────────────────────────────────────
-
-  _makeNavBtn(x, y, label, cb) {
-    const btn = this.add.text(x, y, `[ ${label} ]`, {
-      fontSize: '16px', color: '#8888aa', fontFamily: 'monospace',
-    }).setOrigin(0.5).setInteractive();
-    btn.on('pointerdown', cb);
-    btn.on('pointerover',  () => { if (!btn.getData('active')) btn.setColor('#aabbdd'); });
-    btn.on('pointerout',   () => { if (!btn.getData('active')) btn.setColor('#8888aa'); });
-    return btn;
-  }
-
-  _updateNav() {
-    const isClass = this._view === 'class';
-    this._navClass.setColor(isClass  ? '#ffcc44' : '#8888aa').setData('active', isClass);
-    this._navStash.setColor(!isClass ? '#ffcc44' : '#8888aa').setData('active', !isClass);
-  }
-
-  _switchView(view) {
-    if (this._view === view) return;
-    for (const obj of this._panelObjs) obj.destroy();
-    this._panelObjs = [];
-    this._view      = view;
-    this._updateNav();
-    if (view === 'class') this._showClassSelect();
-    else                  this._showStash();
-  }
-
-  /** Destroy and recreate the current panel — used after stash mutations. */
-  _rebuildPanel() {
-    for (const obj of this._panelObjs) obj.destroy();
-    this._panelObjs = [];
-    if (this._view === 'class') this._showClassSelect();
-    else                        this._showStash();
-  }
-
-  // ── Class Select view ─────────────────────────────────────────────────────────
-
-  _showClassSelect() {
-    this._cards    = {};
-    this._selected = null;
-
-    this._t(this.add.text(640, 152, 'Choose Your Class', {
-      fontSize: '16px', color: '#8888aa', fontFamily: 'monospace',
-    }).setOrigin(0.5));
-
-    this._makeClassCard(330, 345, 'fighter',   'Fighter',   ['Longsword', 'Chain Mail', 'Second Wind']);
-    this._makeClassCard(640, 345, 'monk',      'Monk',      ['Shortsword', 'Unarmored Defense', 'Martial Arts']);
-    this._makeClassCard(950, 345, 'barbarian', 'Barbarian', ['Greatsword', 'Chain Mail', 'Rage (2 uses)']);
-
-    this._enterBtn = this._t(this.add.text(640, 608, '[ Enter Dungeon ]', {
-      fontSize: '20px', color: '#444455', fontFamily: 'monospace',
-    }).setOrigin(0.5).setInteractive());
-
-    this._enterBtn.on('pointerdown', () => {
-      if (this._selected) this.scene.start('DungeonScene', { class: this._selected });
-    });
-  }
-
-  _makeClassCard(x, y, classId, label, traits) {
-    const card = this._t(
-      this.add.rectangle(x, y, 280, 260, 0x111122).setStrokeStyle(2, 0x334466).setInteractive()
-    );
-    this._t(this.add.text(x, y - 90, label, { fontSize: '20px', color: '#ccddff', fontFamily: 'monospace' }).setOrigin(0.5));
-    this._t(this.add.graphics().lineStyle(1, 0x334466).lineBetween(x - 100, y - 65, x + 100, y - 65));
-    traits.forEach((trait, i) => {
-      this._t(this.add.text(x, y - 38 + i * 30, `· ${trait}`, { fontSize: '14px', color: '#8899bb', fontFamily: 'monospace' }).setOrigin(0.5));
-    });
-    card.on('pointerdown', () => this._select(classId));
-    card.on('pointerover',  () => { if (this._selected !== classId) card.setStrokeStyle(2, 0x5566aa); });
-    card.on('pointerout',   () => { if (this._selected !== classId) card.setStrokeStyle(2, 0x334466); });
-    this._cards[classId] = card;
-  }
-
-  _select(classId) {
-    this._selected = classId;
-    for (const [id, card] of Object.entries(this._cards)) {
-      card.setStrokeStyle(2, id === classId ? 0xffcc44 : 0x334466);
-    }
-    this._enterBtn.setColor('#ffcc44');
-  }
-
-  // ── Stash view ────────────────────────────────────────────────────────────────
-
-  _showStash() {
-    const PX = 100, PY = 140, PW = 1080, PH = 500;
-    const MID = PX + Math.floor(PW / 2);  // x=640
-
-    const bg = this._t(this.add.graphics());
-    bg.fillStyle(0x12121e, 0.97);
-    bg.fillRect(PX, PY, PW, PH);
-    bg.lineStyle(1, 0x334466);
-    bg.strokeRect(PX, PY, PW, PH);
-    bg.lineStyle(1, 0x223355);
-    bg.lineBetween(MID, PY + 12, MID, PY + PH - 12);
-
-    // ── Left: stash ───────────────────────────────────────────────────────────
+  _showStashScreen() {
     const stash = getStash();
-    let lx = PX + 20, ly = PY + 16;
+    const x = LP.x + 20;
+    let y = LP.y + 52;
 
-    this._t(this.add.text(lx, ly, 'STASH', { fontSize: '13px', color: '#aaaacc', fontFamily: 'monospace' }));
-    this._t(this.add.text(MID - 20, ly, 'click to send to pack  ›', {
+    this._l(this.add.text(x, y, 'STASH', {
+      fontSize: '12px', color: '#aaaacc', fontFamily: 'monospace',
+    }));
+    this._l(this.add.text(LP.x + LP.w - 20, y, 'click item to add to pack  ›', {
       fontSize: '10px', color: '#445566', fontFamily: 'monospace',
     }).setOrigin(1, 0));
-    ly += 22;
+    y += 22;
 
-    let stashHasItems = false;
+    let hasItems = false;
     for (const section of STASH_SECTIONS) {
       const items = stash
         .filter(e => section.ids.has(e.id))
         .sort((a, b) => STASH_ORDER.indexOf(a.id) - STASH_ORDER.indexOf(b.id));
-      if (items.length === 0) continue;
+      if (!items.length) continue;
 
-      stashHasItems = true;
-      this._t(this.add.text(lx, ly, section.label, { fontSize: '11px', color: '#556677', fontFamily: 'monospace' })); ly += 14;
+      hasItems = true;
+      this._l(this.add.text(x, y, section.label, {
+        fontSize: '11px', color: '#556677', fontFamily: 'monospace',
+      })); y += 14;
 
       for (const { id, qty } of items) {
-        const meta   = ITEM_META[id] ?? { label: id, detail: '' };
-        const qtyTag = qty > 1 ? `  ×${qty}` : '';
-        const row    = this._t(this.add.text(lx + 8, ly,
-          `${meta.label.padEnd(18)} ${meta.detail}${qtyTag}`,
+        const meta = ITEM_META[id] ?? { label: id, detail: '' };
+        const row  = this._l(this.add.text(x + 8, y,
+          `${meta.label.padEnd(18)} ${meta.detail}${qty > 1 ? `  ×${qty}` : ''}`,
           { fontSize: '12px', color: '#ffdd88', fontFamily: 'monospace' },
         ).setInteractive());
         row.on('pointerover',  () => row.setColor('#ffffff'));
         row.on('pointerout',   () => row.setColor('#ffdd88'));
-        row.on('pointerdown',  () => { stashToRaider(id); this._rebuildPanel(); });
-        ly += 16;
+        row.on('pointerdown',  () => { stashToRaider(id); this._onPackChanged(); });
+        y += 16;
       }
-      ly += 8;
+      y += 8;
     }
 
-    if (!stashHasItems) {
-      this._t(this.add.text(lx + 8, ly, '(empty)', { fontSize: '12px', color: '#334455', fontFamily: 'monospace' }));
+    if (!hasItems) {
+      this._l(this.add.text(x + 8, y, '(empty)', {
+        fontSize: '12px', color: '#334455', fontFamily: 'monospace',
+      }));
     }
+  }
 
-    // ── Right: raider's pack ──────────────────────────────────────────────────
-    const pack = getRaiderPack();
-    let rx = MID + 20, ry = PY + 16;
+  _selectClass(classId) {
+    this._selectedClass = classId;
+    for (const obj of this._leftObjs) obj.destroy();
+    this._leftObjs = [];
+    this._showClassScreen();
+    this._buildRaiderPanel();
+  }
 
-    this._t(this.add.text(rx, ry, "RAIDER'S PACK", { fontSize: '13px', color: '#aaaacc', fontFamily: 'monospace' }));
-    this._t(this.add.text(PX + PW - 20, ry, '‹ click to return to stash', {
+  // ── Right panel: Raider Config (rebuilt on any raider state change) ───────────
+
+  _buildRaiderPanel() {
+    for (const obj of this._rightObjs) obj.destroy();
+    this._rightObjs = [];
+
+    const x = RP.x + 20;
+    let y = RP.y + 16;
+
+    this._r(this.add.text(x, y, 'RAIDER CONFIG', {
+      fontSize: '13px', color: '#aaaacc', fontFamily: 'monospace',
+    })); y += 26;
+
+    // ── Class ──────────────────────────────────────────────────────────────────
+    this._r(this.add.text(x, y, 'CLASS', {
+      fontSize: '11px', color: '#556677', fontFamily: 'monospace',
+    })); y += 15;
+
+    if (this._selectedClass) {
+      const def = CLASS_DISPLAY[this._selectedClass];
+      this._r(this.add.text(x + 8, y, def.label, {
+        fontSize: '14px', color: '#ffcc44', fontFamily: 'monospace',
+      })); y += 20;
+      for (const trait of def.traits) {
+        this._r(this.add.text(x + 8, y, `· ${trait}`, {
+          fontSize: '11px', color: '#778899', fontFamily: 'monospace',
+        })); y += 14;
+      }
+    } else {
+      this._r(this.add.text(x + 8, y, '(none — select on Class tab)', {
+        fontSize: '11px', color: '#445566', fontFamily: 'monospace',
+      })); y += 16;
+    }
+    y += 10;
+
+    // ── Divider ────────────────────────────────────────────────────────────────
+    this._r(this.add.graphics()
+      .lineStyle(1, 0x223355)
+      .lineBetween(RP.x + 8, y, RP.x + RP.w - 8, y));
+    y += 12;
+
+    // ── Pack ───────────────────────────────────────────────────────────────────
+    this._r(this.add.text(x, y, 'PACK', {
+      fontSize: '11px', color: '#556677', fontFamily: 'monospace',
+    }));
+    this._r(this.add.text(RP.x + RP.w - 20, y, '‹ click to return to stash', {
       fontSize: '10px', color: '#445566', fontFamily: 'monospace',
     }).setOrigin(1, 0));
-    ry += 22;
+    y += 15;
 
+    const pack = getRaiderPack();
     if (pack.length === 0) {
-      this._t(this.add.text(rx, ry, '(empty)', { fontSize: '12px', color: '#445566', fontFamily: 'monospace' })); ry += 18;
-      this._t(this.add.text(rx, ry,
-        'Raider enters with default class starter gear.',
-        { fontSize: '11px', color: '#334455', fontFamily: 'monospace' },
-      ));
+      this._r(this.add.text(x + 8, y, '(empty — default class gear on entry)', {
+        fontSize: '11px', color: '#334455', fontFamily: 'monospace',
+      }));
     } else {
       const sorted = [...pack].sort((a, b) => {
-        const ai = STASH_ORDER.indexOf(a.id);
-        const bi = STASH_ORDER.indexOf(b.id);
+        const ai = STASH_ORDER.indexOf(a.id), bi = STASH_ORDER.indexOf(b.id);
         return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
       });
       for (const { id, qty } of sorted) {
-        const meta   = ITEM_META[id] ?? { label: id, detail: '' };
-        const qtyTag = qty > 1 ? `  ×${qty}` : '';
-        const row    = this._t(this.add.text(rx, ry,
-          `${meta.label.padEnd(18)} ${meta.detail}${qtyTag}`,
+        const meta = ITEM_META[id] ?? { label: id, detail: '' };
+        const row  = this._r(this.add.text(x + 8, y,
+          `${meta.label.padEnd(16)} ${meta.detail}${qty > 1 ? `  ×${qty}` : ''}`,
           { fontSize: '12px', color: '#88ccff', fontFamily: 'monospace' },
         ).setInteractive());
         row.on('pointerover',  () => row.setColor('#ffffff'));
         row.on('pointerout',   () => row.setColor('#88ccff'));
-        row.on('pointerdown',  () => { raiderToStash(id); this._rebuildPanel(); });
-        ry += 16;
+        row.on('pointerdown',  () => { raiderToStash(id); this._onPackChanged(); });
+        y += 16;
       }
     }
+
+    // ── Enter Dungeon ──────────────────────────────────────────────────────────
+    const active = !!this._selectedClass;
+    const btnY   = RP.y + RP.h - 36;
+    const enterBtn = this._r(this.add.text(RP.x + RP.w / 2, btnY, '[ Enter Dungeon ]', {
+      fontSize: '18px', color: active ? '#ffcc44' : '#334455', fontFamily: 'monospace',
+    }).setOrigin(0.5).setInteractive());
+    enterBtn.on('pointerover',  () => { if (active) enterBtn.setColor('#ffffff'); });
+    enterBtn.on('pointerout',   () => { enterBtn.setColor(active ? '#ffcc44' : '#334455'); });
+    enterBtn.on('pointerdown',  () => {
+      if (active) this.scene.start('DungeonScene', { class: this._selectedClass });
+    });
   }
 
-  // ── Utility ───────────────────────────────────────────────────────────────────
+  /** Called when stash/pack changes: rebuilds stash view (if active) + raider panel. */
+  _onPackChanged() {
+    if (this._leftView === 'stash') {
+      for (const obj of this._leftObjs) obj.destroy();
+      this._leftObjs = [];
+      this._showStashScreen();
+    }
+    this._buildRaiderPanel();
+  }
 
-  /** Track a Phaser object so it is destroyed on panel switch or rebuild. */
-  _t(obj) { this._panelObjs.push(obj); return obj; }
+  // ── Utilities ─────────────────────────────────────────────────────────────────
+
+  _l(obj) { this._leftObjs.push(obj);  return obj; }
+  _r(obj) { this._rightObjs.push(obj); return obj; }
 }
