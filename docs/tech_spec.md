@@ -20,7 +20,7 @@
 - `index.js` — Colyseus server entry point
 
 **client/src/** (no `rendering/` or `ui/` subdirectories yet)
-- `scenes/HubScene.js` — entry point (stub: passes `{ class: 'fighter' }` straight to DungeonScene)
+- `scenes/HubScene.js` — entry point; class selection UI (Fighter / Barbarian); passes `{ class }` to DungeonScene
 - `scenes/DungeonScene.js` — main gameplay: renders server state, wires input; receives class via `init(data)`
 - `scenes/HUDScene.js` — overlay: HP, condition rings, cooldown arc, hotbar, combat log
 - `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI
@@ -32,7 +32,7 @@
 - `data/constants.js`, `data/weapons/melee.js`, `data/armor/armor.js`
 - `data/items/consumables.js`, `data/items/shields.js`
 - `data/enemies/tier1.js` (goblin, dog, skeleton)
-- `data/classes/fighter.js`, `data/classes/index.js` — CLASS_REGISTRY pattern; add new classes here
+- `data/classes/fighter.js`, `data/classes/barbarian.js`, `data/classes/index.js` — CLASS_REGISTRY pattern; add new classes here
 - `logic/combat.js` — full attack resolution (pure functions)
 - `tests/combat.test.js`
 - `types/player.js`, `types/enemy.js`, `types/weapon.js`

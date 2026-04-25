@@ -86,7 +86,7 @@ Many files in docs/tech_spec.md are planned, not yet built. What actually exists
 - `persistence/`, `matchmaking/` — not yet built
 
 **Client** (no `rendering/` or `ui/` subdirectories)
-- `scenes/HubScene.js` — entry point (auto-starts); stub transitions directly to DungeonScene
+- `scenes/HubScene.js` — entry point (auto-starts); class selection UI; passes `{ class }` to DungeonScene
 - `scenes/DungeonScene.js` — gameplay rendering, input wiring; receives `{ class }` via init(data)
 - `scenes/HUDScene.js` — conditions, cooldown rings, hotbar overlay
 - `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI
@@ -94,7 +94,7 @@ Many files in docs/tech_spec.md are planned, not yet built. What actually exists
 - `input/InputHandler.js`
 
 **Shared**
-- `data/` — constants.js, weapons/melee.js, armor/armor.js, items/(consumables+shields), enemies/tier1.js, classes/fighter.js, classes/index.js (CLASS_REGISTRY)
+- `data/` — constants.js, weapons/melee.js, armor/armor.js, items/(consumables+shields), enemies/tier1.js, classes/fighter.js, classes/barbarian.js, classes/index.js (CLASS_REGISTRY)
 - `logic/combat.js` — full attack resolution
 - `tests/combat.test.js`
 - `types/` — player.js, enemy.js, weapon.js

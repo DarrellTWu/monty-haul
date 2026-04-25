@@ -12,7 +12,7 @@ import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.j
 import { GOBLIN, DOG, SKELETON }     from '../../shared/data/enemies/tier1.js';
 import { getModifier, resolveSave, rollDice } from '../../shared/logic/combat.js';
 import { ARMOR_REGISTRY, computeAC } from '../../shared/data/armor/armor.js';
-import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, DAGGER, MACE } from '../../shared/data/weapons/melee.js';
+import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, GREATSWORD, DAGGER, MACE } from '../../shared/data/weapons/melee.js';
 import { SHIELD_REGISTRY }           from '../../shared/data/items/shields.js';
 import { CONSUMABLE_REGISTRY }       from '../../shared/data/items/consumables.js';
 import {
@@ -26,7 +26,7 @@ import { playerAttack, enemyAttack, applySecondWind } from '../systems/CombatSys
 
 const WEAPON_REGISTRY = {
   longsword: LONGSWORD, shortsword: SHORTSWORD,
-  handaxe: HANDAXE, greataxe: GREATAXE, dagger: DAGGER, mace: MACE,
+  handaxe: HANDAXE, greataxe: GREATAXE, greatsword: GREATSWORD, dagger: DAGGER, mace: MACE,
 };
 
 const ROOM_WIDTH  = 1600;
