@@ -1,32 +1,38 @@
 // client/src/scenes/HubScene.js
 // Hub entry point. Top-level nav: Class Select | Stash.
-// Class Select → choose class → enter dungeon.
-// Stash        → view stored items and raider's pack (equip-raider coming next pass).
+// Stash view reads/writes client/src/store/stash.js — click items to move between containers.
 
-const STASH_ITEMS = [
-  // Weapons
-  { id: 'longsword',           label: 'Longsword',        detail: '1d8  slashing',    qty: 1 },
-  { id: 'shortsword',          label: 'Shortsword',       detail: '1d6  piercing',    qty: 1 },
-  { id: 'dagger',              label: 'Dagger',           detail: '1d4  piercing',    qty: 1 },
-  { id: 'handaxe',             label: 'Handaxe',          detail: '1d6  slashing',    qty: 1 },
-  { id: 'mace',                label: 'Mace',             detail: '1d6  bludgeoning', qty: 1 },
-  { id: 'greataxe',            label: 'Greataxe',         detail: '1d12 slashing',    qty: 1 },
-  { id: 'greatsword',          label: 'Greatsword',       detail: '2d6  slashing',    qty: 1 },
-  // Armor & shield
-  { id: 'chain_mail',          label: 'Chain Mail',       detail: 'AC 16  heavy',     qty: 1 },
-  { id: 'half_plate',          label: 'Half Plate',       detail: 'AC 15+DEX  med',   qty: 1 },
-  { id: 'shield',              label: 'Shield',           detail: '+2 AC',            qty: 1 },
-  // Potions
-  { id: 'healing_potion',      label: 'Healing Potion',   detail: '2d4+2 HP',         qty: 2 },
-  { id: 'bless_potion',        label: 'Bless Potion',     detail: '+1d4 atk 60s',     qty: 2 },
-  { id: 'longstrider_potion',  label: 'Longstrider Pot',  detail: '+10ft spd 2m',     qty: 2 },
-  { id: 'false_life_potion',   label: 'False Life Pot',   detail: '1d4+4 tmp HP 2m',  qty: 2 },
+import { getStash, getRaiderPack, stashToRaider, raiderToStash } from '../store/stash.js';
+
+// Display metadata for all known item ids (label + detail line).
+const ITEM_META = {
+  longsword:           { label: 'Longsword',        detail: '1d8  slashing'    },
+  shortsword:          { label: 'Shortsword',       detail: '1d6  piercing'    },
+  dagger:              { label: 'Dagger',           detail: '1d4  piercing'    },
+  handaxe:             { label: 'Handaxe',          detail: '1d6  slashing'    },
+  mace:                { label: 'Mace',             detail: '1d6  bludgeoning' },
+  greataxe:            { label: 'Greataxe',         detail: '1d12 slashing'    },
+  greatsword:          { label: 'Greatsword',       detail: '2d6  slashing'    },
+  chain_mail:          { label: 'Chain Mail',       detail: 'AC 16  heavy'     },
+  half_plate:          { label: 'Half Plate',       detail: 'AC 15+DEX  med'   },
+  shield:              { label: 'Shield',           detail: '+2 AC'            },
+  healing_potion:      { label: 'Healing Potion',   detail: '2d4+2 HP'         },
+  bless_potion:        { label: 'Bless Potion',     detail: '+1d4 atk 60s'     },
+  longstrider_potion:  { label: 'Longstrider Pot',  detail: '+10ft spd 2m'     },
+  false_life_potion:   { label: 'False Life Pot',   detail: '1d4+4 tmp HP 2m'  },
+};
+
+// Canonical display order within the stash panel.
+const STASH_ORDER = [
+  'longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword',
+  'chain_mail','half_plate','shield',
+  'healing_potion','bless_potion','longstrider_potion','false_life_potion',
 ];
 
 const STASH_SECTIONS = [
-  { label: 'Weapons',       start: 0,  end: 7  },
-  { label: 'Armor & Shield', start: 7,  end: 10 },
-  { label: 'Potions',       start: 10, end: 14 },
+  { label: 'Weapons',        ids: new Set(['longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword']) },
+  { label: 'Armor & Shield', ids: new Set(['chain_mail','half_plate','shield']) },
+  { label: 'Potions',        ids: new Set(['healing_potion','bless_potion','longstrider_potion','false_life_potion']) },
 ];
 
 export class HubScene extends Phaser.Scene {
@@ -34,10 +40,13 @@ export class HubScene extends Phaser.Scene {
     super({ key: 'HubScene' });
   }
 
+  init(data) {
+    this._initData = data ?? {};
+  }
+
   create() {
     this._selected  = null;
     this._cards     = {};
-    this._view      = 'class';
     this._panelObjs = [];
 
     this.add.text(640, 55, "MONTY HAUL'S DUNGEON CRAWL", {
@@ -46,9 +55,16 @@ export class HubScene extends Phaser.Scene {
 
     this._navClass = this._makeNavBtn(450, 108, 'Class Select', () => this._switchView('class'));
     this._navStash = this._makeNavBtn(790, 108, 'Stash',        () => this._switchView('stash'));
-    this._updateNav();
 
-    this._showClassSelect();
+    if (this._initData.view === 'stash') {
+      this._view = 'stash';
+      this._updateNav();
+      this._showStash();
+    } else {
+      this._view = 'class';
+      this._updateNav();
+      this._showClassSelect();
+    }
   }
 
   // ── Navigation ────────────────────────────────────────────────────────────────
@@ -77,6 +93,14 @@ export class HubScene extends Phaser.Scene {
     this._updateNav();
     if (view === 'class') this._showClassSelect();
     else                  this._showStash();
+  }
+
+  /** Destroy and recreate the current panel — used after stash mutations. */
+  _rebuildPanel() {
+    for (const obj of this._panelObjs) obj.destroy();
+    this._panelObjs = [];
+    if (this._view === 'class') this._showClassSelect();
+    else                        this._showStash();
   }
 
   // ── Class Select view ─────────────────────────────────────────────────────────
@@ -129,7 +153,7 @@ export class HubScene extends Phaser.Scene {
 
   _showStash() {
     const PX = 100, PY = 140, PW = 1080, PH = 500;
-    const MID = PX + Math.floor(PW / 2);  // 640
+    const MID = PX + Math.floor(PW / 2);  // x=640
 
     const bg = this._t(this.add.graphics());
     bg.fillStyle(0x12121e, 0.97);
@@ -139,39 +163,84 @@ export class HubScene extends Phaser.Scene {
     bg.lineStyle(1, 0x223355);
     bg.lineBetween(MID, PY + 12, MID, PY + PH - 12);
 
-    // Left column — stash
+    // ── Left: stash ───────────────────────────────────────────────────────────
+    const stash = getStash();
     let lx = PX + 20, ly = PY + 16;
-    this._t(this.add.text(lx, ly, 'STASH', { fontSize: '13px', color: '#aaaacc', fontFamily: 'monospace' })); ly += 22;
 
-    for (const { label, start, end } of STASH_SECTIONS) {
-      this._t(this.add.text(lx, ly, label, { fontSize: '11px', color: '#556677', fontFamily: 'monospace' })); ly += 14;
-      for (let i = start; i < end; i++) {
-        const { label: name, detail, qty } = STASH_ITEMS[i];
+    this._t(this.add.text(lx, ly, 'STASH', { fontSize: '13px', color: '#aaaacc', fontFamily: 'monospace' }));
+    this._t(this.add.text(MID - 20, ly, 'click to send to pack  ›', {
+      fontSize: '10px', color: '#445566', fontFamily: 'monospace',
+    }).setOrigin(1, 0));
+    ly += 22;
+
+    let stashHasItems = false;
+    for (const section of STASH_SECTIONS) {
+      const items = stash
+        .filter(e => section.ids.has(e.id))
+        .sort((a, b) => STASH_ORDER.indexOf(a.id) - STASH_ORDER.indexOf(b.id));
+      if (items.length === 0) continue;
+
+      stashHasItems = true;
+      this._t(this.add.text(lx, ly, section.label, { fontSize: '11px', color: '#556677', fontFamily: 'monospace' })); ly += 14;
+
+      for (const { id, qty } of items) {
+        const meta   = ITEM_META[id] ?? { label: id, detail: '' };
         const qtyTag = qty > 1 ? `  ×${qty}` : '';
-        this._t(this.add.text(lx + 8, ly,
-          `${name.padEnd(18)} ${detail}${qtyTag}`,
+        const row    = this._t(this.add.text(lx + 8, ly,
+          `${meta.label.padEnd(18)} ${meta.detail}${qtyTag}`,
           { fontSize: '12px', color: '#ffdd88', fontFamily: 'monospace' },
-        )); ly += 16;
+        ).setInteractive());
+        row.on('pointerover',  () => row.setColor('#ffffff'));
+        row.on('pointerout',   () => row.setColor('#ffdd88'));
+        row.on('pointerdown',  () => { stashToRaider(id); this._rebuildPanel(); });
+        ly += 16;
       }
       ly += 8;
     }
 
-    // Right column — raider's pack
+    if (!stashHasItems) {
+      this._t(this.add.text(lx + 8, ly, '(empty)', { fontSize: '12px', color: '#334455', fontFamily: 'monospace' }));
+    }
+
+    // ── Right: raider's pack ──────────────────────────────────────────────────
+    const pack = getRaiderPack();
     let rx = MID + 20, ry = PY + 16;
-    this._t(this.add.text(rx, ry, "RAIDER'S PACK", { fontSize: '13px', color: '#aaaacc', fontFamily: 'monospace' })); ry += 22;
-    this._t(this.add.text(rx, ry, '(empty)', { fontSize: '12px', color: '#445566', fontFamily: 'monospace' })); ry += 20;
-    this._t(this.add.text(rx, ry,
-      'Raider enters with default class starter gear.',
-      { fontSize: '11px', color: '#445566', fontFamily: 'monospace' },
-    )); ry += 18;
-    this._t(this.add.text(rx, ry,
-      'Equip raider — coming next pass',
-      { fontSize: '10px', color: '#334455', fontFamily: 'monospace', fontStyle: 'italic' },
-    ));
+
+    this._t(this.add.text(rx, ry, "RAIDER'S PACK", { fontSize: '13px', color: '#aaaacc', fontFamily: 'monospace' }));
+    this._t(this.add.text(PX + PW - 20, ry, '‹ click to return to stash', {
+      fontSize: '10px', color: '#445566', fontFamily: 'monospace',
+    }).setOrigin(1, 0));
+    ry += 22;
+
+    if (pack.length === 0) {
+      this._t(this.add.text(rx, ry, '(empty)', { fontSize: '12px', color: '#445566', fontFamily: 'monospace' })); ry += 18;
+      this._t(this.add.text(rx, ry,
+        'Raider enters with default class starter gear.',
+        { fontSize: '11px', color: '#334455', fontFamily: 'monospace' },
+      ));
+    } else {
+      const sorted = [...pack].sort((a, b) => {
+        const ai = STASH_ORDER.indexOf(a.id);
+        const bi = STASH_ORDER.indexOf(b.id);
+        return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+      });
+      for (const { id, qty } of sorted) {
+        const meta   = ITEM_META[id] ?? { label: id, detail: '' };
+        const qtyTag = qty > 1 ? `  ×${qty}` : '';
+        const row    = this._t(this.add.text(rx, ry,
+          `${meta.label.padEnd(18)} ${meta.detail}${qtyTag}`,
+          { fontSize: '12px', color: '#88ccff', fontFamily: 'monospace' },
+        ).setInteractive());
+        row.on('pointerover',  () => row.setColor('#ffffff'));
+        row.on('pointerout',   () => row.setColor('#88ccff'));
+        row.on('pointerdown',  () => { raiderToStash(id); this._rebuildPanel(); });
+        ry += 16;
+      }
+    }
   }
 
   // ── Utility ───────────────────────────────────────────────────────────────────
 
-  /** Track a Phaser object so it is destroyed when the view switches. */
+  /** Track a Phaser object so it is destroyed on panel switch or rebuild. */
   _t(obj) { this._panelObjs.push(obj); return obj; }
 }
