@@ -71,8 +71,9 @@ D&D 5e SRD mechanics adapted for real-time play.
 - One module per agent session. Never touch unrelated files.
 
 ## Key Commands
-- `npm run dev` — starts Vite dev server (client)
-- `npm run server` — starts Colyseus server
+- `npm start` — starts both server and client together (via concurrently)
+- `npm run dev` — starts Vite dev server (client) only
+- `npm run server` — starts Colyseus server only
 - `node shared/tests/combat.test.js` — run combat tests
 
 ## Current File Structure (Actual)
