@@ -9,7 +9,8 @@ State your assumptions explicitly. If uncertain, ask.
 If multiple interpretations exist, present them - don't pick silently.
 If a simpler approach exists, say so. Push back when warranted.
 If something is unclear, stop. Name what's confusing. Ask.
-2. Simplicity First
+
+## General Coding Principle: Simplicity First
 Minimum code that solves the problem. Nothing speculative.
 
 No features beyond what was asked.
@@ -74,12 +75,57 @@ D&D 5e SRD mechanics adapted for real-time play.
 - `npm run server` — starts Colyseus server
 - `node shared/tests/combat.test.js` — run combat tests
 
+## Current File Structure (Actual)
+Many files in docs/tech_spec.md are planned, not yet built. What actually exists:
+
+**Server**
+- `rooms/DungeonRoom.js` — message routing + equip/loot/hotbar/trap logic
+- `systems/` — CombatSystem.js, MovementSystem.js, AISystem.js (called from tick loop)
+- `state/` — PlayerState, EnemyState, GameState, ChestState, TrapState
+- `persistence/`, `matchmaking/` — not yet built
+
+**Client** (no `rendering/` or `ui/` subdirectories)
+- `scenes/DungeonScene.js` — gameplay rendering, input wiring
+- `scenes/HUDScene.js` — conditions, cooldown rings, hotbar overlay
+- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI
+- `network/ColyseusClient.js`, `input/InputHandler.js`
+
+**Shared**
+- `data/` — constants.js, weapons/melee.js, armor/armor.js, items/(consumables+shields), enemies/tier1.js, classes/fighter.js
+- `logic/combat.js` — full attack resolution
+- `tests/combat.test.js`
+- `types/` — player.js, enemy.js, weapon.js
+- `data/subclasses/`, `logic/conditions.js`, `logic/ai.js`, `logic/loot.js` — not yet built
+
 ## Agent Task Context
 Before any game logic task, read these files:
-- shared/types/player.js and shared/types/item.js (data shapes)
-- shared/data/constants.js (tuning values)
+- `shared/types/player.js` and `shared/data/constants.js` (data shapes and tuning)
+- `server/state/PlayerState.js` — authoritative runtime schema. Key fields:
+  - `x, y, vx, vy` — position and velocity
+  - `hp, maxHp, ac, level, alive`
+  - `equippedWeaponId, offhandId, equippedArmorId` — equipment slots ('' = empty)
+  - `inventory` — ArraySchema of item id strings
+  - `hotbar` — ArraySchema[10] of ability/consumable ids or ''
+  - `conditions` — ArraySchema of active condition id strings
+  - `secondWindAvailable, blessRemainingMs, longstriderRemainingMs, falseLifeRemainingMs, tempHp`
 - The specific file being modified
 - A structural reference file if creating something new
+
+## Client-Server Message Protocol
+All messages handled in `DungeonRoom.js` onCreate.
+
+**Client → Server**
+- `move` `{ dx, dy }` — normalized movement direction (-1..1 each axis)
+- `stop` — zero player velocity
+- `attack` — attempt melee attack
+- `equip` `{ itemId, slot? }` — slot: `'weapon'|'offhand'|'armor'` or omit for auto-detect
+- `unequip` `{ slot }` — slot: `'weapon'|'offhand'|'armor'`
+- `loot` `{ chestId }` — open chest (server validates range)
+- `assign_hotbar` `{ itemId, slot }` — bind ability/consumable id to hotbar index 0–9
+- `use_hotbar` `{ slot }` — activate hotbar slot 0–9
+
+**Server → Client**
+- `combat_log` `{ message }` — text line pushed to the HUD combat log
 
 ## Reference Docs (read when relevant to the task)
 - docs/tech_spec.md — Full technical architecture, file structure, module details

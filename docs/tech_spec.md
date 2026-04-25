@@ -2,6 +2,45 @@
 ## Technical Architecture & Project Structure
 *v0.1 | Internal Reference | Beta Build Target*
 
+---
+
+# Current Implementation State
+> **Read this before the rest of the spec.** The sections below describe the target architecture. This section describes what actually exists now.
+
+**Active phase:** Prototype between Phase 1 and Phase 2. Single-room multiplayer works. Cohort branches, floor progression, Supabase persistence, and the hub are not yet implemented. The map is a single flat room used for prototyping mechanics and combat systems.
+
+## Files That Exist Today
+
+**server/**
+- `rooms/DungeonRoom.js` — session lifecycle, all message handling, equip/unequip/loot/hotbar/trap logic
+- `systems/CombatSystem.js` — multiplayer wrapper around shared/logic/combat.js
+- `systems/MovementSystem.js` — applies velocity to players and enemies each tick
+- `systems/AISystem.js` — enemy state machine (idle → aggro → attack)
+- `state/` — PlayerState, EnemyState, GameState, ChestState, TrapState
+- `index.js` — Colyseus server entry point
+
+**client/src/** (no `rendering/` or `ui/` subdirectories yet)
+- `scenes/DungeonScene.js` — main gameplay: renders server state, wires input
+- `scenes/HUDScene.js` — overlay: HP, condition rings, cooldown arc, hotbar, combat log
+- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI
+- `network/ColyseusClient.js` — room join/leave, all sendX helpers
+- `input/InputHandler.js` — WASD/attack/hotbar key bindings
+- `main.js` — Phaser config and scene registration
+
+**shared/**
+- `data/constants.js`, `data/weapons/melee.js`, `data/armor/armor.js`
+- `data/items/consumables.js`, `data/items/shields.js`
+- `data/enemies/tier1.js` (goblin, dog, skeleton)
+- `data/classes/fighter.js`
+- `logic/combat.js` — full attack resolution (pure functions)
+- `tests/combat.test.js`
+- `types/player.js`, `types/enemy.js`, `types/weapon.js`
+
+## Not Yet Built
+`server/persistence/`, `server/matchmaking/`, `client/rendering/`, `client/ui/`, `shared/data/subclasses/`, `shared/data/gear/`, `shared/logic/conditions.js`, `shared/logic/ai.js`, `shared/logic/loot.js`, `shared/logic/floor-generator.js`, ranged weapons, Supabase integration, floor generation, cohort/branch maps.
+
+---
+
 # 1. Stack Overview
 The beta is a browser-based, multiplayer-first game. No install required. The stack is chosen for agent legibility — every layer has dense, high-quality training data in Opus 4.6 — and for clean separation of concerns so that coding agents can work on individual modules without contaminating unrelated systems.
 
@@ -338,17 +377,21 @@ The client is responsible for rendering, input capture, and UI only. It imports 
 |                                                                                        |
 | | |                                                                                  |
 |                                                                                        |
-| | ├── scenes/                                                                         |
+| | ├── scenes/  \# BUILT: DungeonScene, HUDScene, InventoryScene. Rest are planned.  |
+|                                                                                        |
+| | | ├── DungeonScene.js \# Main gameplay scene: renders server state, sends input    |
+|                                                                                        |
+| | | ├── HUDScene.js \# Overlay: HP bar, condition rings, cooldown arc, hotbar, combat log |
+|                                                                                        |
+| | | ├── InventoryScene.js \# Equipment slots (weapon/offhand/armor), bag, hotbar assignment |
+|                                                                                        |
+| | | \# --- planned, not yet built ---                                                 |
 |                                                                                        |
 | | | ├── BootScene.js \# Asset preload, auth check, redirect to hub or login          |
 |                                                                                        |
 | | | ├── LoginScene.js \# Supabase auth UI (email/password, OAuth)                    |
 |                                                                                        |
 | | | ├── HubScene.js \# Persistent hub: stash, shop, class select, queue              |
-|                                                                                        |
-| | | ├── DungeonScene.js \# Main gameplay scene: renders server state, sends input    |
-|                                                                                        |
-| | | ├── HUDScene.js \# Overlay scene: HP, cooldowns, combat log, conditions          |
 |                                                                                        |
 | | | └── ResultsScene.js \# Floor complete / death screen with loot summary           |
 |                                                                                        |
