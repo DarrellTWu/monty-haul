@@ -13,6 +13,7 @@
 import { joinDungeon, sendLoot, sendUseHotbar } from '../network/ColyseusClient.js';
 import { InputHandler } from '../input/InputHandler.js';
 import { CHEST_LOOT_RANGE_PX, TRAP_RADIUS_PX } from '../../../shared/data/constants.js';
+import { getRaiderPackFlat, setRaiderPack } from '../store/stash.js';
 
 // Visual config — swap these out when sprites land.
 const PLAYER_RADIUS   = 16;
@@ -35,16 +36,18 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   init(data) {
-    this._joinOpts = data ?? {};
+    this._joinOpts = { ...(data ?? {}), items: getRaiderPackFlat() };
   }
 
   async create() {
-    this._room     = null;
+    this._room      = null;
     this._playerGfx = new Map();  // sessionId → { circle, hpBar }
     this._enemyGfx  = new Map();  // enemyId   → { circle, hpBar }
     this._chestGfx  = new Map();  // chestId   → { gfx, hint, chestState }
     this._trapGfx   = new Map();  // trapId    → { gfx, trapState }
     this._input     = null;
+    this._runEnded  = false;
+    this._lastHitBy = 'an enemy';
 
     this._drawRoom();
 
@@ -87,10 +90,16 @@ export class DungeonScene extends Phaser.Scene {
       this._createTrapGfx(id, trap);
     });
 
-    // Relay combat log messages to HUDScene.
+    // Relay combat log messages to HUDScene; track last entity to hit the player.
+    const playerLabel = this._joinOpts.class
+      ? this._joinOpts.class[0].toUpperCase() + this._joinOpts.class.slice(1)
+      : 'Player';
     this._room.onMessage('combat_log', ({ message }) => {
       const hud = this.scene.get('HUDScene');
       if (hud?.addLog) hud.addLog(message);
+      if (message.includes(`→ ${playerLabel}:`) && message.includes(': hit')) {
+        this._lastHitBy = message.split('→')[0].trim();
+      }
     });
 
     // Input.
@@ -103,10 +112,9 @@ export class DungeonScene extends Phaser.Scene {
     this.scene.launch('HUDScene');
 
     this._room.state.onChange(() => {
-      if (this._room.state.phase === 'complete' && !this._victoryText) {
-        this._victoryText = this.add.text(ROOM_WIDTH / 2, ROOM_HEIGHT / 2, 'All enemies defeated!', {
-          fontSize: '36px', color: '#ffff00', backgroundColor: '#000000',
-        }).setOrigin(0.5).setDepth(10);
+      if (this._room.state.phase === 'complete' && !this._runEnded) {
+        this._runEnded = true;
+        this._onRunComplete();
       }
     });
   }
@@ -118,6 +126,11 @@ export class DungeonScene extends Phaser.Scene {
 
     const state    = this._room.state;
     const myPlayer = state.players.get(this._room.sessionId);
+
+    if (myPlayer && !myPlayer.alive && !this._runEnded) {
+      this._runEnded = true;
+      this._onRunFailed();
+    }
 
     // Player visuals.
     for (const [sessionId, player] of state.players) {
@@ -273,5 +286,107 @@ export class DungeonScene extends Phaser.Scene {
     const hpColor = frac > 0.5 ? 0x44cc44 : frac > 0.25 ? 0xffaa00 : 0xcc2222;
     gfx.fillStyle(hpColor);
     gfx.fillRect(bx, by, HP_BAR_WIDTH * frac, HP_BAR_HEIGHT);
+  }
+
+  // ── Run end ───────────────────────────────────────────────────────────────────
+
+  _onRunComplete() {
+    const player = this._room.state.players.get(this._room.sessionId);
+    const items  = player ? this._collectItems(player) : [];
+    setRaiderPack(items);
+    const packLines = items.length === 0
+      ? ['(nothing — only default class gear)']
+      : this._groupItems(items).map(({ label, qty }) => `· ${label}${qty > 1 ? `  ×${qty}` : ''}`);
+    this._showRunSummary({
+      title:      '── RUN COMPLETE ──',
+      titleColor: '#88ffaa',
+      bodyLines:  ['All enemies defeated.', '', 'Extracting with:'],
+      packLines,
+    });
+  }
+
+  _onRunFailed() {
+    setRaiderPack([]);
+    this._showRunSummary({
+      title:      '── RUN FAILED ──',
+      titleColor: '#ff6666',
+      bodyLines:  [`Your raider was slain by ${this._lastHitBy}.`, 'All carried items were lost.'],
+      packLines:  [],
+    });
+  }
+
+  _showRunSummary({ title, titleColor, bodyLines, packLines }) {
+    this._input.enabled = false;
+    if (this.scene.isActive('InventoryScene')) this.scene.stop('InventoryScene');
+    if (this.scene.isActive('HUDScene'))       this.scene.stop('HUDScene');
+
+    const SW = 1280, SH = 720;
+    const PW = 560,  PH = 400;
+    const PX = (SW - PW) / 2;
+    const PY = (SH - PH) / 2;
+    const D  = 22;
+
+    const bg = this.add.graphics().setScrollFactor(0).setDepth(D);
+    bg.fillStyle(0x000000, 0.78);
+    bg.fillRect(0, 0, SW, SH);
+    bg.fillStyle(0x12121e, 0.97);
+    bg.fillRect(PX, PY, PW, PH);
+    bg.lineStyle(1, 0x334466);
+    bg.strokeRect(PX, PY, PW, PH);
+
+    let ty = PY + 26;
+    this.add.text(SW / 2, ty, title, {
+      fontSize: '20px', color: titleColor, fontFamily: 'monospace',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1);
+    ty += 38;
+
+    for (const line of bodyLines) {
+      if (line === '') { ty += 8; continue; }
+      this.add.text(PX + 24, ty, line, {
+        fontSize: '13px', color: '#aaaacc', fontFamily: 'monospace',
+      }).setScrollFactor(0).setDepth(D + 1);
+      ty += 18;
+    }
+
+    for (const line of packLines) {
+      this.add.text(PX + 32, ty, line, {
+        fontSize: '12px', color: line.startsWith('(') ? '#445566' : '#ffdd88', fontFamily: 'monospace',
+      }).setScrollFactor(0).setDepth(D + 1);
+      ty += 16;
+    }
+
+    this.add.text(SW / 2, PY + PH - 28, '[ click or press any key to return to hub ]', {
+      fontSize: '12px', color: '#6688aa', fontFamily: 'monospace',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1);
+
+    // Short delay so an accidental click doesn't immediately dismiss the summary.
+    this.time.delayedCall(600, () => {
+      this.input.once('pointerdown', () => this._exitToHub());
+      this.input.keyboard.once('keydown', () => this._exitToHub());
+    });
+  }
+
+  _collectItems(player) {
+    const ids = [...player.inventory];
+    if (player.equippedWeaponId && player.equippedWeaponId !== 'unarmed') ids.push(player.equippedWeaponId);
+    if (player.offhandId)       ids.push(player.offhandId);
+    if (player.equippedArmorId) ids.push(player.equippedArmorId);
+    return ids;
+  }
+
+  _groupItems(ids) {
+    const counts = {};
+    for (const id of ids) counts[id] = (counts[id] ?? 0) + 1;
+    return Object.entries(counts).map(([id, qty]) => ({
+      label: id.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' '),
+      qty,
+    }));
+  }
+
+  async _exitToHub() {
+    try { await this._room?.leave(); } catch { /* ignore if already disconnected */ }
+    this.scene.stop('HUDScene');
+    this.scene.stop('InventoryScene');
+    this.scene.start('HubScene', { view: 'stash' });
   }
 }
