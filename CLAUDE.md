@@ -134,6 +134,16 @@ All messages handled in `DungeonRoom.js` onCreate.
 - docs/tech_spec.md — Full technical architecture, file structure, module details
 - docs/gdd.md — Game design document, combat system, class roster, items
 
+## Keeping Docs Current
+After completing any task, flag to the user if the changes warrant updates to CLAUDE.md or docs/tech_spec.md. Triggers include:
+- Files added/removed that appear in the file structure lists
+- New fields on PlayerState or other synced state
+- Changes to the scene entry point or scene graph
+- New message protocol entries (new messages, changed payloads)
+- New patterns established (new registry, new system, new architectural convention)
+
+Don't update the docs unprompted — flag it and let the user decide.
+
 ## Code Style
 - ES modules (import/export), not CommonJS (require)
 - Pure functions in shared/logic/ — no side effects, no framework deps
