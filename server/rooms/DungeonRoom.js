@@ -356,10 +356,14 @@ export class DungeonRoom extends Room {
       return;
     }
 
-    this.state.enemies.clear();
-    this.state.chests.clear();
-    this.state.traps.clear();
-    this.state.stairs.clear();
+    // MapSchema.clear() always emits OPERATION.CLEAR to the change tracker —
+    // even on an empty map. Calling it during the initial onCreate load would
+    // make the joining client process snapshot-add then clear+re-add, double-
+    // firing onAdd and leaving orphan gfx at spawn. Guard each clear on size.
+    if (this.state.enemies.size > 0) this.state.enemies.clear();
+    if (this.state.chests.size  > 0) this.state.chests.clear();
+    if (this.state.traps.size   > 0) this.state.traps.clear();
+    if (this.state.stairs.size  > 0) this.state.stairs.clear();
     this._enemyDefs.clear();
     this._lootRolled.clear();
 
