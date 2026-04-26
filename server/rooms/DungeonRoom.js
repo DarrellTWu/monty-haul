@@ -11,6 +11,8 @@ import { TrapState }   from '../state/TrapState.js';
 import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.js';
 import { GOBLIN, DOG, SKELETON }     from '../../shared/data/enemies/tier1.js';
 import { getModifier, resolveSave, rollDice } from '../../shared/logic/combat.js';
+import { rollLoot }                  from '../../shared/logic/loot.js';
+import { LOOT_TABLE_REGISTRY }       from '../../shared/data/loot/tier1.js';
 import { ARMOR_REGISTRY, computeAC } from '../../shared/data/armor/armor.js';
 import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, GREATSWORD, DAGGER, MACE } from '../../shared/data/weapons/melee.js';
 import { SHIELD_REGISTRY }           from '../../shared/data/items/shields.js';
@@ -49,6 +51,7 @@ export class DungeonRoom extends Room {
     this.setState(new GameState());
     this._enemyDefs       = new Map();
     this._conditionTimers = new Map(); // `${sessionId}_${condition}` → remainingMs
+    this._lootRolled      = new Set(); // enemyIds whose loot has been rolled (one-shot on death)
 
     this._spawnGoblins();
     this._spawnDog();
@@ -160,6 +163,34 @@ export class DungeonRoom extends Room {
       chest.items.splice(0, chest.items.length);
       chest.open = true;
       console.log(`[DungeonRoom] ${client.sessionId} looted chest ${chestId}`);
+    });
+
+    // ── Corpse looting ────────────────────────────────────────────────────────────
+    // Server validates: enemy exists, dead, not yet looted, player in range.
+    // Transfers gold to player.gold and items to player.inventory in one shot.
+    this.onMessage('loot_corpse', (client, { enemyId }) => {
+      const player = this.state.players.get(client.sessionId);
+      const enemy  = this.state.enemies.get(String(enemyId));
+      if (!player || !player.alive || !enemy) return;
+      if (enemy.alive || enemy.looted) return;
+      const dx = player.x - enemy.x;
+      const dy = player.y - enemy.y;
+      if (Math.sqrt(dx * dx + dy * dy) > CHEST_LOOT_RANGE_PX) return;
+
+      const gold = enemy.lootGold;
+      const items = [...enemy.lootItems];
+      player.gold += gold;
+      for (const id of items) player.inventory.push(id);
+      enemy.lootGold = 0;
+      enemy.lootItems.splice(0, enemy.lootItems.length);
+      enemy.looted = true;
+
+      const summary = [
+        gold > 0 ? `${gold} gp` : null,
+        items.length > 0 ? items.join(', ') : null,
+      ].filter(Boolean).join(' + ') || 'nothing';
+      this.broadcast('combat_log', { message: `Looted ${enemy.type}: ${summary}` });
+      console.log(`[DungeonRoom] ${client.sessionId} looted corpse ${enemyId}: ${summary}`);
     });
 
     // ── Hotbar management ─────────────────────────────────────────────────────────
@@ -363,11 +394,33 @@ export class DungeonRoom extends Room {
 
     this._tickTraps(dt);
     this._tickConditions(dt);
+    this._rollLootForFreshDeaths();
 
     const allDead = [...this.state.enemies.values()].every(e => !e.alive);
     if (allDead && this.state.phase === 'playing') {
       this.state.phase = 'complete';
       console.log('[DungeonRoom] All enemies defeated');
+    }
+  }
+
+  /**
+   * For each enemy that died this tick (first time we see alive=false), look up
+   * its loot table and roll once. Idempotent via `_lootRolled` guard so this can
+   * run every tick without re-rolling. Enemies with no table drop nothing silently.
+   */
+  _rollLootForFreshDeaths() {
+    for (const [id, enemy] of this.state.enemies) {
+      if (enemy.alive) continue;
+      if (this._lootRolled.has(id)) continue;
+      this._lootRolled.add(id);
+
+      const table = LOOT_TABLE_REGISTRY[enemy.type];
+      if (!table) continue;
+
+      const { gold, items } = rollLoot(table);
+      enemy.lootGold = gold;
+      for (const itemId of items) enemy.lootItems.push(itemId);
+      console.log(`[DungeonRoom] ${enemy.type} (${id}) dropped: ${gold} gp, items=[${items.join(', ')}]`);
     }
   }
 
