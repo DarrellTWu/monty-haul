@@ -2,7 +2,8 @@
 // Hub layout: left panel cycles through sub-screens (Class, Stash, future additions);
 // right panel is a persistent Raider Config summary. Enter Dungeon lives on the right.
 
-import { getStash, getRaiderPack, stashToRaider, raiderToStash, getHubGold } from '../store/stash.js';
+import { getStash, getRaiderPack, stashToRaider, raiderToStash, getHubGold, buyItem } from '../store/stash.js';
+import { VENDOR_CATALOG } from '../../../shared/data/shop.js';
 
 // Panel geometry
 const LP = { x: 30,  y: 70, w: 760, h: 600 }; // left panel
@@ -17,8 +18,18 @@ const ITEM_META = {
   mace:                { label: 'Mace',             detail: '1d6  bludgeoning' },
   greataxe:            { label: 'Greataxe',         detail: '1d12 slashing'    },
   greatsword:          { label: 'Greatsword',       detail: '2d6  slashing'    },
+  padded:              { label: 'Padded',           detail: 'AC 11+DEX  light' },
+  leather:             { label: 'Leather',          detail: 'AC 11+DEX  light' },
+  studded_leather:     { label: 'Studded Leather',  detail: 'AC 12+DEX  light' },
+  hide:                { label: 'Hide',             detail: 'AC 12+DEX  med'   },
+  chain_shirt:         { label: 'Chain Shirt',      detail: 'AC 13+DEX  med'   },
+  scale_mail:          { label: 'Scale Mail',       detail: 'AC 14+DEX  med'   },
+  breastplate:         { label: 'Breastplate',      detail: 'AC 14+DEX  med'   },
+  ring_mail:           { label: 'Ring Mail',        detail: 'AC 14  heavy'     },
   chain_mail:          { label: 'Chain Mail',       detail: 'AC 16  heavy'     },
+  splint:              { label: 'Splint',           detail: 'AC 17  heavy'     },
   half_plate:          { label: 'Half Plate',       detail: 'AC 15+DEX  med'   },
+  plate:               { label: 'Plate',            detail: 'AC 18  heavy'     },
   shield:              { label: 'Shield',           detail: '+2 AC'            },
   healing_potion:      { label: 'Healing Potion',   detail: '2d4+2 HP'         },
   bless_potion:        { label: 'Bless Potion',     detail: '+1d4 atk 60s'     },
@@ -30,14 +41,23 @@ const ITEM_META = {
 
 const STASH_ORDER = [
   'longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword',
-  'chain_mail','half_plate','shield',
-  'healing_potion','bless_potion','longstrider_potion','false_life_potion',
+  'padded','leather','studded_leather',
+  'hide','chain_shirt','scale_mail','breastplate','half_plate',
+  'ring_mail','chain_mail','splint','plate',
+  'shield',
+  'healing_potion','longstrider_potion','false_life_potion','bless_potion',
   'skeleton_bone','wolf_pelt',
+];
+
+const ARMOR_IDS = [
+  'padded','leather','studded_leather',
+  'hide','chain_shirt','scale_mail','breastplate','half_plate',
+  'ring_mail','chain_mail','splint','plate',
 ];
 
 const STASH_SECTIONS = [
   { label: 'Weapons',        ids: new Set(['longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword']) },
-  { label: 'Armor & Shield', ids: new Set(['chain_mail','half_plate','shield']) },
+  { label: 'Armor & Shield', ids: new Set([...ARMOR_IDS, 'shield']) },
   { label: 'Potions',        ids: new Set(['healing_potion','bless_potion','longstrider_potion','false_life_potion']) },
   { label: 'Materials',      ids: new Set(['skeleton_bone','wolf_pelt']) },
 ];
@@ -81,6 +101,7 @@ export class HubScene extends Phaser.Scene {
   create() {
     this._selectedClass = null;
     this._leftView      = this._initData.view === 'stash' ? 'stash' : 'class';
+    this._shopVendor    = 'potions';
     this._leftObjs      = [];
     this._rightObjs     = [];
 
@@ -93,7 +114,7 @@ export class HubScene extends Phaser.Scene {
     this.add.text(RP.x + RP.w, 30, 'VAULT', {
       fontSize: '10px', color: '#556677', fontFamily: 'monospace',
     }).setOrigin(1, 0);
-    this.add.text(RP.x + RP.w, 42, `${getHubGold()} gp`, {
+    this._vaultGoldText = this.add.text(RP.x + RP.w, 42, `${getHubGold()} gp`, {
       fontSize: '15px', color: '#ffcc44', fontFamily: 'monospace',
     }).setOrigin(1, 0);
 
@@ -118,7 +139,11 @@ export class HubScene extends Phaser.Scene {
   // ── Sub-nav (left panel tabs — permanent) ─────────────────────────────────────
 
   _buildSubNav() {
-    const tabs = [{ id: 'class', label: 'Class' }, { id: 'stash', label: 'Stash' }];
+    const tabs = [
+      { id: 'class', label: 'Class' },
+      { id: 'stash', label: 'Stash' },
+      { id: 'shop',  label: 'Shop'  },
+    ];
     this._subNavBtns = {};
     let tx = LP.x + 16;
     const ty = LP.y + 14;
@@ -156,8 +181,9 @@ export class HubScene extends Phaser.Scene {
   // ── Left panel content ────────────────────────────────────────────────────────
 
   _showLeftContent() {
-    if (this._leftView === 'class') this._showClassScreen();
-    else                            this._showStashScreen();
+    if      (this._leftView === 'class') this._showClassScreen();
+    else if (this._leftView === 'shop')  this._showShopScreen();
+    else                                 this._showStashScreen();
   }
 
   _showClassScreen() {
@@ -245,6 +271,96 @@ export class HubScene extends Phaser.Scene {
         fontSize: '12px', color: '#334455', fontFamily: 'monospace',
       }));
     }
+  }
+
+  _showShopScreen() {
+    const x = LP.x + 20;
+    let   y = LP.y + 52;
+
+    this._l(this.add.text(x, y, 'SHOP', {
+      fontSize: '12px', color: '#aaaacc', fontFamily: 'monospace',
+    }));
+    this._l(this.add.text(LP.x + LP.w - 20, y, 'click [ Buy ] to add to stash  ›', {
+      fontSize: '10px', color: '#445566', fontFamily: 'monospace',
+    }).setOrigin(1, 0));
+    y += 22;
+
+    // Vendor sub-nav (Potions / Armor).
+    const vendors = [{ id: 'potions', label: 'Potion Vendor' }, { id: 'armor', label: 'Armor Vendor' }];
+    let vx = x;
+    for (const { id, label } of vendors) {
+      const active = this._shopVendor === id;
+      const btn = this._l(this.add.text(vx, y, `[ ${label} ]`, {
+        fontSize: '13px',
+        color: active ? '#ffcc44' : '#8888aa',
+        fontFamily: 'monospace',
+      }).setInteractive());
+      btn.on('pointerover', () => { if (this._shopVendor !== id) btn.setColor('#aabbdd'); });
+      btn.on('pointerout',  () => { if (this._shopVendor !== id) btn.setColor('#8888aa'); });
+      btn.on('pointerdown', () => {
+        if (this._shopVendor === id) return;
+        this._shopVendor = id;
+        this._refreshShopScreen();
+      });
+      vx += btn.width + 16;
+    }
+    y += 28;
+
+    this._l(this.add.graphics()
+      .lineStyle(1, 0x223355)
+      .lineBetween(x, y, LP.x + LP.w - 20, y));
+    y += 12;
+
+    // Item list for the active vendor.
+    const gold  = getHubGold();
+    const items = VENDOR_CATALOG[this._shopVendor] ?? [];
+
+    for (const { id, price } of items) {
+      const meta       = ITEM_META[id] ?? { label: id, detail: '' };
+      const affordable = gold >= price;
+      const itemColor  = affordable ? '#ffdd88' : '#445566';
+
+      this._l(this.add.text(x + 8, y,
+        `${meta.label.padEnd(18)} ${meta.detail.padEnd(20)} ${String(price).padStart(5)} gp`,
+        { fontSize: '12px', color: itemColor, fontFamily: 'monospace' },
+      ));
+
+      const buyX = LP.x + LP.w - 24;
+      const buyBtn = this._l(this.add.text(buyX, y, '[ Buy ]', {
+        fontSize: '12px',
+        color: affordable ? '#88ccff' : '#334455',
+        fontFamily: 'monospace',
+      }).setOrigin(1, 0));
+
+      if (affordable) {
+        buyBtn.setInteractive();
+        buyBtn.on('pointerover', () => buyBtn.setColor('#ffffff'));
+        buyBtn.on('pointerout',  () => buyBtn.setColor('#88ccff'));
+        buyBtn.on('pointerdown', () => {
+          if (buyItem(id, price)) this._onPurchase();
+        });
+      }
+
+      y += 18;
+    }
+  }
+
+  /** Update the always-visible vault counter from the live store. */
+  _refreshVault() {
+    if (this._vaultGoldText) this._vaultGoldText.setText(`${getHubGold()} gp`);
+  }
+
+  /** Rebuild just the shop screen (cheaper than the whole left panel). */
+  _refreshShopScreen() {
+    for (const obj of this._leftObjs) obj.destroy();
+    this._leftObjs = [];
+    this._showShopScreen();
+  }
+
+  /** Called after a successful Buy: vault display, shop list, raider panel (stash count). */
+  _onPurchase() {
+    this._refreshVault();
+    this._refreshShopScreen();
   }
 
   _selectClass(classId) {

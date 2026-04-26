@@ -122,3 +122,19 @@ export function addHubGold(n) {
 export function setHubGold(n) {
   _save(HUB_GOLD_KEY, Math.max(0, Math.floor(Number(n) || 0)));
 }
+
+/**
+ * Spend `price` from hub gold to add 1× of `id` to the stash.
+ * Returns false if the player can't afford it; true on success.
+ */
+export function buyItem(id, price) {
+  const gold = getHubGold();
+  if (gold < price) return false;
+  setHubGold(gold - price);
+  const stash = getStash();
+  const entry = stash.find(e => e.id === id);
+  if (entry) entry.qty += 1;
+  else       stash.push({ id, qty: 1 });
+  _save(STASH_KEY, stash);
+  return true;
+}

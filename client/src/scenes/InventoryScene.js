@@ -63,8 +63,18 @@ const CONSUMABLE_DISPLAY = {
 
 // Armor display: bag label and equipped-slot label are different sizes.
 const ARMOR_BAG_DISPLAY = {
-  chain_mail: { label: 'Chain Mail',  detail: 'AC 16  heavy' },
-  half_plate: { label: 'Half Plate',  detail: 'AC 15+DEX med' },
+  padded:          { label: 'Padded',          detail: 'AC 11+DEX light' },
+  leather:         { label: 'Leather',         detail: 'AC 11+DEX light' },
+  studded_leather: { label: 'Studded Leather', detail: 'AC 12+DEX light' },
+  hide:            { label: 'Hide',            detail: 'AC 12+DEX med'   },
+  chain_shirt:     { label: 'Chain Shirt',     detail: 'AC 13+DEX med'   },
+  scale_mail:      { label: 'Scale Mail',      detail: 'AC 14+DEX med'   },
+  breastplate:     { label: 'Breastplate',     detail: 'AC 14+DEX med'   },
+  half_plate:      { label: 'Half Plate',      detail: 'AC 15+DEX med'   },
+  ring_mail:       { label: 'Ring Mail',       detail: 'AC 14  heavy'    },
+  chain_mail:      { label: 'Chain Mail',      detail: 'AC 16  heavy'    },
+  splint:          { label: 'Splint',          detail: 'AC 17  heavy'    },
+  plate:           { label: 'Plate',           detail: 'AC 18  heavy'    },
 };
 
 // Crafting materials — bag-only items, no equip / hotbar / consume affordance.
@@ -77,8 +87,18 @@ const MATERIAL_DISPLAY = {
 
 // Full description shown in the equipped armor slot.
 const ARMOR_SLOT_DISPLAY = {
-  chain_mail: 'Chain Mail — AC 16  (heavy, STR 13)',
-  half_plate: 'Half Plate — AC 17  (medium, DEX capped +2)',
+  padded:          'Padded — AC 11+DEX  (light, stealth disadv.)',
+  leather:         'Leather — AC 11+DEX  (light)',
+  studded_leather: 'Studded Leather — AC 12+DEX  (light)',
+  hide:            'Hide — AC 12+DEX(cap 2)  (medium)',
+  chain_shirt:     'Chain Shirt — AC 13+DEX(cap 2)  (medium)',
+  scale_mail:      'Scale Mail — AC 14+DEX(cap 2)  (medium, stealth disadv.)',
+  breastplate:     'Breastplate — AC 14+DEX(cap 2)  (medium)',
+  half_plate:      'Half Plate — AC 17  (medium, DEX capped +2)',
+  ring_mail:       'Ring Mail — AC 14  (heavy, stealth disadv.)',
+  chain_mail:      'Chain Mail — AC 16  (heavy, STR 13)',
+  splint:          'Splint — AC 17  (heavy, STR 15)',
+  plate:           'Plate — AC 18  (heavy, STR 15)',
 };
 
 
