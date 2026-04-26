@@ -75,31 +75,33 @@ D&D 5e SRD mechanics adapted for real-time play.
 - `npm run dev` — starts Vite dev server (client) only
 - `npm run server` — starts Colyseus server only
 - `node shared/tests/combat.test.js` — run combat tests
+- `node shared/tests/loot.test.js` — run loot tests
 
 ## Current File Structure (Actual)
 Many files in docs/tech_spec.md are planned, not yet built. What actually exists:
 
 **Server**
-- `rooms/DungeonRoom.js` — message routing + equip/loot/hotbar/trap logic
+- `rooms/DungeonRoom.js` — message routing + equip/loot/hotbar/trap logic; rolls loot on enemy death and handles `loot_corpse`
 - `systems/` — CombatSystem.js, MovementSystem.js, AISystem.js (called from tick loop)
 - `state/` — PlayerState, EnemyState, GameState, ChestState, TrapState
 - `persistence/`, `matchmaking/` — not yet built
 
 **Client** (no `rendering/` or `ui/` subdirectories)
-- `scenes/HubScene.js` — entry point (auto-starts); two-panel layout: left cycles sub-screens (Class, Stash), right is persistent Raider Config + Enter Dungeon; passes `{ class, items }` to DungeonScene; auto-opens Stash tab when `init({ view: 'stash' })`
-- `scenes/DungeonScene.js` — gameplay rendering, input wiring; receives `{ class, items }` via init(data); detects run complete/death, shows run summary overlay, calls `setRaiderPack` on exit
+- `scenes/HubScene.js` — entry point (auto-starts); two-panel layout: left cycles sub-screens (Class, Stash), right is persistent Raider Config + Enter Dungeon; screen-level VAULT display (top-right) shows hub gold; passes `{ class, items }` to DungeonScene; auto-opens Stash tab when `init({ view: 'stash' })`
+- `scenes/DungeonScene.js` — gameplay rendering, input wiring; receives `{ class, items }` via init(data); detects run complete/death, shows run summary overlay, calls `setRaiderPack` and `addHubGold(player.gold)` on extract; F-key triggers `_tryLootNearby` which dispatches to chest or corpse; lootable corpses render dim gold with an "F: Loot" hint
 - `scenes/HUDScene.js` — conditions, cooldown rings, hotbar overlay
-- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI
-- `network/ColyseusClient.js` — `joinDungeon(opts)` forwards opts (incl. class + items) to server
+- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI; shows live `GOLD N gp` line under HP/AC; renders materials (skeleton_bone, wolf_pelt) in the bag
+- `network/ColyseusClient.js` — `joinDungeon(opts)` forwards opts (incl. class + items) to server; `sendLoot` (chests), `sendLootCorpse` (corpses)
 - `input/InputHandler.js`
-- `store/stash.js` — localStorage-backed item store; two containers (stash + raider pack); `getStash`, `getRaiderPack`, `stashToRaider`, `raiderToStash`, `getRaiderPackFlat`, `setRaiderPack`; seeded with all items on first load; designed for drop-in Supabase swap
+- `store/stash.js` — localStorage-backed item store; two containers (stash + raider pack) plus persistent hub gold (`mh_hub_gold`); `getStash`, `getRaiderPack`, `stashToRaider`, `raiderToStash`, `getRaiderPackFlat`, `setRaiderPack`, `getHubGold`, `addHubGold`, `setHubGold`; seeded with all items + 0 gold on first load; designed for drop-in Supabase swap
 
 **Shared**
-- `data/` — constants.js, weapons/melee.js, armor/armor.js, items/(consumables+shields), enemies/tier1.js, classes/fighter.js, classes/barbarian.js, classes/monk.js, classes/index.js (CLASS_REGISTRY)
+- `data/` — constants.js, weapons/melee.js, armor/armor.js, items/(consumables+shields+materials), enemies/tier1.js, classes/fighter.js, classes/barbarian.js, classes/monk.js, classes/index.js (CLASS_REGISTRY), loot/tier1.js (LOOT_TABLE_REGISTRY)
 - `logic/combat.js` — full attack resolution
-- `tests/combat.test.js`
+- `logic/loot.js` — pure `rollLoot(table, rng?)` returning `{ gold, items }`; supports literal item ids and `@pool` references (currently `@potion_any`)
+- `tests/combat.test.js`, `tests/loot.test.js`
 - `types/` — player.js, enemy.js, weapon.js
-- `data/subclasses/`, `logic/conditions.js`, `logic/ai.js`, `logic/loot.js` — not yet built
+- `data/subclasses/`, `logic/conditions.js`, `logic/ai.js` — not yet built
 
 ## Agent Task Context
 Before any game logic task, read these files:
@@ -114,6 +116,9 @@ Before any game logic task, read these files:
   - `conditions` — ArraySchema of active condition id strings
   - `secondWindAvailable, blessRemainingMs, longstriderRemainingMs, falseLifeRemainingMs, tempHp`
   - `rageRemainingMs, rageUsesRemaining` — Barbarian rage tracking (synced for HUD ring + inventory)
+  - `gold` — run-scope wallet; transferred to hub via `addHubGold` on extract, lost on death
+- `server/state/EnemyState.js` — synced enemy schema. Loot fields:
+  - `lootGold, lootItems, looted` — populated on first tick after death from `LOOT_TABLE_REGISTRY[type]` via `rollLoot`; `looted` flips true when a player picks up the corpse via `loot_corpse`
 - The specific file being modified
 - A structural reference file if creating something new
 
@@ -148,15 +153,24 @@ All messages handled in `DungeonRoom.js` onCreate.
 - `equip` `{ itemId, slot? }` — slot: `'weapon'|'offhand'|'armor'` or omit for auto-detect
 - `unequip` `{ slot }` — slot: `'weapon'|'offhand'|'armor'`
 - `loot` `{ chestId }` — open chest (server validates range)
+- `loot_corpse` `{ enemyId }` — take gold + items from a dead enemy (server validates dead, !looted, in range)
 - `assign_hotbar` `{ itemId, slot }` — bind ability/consumable id to hotbar index 0–9
 - `use_hotbar` `{ slot }` — activate hotbar slot 0–9
 
 **Server → Client**
 - `combat_log` `{ message }` — text line pushed to the HUD combat log
 
+## Loot System
+- Tables live in `shared/data/loot/tier1.js` keyed by enemy id (LOOT_TABLE_REGISTRY).
+- Each table: `{ gold: { dice, bonus } | null, drops: [{ itemId, chance, qty }] }`.
+- `itemId` accepts literal ids OR `@pool_name` references resolved by `shared/logic/loot.js` (currently only `@potion_any` → CONSUMABLE_REGISTRY). Add new pools to the POOLS map in loot.js.
+- DungeonRoom._tick calls `_rollLootForFreshDeaths()` each tick — idempotent via `_lootRolled` Set guard. Enemies with no table drop nothing silently.
+- All numeric tuning (dice, chances, gold ranges) lives in the table file, not in logic.
+
 ## Reference Docs (read when relevant to the task)
 - docs/tech_spec.md — Full technical architecture, file structure, module details
 - docs/gdd.md — Game design document, combat system, class roster, items
+- docs/loot-system-plan.md — loot tables, gold tracking, corpse looting design and build plan
 
 ## Keeping Docs Current
 After completing any task, flag to the user if the changes warrant updates to CLAUDE.md or docs/tech_spec.md. Triggers include:

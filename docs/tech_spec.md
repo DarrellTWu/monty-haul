@@ -12,34 +12,36 @@
 ## Files That Exist Today
 
 **server/**
-- `rooms/DungeonRoom.js` — session lifecycle, all message handling, equip/unequip/loot/hotbar/trap logic
+- `rooms/DungeonRoom.js` — session lifecycle, all message handling, equip/unequip/loot/hotbar/trap logic; rolls loot on enemy death and handles `loot_corpse`
 - `systems/CombatSystem.js` — multiplayer wrapper around shared/logic/combat.js
 - `systems/MovementSystem.js` — applies velocity to players and enemies each tick
 - `systems/AISystem.js` — enemy state machine (idle → aggro → attack)
-- `state/` — PlayerState, EnemyState, GameState, ChestState, TrapState
+- `state/` — PlayerState (incl. `gold`), EnemyState (incl. `lootGold`/`lootItems`/`looted`), GameState, ChestState, TrapState
 - `index.js` — Colyseus server entry point
 
 **client/src/** (no `rendering/` or `ui/` subdirectories yet)
-- `scenes/HubScene.js` — entry point; two-panel layout: left cycles sub-screens (Class, Stash), right is persistent Raider Config + Enter Dungeon; passes `{ class, items }` to DungeonScene; auto-opens Stash tab when `init({ view: 'stash' })`
-- `scenes/DungeonScene.js` — main gameplay: renders server state, wires input; receives class+items via `init(data)`; detects run complete/death, shows run summary overlay, calls `setRaiderPack` on exit
+- `scenes/HubScene.js` — entry point; two-panel layout: left cycles sub-screens (Class, Stash), right is persistent Raider Config + Enter Dungeon; screen-level VAULT display (top-right) shows hub gold; passes `{ class, items }` to DungeonScene; auto-opens Stash tab when `init({ view: 'stash' })`
+- `scenes/DungeonScene.js` — main gameplay: renders server state, wires input; receives class+items via `init(data)`; lootable corpses render dim gold with an "F: Loot" hint; F key dispatches to chest or corpse via `_tryLootNearby`; on extract, calls `setRaiderPack` and `addHubGold(player.gold)`
 - `scenes/HUDScene.js` — overlay: HP, condition rings, cooldown arc, hotbar, combat log
-- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI
-- `network/ColyseusClient.js` — room join/leave, all sendX helpers; `joinDungeon(opts)` forwards opts (incl. class + items) to server
-- `store/stash.js` — localStorage-backed item store (stash + raider pack); seeded with all items on first load; designed for drop-in Supabase swap
+- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI; live `GOLD N gp` line under HP/AC; renders crafting materials in the bag
+- `network/ColyseusClient.js` — room join/leave, all sendX helpers (`sendLoot` for chests, `sendLootCorpse` for corpses); `joinDungeon(opts)` forwards opts (incl. class + items) to server
+- `store/stash.js` — localStorage-backed item store (stash + raider pack + hub gold); seeded with all items + 0 gold on first load; designed for drop-in Supabase swap
 - `input/InputHandler.js` — WASD/attack/hotbar key bindings
 - `main.js` — Phaser config and scene registration; HubScene is first (auto-starts)
 
 **shared/**
 - `data/constants.js`, `data/weapons/melee.js`, `data/armor/armor.js`
-- `data/items/consumables.js`, `data/items/shields.js`
+- `data/items/consumables.js`, `data/items/shields.js`, `data/items/materials.js` (skeleton_bone, wolf_pelt — crafting materials, bag-only)
 - `data/enemies/tier1.js` (goblin, dog, skeleton)
+- `data/loot/tier1.js` — LOOT_TABLE_REGISTRY keyed by enemy id; each table is `{ gold, drops }`. Drop entries support literal item ids and `@pool_name` references (currently `@potion_any` → CONSUMABLE_REGISTRY).
 - `data/classes/fighter.js`, `data/classes/barbarian.js`, `data/classes/monk.js`, `data/classes/index.js` — CLASS_REGISTRY pattern; add new classes here
 - `logic/combat.js` — full attack resolution (pure functions)
-- `tests/combat.test.js`
+- `logic/loot.js` — pure `rollLoot(table, rng?)` returning `{ gold, items }`; rng-injected, deterministic consumption order; pool resolvers in POOLS map
+- `tests/combat.test.js`, `tests/loot.test.js`
 - `types/player.js`, `types/enemy.js`, `types/weapon.js`
 
 ## Not Yet Built
-`server/persistence/`, `server/matchmaking/`, `client/rendering/`, `client/ui/`, `shared/data/subclasses/`, `shared/data/gear/`, `shared/logic/conditions.js`, `shared/logic/ai.js`, `shared/logic/loot.js`, `shared/logic/floor-generator.js`, ranged weapons, Supabase integration, floor generation, cohort/branch maps.
+`server/persistence/`, `server/matchmaking/`, `client/rendering/`, `client/ui/`, `shared/data/subclasses/`, `shared/data/gear/`, `shared/logic/conditions.js`, `shared/logic/ai.js`, `shared/logic/floor-generator.js`, ranged weapons, Supabase integration, floor generation, cohort/branch maps, crafting bench (materials exist, recipes do not).
 
 ---
 

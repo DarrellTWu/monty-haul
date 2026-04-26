@@ -195,8 +195,11 @@ Steps 1 and 2 can be tested independently (hub only, no dungeon needed). Steps 3
 - Hub equip slots (pre-equipping weapon/armor from hub UI) — raider pack is bag-only for now
 - Item validation server-side — server trusts client item list
 - Supabase persistence — localStorage only
-- Loot drops — items come from stash only, no mid-run pickup yet
 - Raider death item recovery — death wipes the raider pack by design (items lost on death is intentional, no recovery mechanic planned)
+
+> Note: "no mid-run pickup yet" was an out-of-scope item in the original pass.
+> Mid-run pickup landed via the loot system (corpse looting, gold tracking,
+> crafting materials). See `docs/loot-system-plan.md`.
 
 ---
 
