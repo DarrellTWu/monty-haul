@@ -84,6 +84,21 @@ export function raiderToStash(id) {
   return true;
 }
 
+/** Bulk-move every item in the raider pack → stash. Returns false if pack empty. */
+export function dumpRaiderPackToStash() {
+  const pack = getRaiderPack();
+  if (pack.length === 0) return false;
+  const stash = getStash();
+  for (const { id, qty } of pack) {
+    const dst = stash.find(e => e.id === id);
+    if (dst) dst.qty += qty;
+    else     stash.push({ id, qty });
+  }
+  _save(STASH_KEY,       stash);
+  _save(RAIDER_PACK_KEY, []);
+  return true;
+}
+
 /** Flat id array for passing to the server on dungeon join. */
 export function getRaiderPackFlat() {
   const ids = [];
@@ -121,6 +136,21 @@ export function addHubGold(n) {
 /** Overwrite hub gold. Rarely needed — exposed for resets / future server sync. */
 export function setHubGold(n) {
   _save(HUB_GOLD_KEY, Math.max(0, Math.floor(Number(n) || 0)));
+}
+
+/**
+ * Sell 1× of `id` from the stash for `price` gp into the hub vault.
+ * Caller computes the price (typically via shared/data/values.js sellPrice()).
+ * Returns false if the item isn't in the stash.
+ */
+export function sellItem(id, price) {
+  const stash = getStash();
+  const entry = stash.find(e => e.id === id);
+  if (!entry || entry.qty < 1) return false;
+  entry.qty -= 1;
+  _save(STASH_KEY, stash.filter(e => e.qty > 0));
+  setHubGold(getHubGold() + Math.max(0, Math.floor(Number(price) || 0)));
+  return true;
 }
 
 /**

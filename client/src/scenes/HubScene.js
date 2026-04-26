@@ -2,8 +2,12 @@
 // Hub layout: left panel cycles through sub-screens (Class, Stash, future additions);
 // right panel is a persistent Raider Config summary. Enter Dungeon lives on the right.
 
-import { getStash, getRaiderPack, stashToRaider, raiderToStash, getHubGold, buyItem, craftRecipe } from '../store/stash.js';
+import {
+  getStash, getRaiderPack, stashToRaider, raiderToStash, getHubGold,
+  buyItem, sellItem, craftRecipe, dumpRaiderPackToStash,
+} from '../store/stash.js';
 import { VENDOR_CATALOG } from '../../../shared/data/shop.js';
+import { sellPrice } from '../../../shared/data/values.js';
 import { BENCH_REGISTRY } from '../../../shared/data/crafting/benches.js';
 import { recipesForBench } from '../../../shared/data/crafting/recipes.js';
 
@@ -240,7 +244,7 @@ export class HubScene extends Phaser.Scene {
     this._l(this.add.text(x, y, 'STASH', {
       fontSize: '12px', color: '#aaaacc', fontFamily: 'monospace',
     }));
-    this._l(this.add.text(LP.x + LP.w - 20, y, 'click item to add to pack  ›', {
+    this._l(this.add.text(LP.x + LP.w - 20, y, 'click row → pack  ·  [ Sell ] → vault', {
       fontSize: '10px', color: '#445566', fontFamily: 'monospace',
     }).setOrigin(1, 0));
     y += 22;
@@ -266,6 +270,21 @@ export class HubScene extends Phaser.Scene {
         row.on('pointerover',  () => row.setColor('#ffffff'));
         row.on('pointerout',   () => row.setColor('#ffdd88'));
         row.on('pointerdown',  () => { stashToRaider(id); this._onPackChanged(); });
+
+        // Right-aligned Sell button. Items with no defined value (sellPrice 0)
+        // simply render no button — they're not sellable.
+        const price = sellPrice(id);
+        if (price > 0) {
+          const sellBtn = this._l(this.add.text(LP.x + LP.w - 20, y, `[ Sell ${price} gp ]`, {
+            fontSize: '11px', color: '#88ccff', fontFamily: 'monospace',
+          }).setOrigin(1, 0).setInteractive());
+          sellBtn.on('pointerover', () => sellBtn.setColor('#ffffff'));
+          sellBtn.on('pointerout',  () => sellBtn.setColor('#88ccff'));
+          sellBtn.on('pointerdown', () => {
+            if (sellItem(id, price)) this._onSold();
+          });
+        }
+
         y += 16;
       }
       y += 8;
@@ -567,6 +586,17 @@ export class HubScene extends Phaser.Scene {
         row.on('pointerdown',  () => { raiderToStash(id); this._onPackChanged(); });
         y += 16;
       }
+
+      // Bulk action — only shown when there's something to dump.
+      y += 4;
+      const dumpBtn = this._r(this.add.text(x + 8, y, '[ Dump All to Stash ]', {
+        fontSize: '11px', color: '#aabbdd', fontFamily: 'monospace',
+      }).setInteractive());
+      dumpBtn.on('pointerover', () => dumpBtn.setColor('#ffffff'));
+      dumpBtn.on('pointerout',  () => dumpBtn.setColor('#aabbdd'));
+      dumpBtn.on('pointerdown', () => {
+        if (dumpRaiderPackToStash()) this._onPackChanged();
+      });
     }
 
     // ── Enter Dungeon ──────────────────────────────────────────────────────────
@@ -590,6 +620,16 @@ export class HubScene extends Phaser.Scene {
       this._showStashScreen();
     }
     this._buildRaiderPanel();
+  }
+
+  /** Called after a successful Sell: stash view + vault counter; raider panel unaffected. */
+  _onSold() {
+    this._refreshVault();
+    if (this._leftView === 'stash') {
+      for (const obj of this._leftObjs) obj.destroy();
+      this._leftObjs = [];
+      this._showStashScreen();
+    }
   }
 
   // ── Utilities ─────────────────────────────────────────────────────────────────
