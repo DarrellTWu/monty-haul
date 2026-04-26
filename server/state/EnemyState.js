@@ -1,6 +1,6 @@
 // server/state/EnemyState.js
 import { createRequire } from 'module';
-const { Schema, defineTypes } = createRequire(import.meta.url)('@colyseus/schema');
+const { Schema, ArraySchema, defineTypes } = createRequire(import.meta.url)('@colyseus/schema');
 
 export class EnemyState extends Schema {
   constructor() {
@@ -17,6 +17,9 @@ export class EnemyState extends Schema {
     this.aiState = 'idle';
     this.vx = 0;
     this.vy = 0;
+    this.lootGold  = 0;                  // populated on death from LOOT_TABLE_REGISTRY
+    this.lootItems = new ArraySchema();  // item ids available to loot from corpse
+    this.looted    = false;              // flips true after a player loots the corpse
   }
 }
 
@@ -33,4 +36,7 @@ defineTypes(EnemyState, {
   aiState: 'string',
   vx: 'number',
   vy: 'number',
+  lootGold:  'number',
+  lootItems: { array: 'string' },
+  looted:    'boolean',
 });

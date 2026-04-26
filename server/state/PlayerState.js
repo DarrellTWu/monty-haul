@@ -26,6 +26,7 @@ export class PlayerState extends Schema {
     this.tempHp                   = 0; // temporary HP (absorbed before regular HP)
     this.rageRemainingMs          = 0; // synced for HUD ring display
     this.rageUsesRemaining        = 0; // remaining rage activations this run
+    this.gold                     = 0; // run-scope wallet; transferred to hub on extract, lost on death
     this.inventory  = new ArraySchema(); // unequipped item ids
     this.conditions = new ArraySchema(); // active condition ids (e.g. 'bless')
     this.hotbar     = new ArraySchema(); // 10 slots: ability/consumable id or ''
@@ -54,6 +55,7 @@ defineTypes(PlayerState, {
   tempHp:                   'number',
   rageRemainingMs:          'number',
   rageUsesRemaining:        'number',
+  gold:                     'number',
   inventory:  { array: 'string' },
   conditions: { array: 'string' },
   hotbar:     { array: 'string' },
