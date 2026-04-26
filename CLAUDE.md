@@ -87,16 +87,16 @@ Many files in docs/tech_spec.md are planned, not yet built. What actually exists
 - `persistence/`, `matchmaking/` — not yet built
 
 **Client** (no `rendering/` or `ui/` subdirectories)
-- `scenes/HubScene.js` — entry point (auto-starts); two-panel layout: left cycles sub-screens (Class, Stash), right is persistent Raider Config + Enter Dungeon; screen-level VAULT display (top-right) shows hub gold; passes `{ class, items }` to DungeonScene; auto-opens Stash tab when `init({ view: 'stash' })`
+- `scenes/HubScene.js` — entry point (auto-starts); two-panel layout: left cycles sub-screens (Class, Stash, Shop, Craft), right is persistent Raider Config + Enter Dungeon; screen-level VAULT display (top-right) shows hub gold; passes `{ class, items }` to DungeonScene; auto-opens Stash tab when `init({ view: 'stash' })`. Sub-state: `_shopVendor` (`'potions' | 'armor'`), `_craftBench` (one of the six BENCH_REGISTRY ids). Stash rows expose `[ Sell N gp ]`; raider panel shows `[ Dump All to Stash ]` when pack non-empty.
 - `scenes/DungeonScene.js` — gameplay rendering, input wiring; receives `{ class, items }` via init(data); detects run complete/death, shows run summary overlay, calls `setRaiderPack` and `addHubGold(player.gold)` on extract; F-key triggers `_tryLootNearby` which dispatches to chest or corpse; lootable corpses render dim gold with an "F: Loot" hint
 - `scenes/HUDScene.js` — conditions, cooldown rings, hotbar overlay
-- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI; shows live `GOLD N gp` line under HP/AC; renders materials (skeleton_bone, wolf_pelt) in the bag
+- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI; shows live `GOLD N gp` line under HP/AC; renders materials (skeleton_bone, wolf_pelt) in the bag. Bag is a fixed-height scrollable viewport: items past the visible area are clipped by a shared `GeometryMask` and reachable via mouse wheel; mask is cleared on drag-start and restored on drag-end so dragged items aren't clipped while moving to equip slots or hotbar.
 - `network/ColyseusClient.js` — `joinDungeon(opts)` forwards opts (incl. class + items) to server; `sendLoot` (chests), `sendLootCorpse` (corpses)
 - `input/InputHandler.js`
-- `store/stash.js` — localStorage-backed item store; two containers (stash + raider pack) plus persistent hub gold (`mh_hub_gold`); `getStash`, `getRaiderPack`, `stashToRaider`, `raiderToStash`, `getRaiderPackFlat`, `setRaiderPack`, `getHubGold`, `addHubGold`, `setHubGold`; seeded with all items + 0 gold on first load; designed for drop-in Supabase swap
+- `store/stash.js` — localStorage-backed item store; two containers (stash + raider pack) plus persistent hub gold (`mh_hub_gold`). Reads: `getStash`, `getRaiderPack`, `getRaiderPackFlat`, `getHubGold`. Mutations: `stashToRaider`, `raiderToStash`, `dumpRaiderPackToStash`, `setRaiderPack`, `addHubGold`, `setHubGold`, `buyItem`, `sellItem`, `craftRecipe`. Seeded with all items + 0 gold on first load; designed for drop-in Supabase swap. ALL hub-side state mutations route through this file — single migration point.
 
 **Shared**
-- `data/` — constants.js, weapons/melee.js, armor/armor.js, items/(consumables+shields+materials), enemies/tier1.js, classes/fighter.js, classes/barbarian.js, classes/monk.js, classes/index.js (CLASS_REGISTRY), loot/tier1.js (LOOT_TABLE_REGISTRY)
+- `data/` — constants.js, values.js (ITEM_GOLD_VALUE + sellPrice), shop.js (VENDOR_CATALOG), weapons/melee.js, armor/armor.js, items/(consumables+shields+materials), enemies/tier1.js, classes/fighter.js, classes/barbarian.js, classes/monk.js, classes/index.js (CLASS_REGISTRY), loot/tier1.js (LOOT_TABLE_REGISTRY), crafting/benches.js (BENCH_REGISTRY), crafting/recipes.js (RECIPE_REGISTRY + recipesForBench)
 - `logic/combat.js` — full attack resolution
 - `logic/loot.js` — pure `rollLoot(table, rng?)` returning `{ gold, items }`; supports literal item ids and `@pool` references (currently `@potion_any`)
 - `tests/combat.test.js`, `tests/loot.test.js`
@@ -167,9 +167,17 @@ All messages handled in `DungeonRoom.js` onCreate.
 - DungeonRoom._tick calls `_rollLootForFreshDeaths()` each tick — idempotent via `_lootRolled` Set guard. Enemies with no table drop nothing silently.
 - All numeric tuning (dice, chances, gold ranges) lives in the table file, not in logic.
 
+## Hub Economy & Crafting
+- **Pricing source of truth**: `shared/data/values.js` exports `ITEM_GOLD_VALUE` (SRD prices for weapons/armor/potions, nominal values for materials) and `sellPrice(id)` (1/4× value, floor, min 1 gp). Both shop buy prices and stash sell prices read from this map — single source, no drift.
+- **Shop**: `VENDOR_CATALOG` in `shared/data/shop.js` is keyed by vendor (`potions`, `armor`); each entry is `{ id, price }` where price is computed from `ITEM_GOLD_VALUE`. Add a new vendor or item by editing the id arrays in shop.js.
+- **Crafting benches**: `BENCH_REGISTRY` in `shared/data/crafting/benches.js` defines all six benches with `status: 'open' | 'planned'`. Planned benches render a "Coming soon" placeholder. Six benches: forge, binder, artificer, apothecary, scriptorium, refinery.
+- **Recipes**: `RECIPE_REGISTRY` in `shared/data/crafting/recipes.js` is keyed by recipe id. Shape: `{ id, label, bench, inputs: [{ id, qty }], output: { id, qty } }`. `recipesForBench(benchId)` filters by bench. New recipes are pure data — no logic to write.
+- **Stash mutations** (`client/src/store/stash.js`): `buyItem(id, price)`, `sellItem(id, price)`, `craftRecipe(recipe)`, `dumpRaiderPackToStash()`. All atomic — `craftRecipe` validates every input before any deduction. Caller passes prices computed via `sellPrice()` / `VENDOR_CATALOG` lookup.
+
 ## Reference Docs (read when relevant to the task)
 - docs/tech_spec.md — Full technical architecture, file structure, module details
 - docs/gdd.md — Game design document, combat system, class roster, items
+- docs/gdd_crafting.md — Conceptual crafting & itemization GDD (three-part item model, biomes, recipe acquisition, six benches)
 - docs/loot-system-plan.md — loot tables, gold tracking, corpse looting design and build plan
 
 ## Keeping Docs Current
