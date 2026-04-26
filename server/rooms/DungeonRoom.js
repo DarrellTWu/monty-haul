@@ -7,9 +7,11 @@ import { PlayerState } from '../state/PlayerState.js';
 import { EnemyState }  from '../state/EnemyState.js';
 import { ChestState }  from '../state/ChestState.js';
 import { TrapState }   from '../state/TrapState.js';
+import { StairState }  from '../state/StairState.js';
 
 import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.js';
 import { GOBLIN, DOG, SKELETON }     from '../../shared/data/enemies/tier1.js';
+import { FLOOR_REGISTRY }            from '../../shared/data/floors/index.js';
 import { getModifier, resolveSave, rollDice } from '../../shared/logic/combat.js';
 import { rollLoot }                  from '../../shared/logic/loot.js';
 import { LOOT_TABLE_REGISTRY }       from '../../shared/data/loot/tier1.js';
@@ -32,19 +34,10 @@ const WEAPON_REGISTRY = {
   handaxe: HANDAXE, greataxe: GREATAXE, greatsword: GREATSWORD, dagger: DAGGER, mace: MACE,
 };
 
-const ROOM_WIDTH  = 1600;
-const ROOM_HEIGHT = 1200;
-const WALL        = 40;
-const BOUNDS = { minX: WALL, maxX: ROOM_WIDTH - WALL, minY: WALL, maxY: ROOM_HEIGHT - WALL };
+// type string → enemy stat block. Used by _loadFloor when reading floor data.
+const ENEMY_REGISTRY = { goblin: GOBLIN, dog: DOG, skeleton: SKELETON };
 
-const FIGHTER_SPAWN  = { x: 800, y: 600 };
-const CHEST_SPAWN    = { x: 880, y: 600 };
-const TRAP_SPAWN     = { x: 1380, y: 160 };
-
-// Four corners, each enemy type gets a separate corner.
-const GOBLIN_SPAWNS   = [{ x: 300, y: 300 }, { x: 1300, y: 900 }];
-const DOG_SPAWN       = { x: 1300, y: 300 };
-const SKELETON_SPAWN  = { x: 300, y: 900 };
+const WALL = 40; // px wall thickness on every floor
 
 export class DungeonRoom extends Room {
   onCreate(options) {
@@ -52,12 +45,9 @@ export class DungeonRoom extends Room {
     this._enemyDefs       = new Map();
     this._conditionTimers = new Map(); // `${sessionId}_${condition}` → remainingMs
     this._lootRolled      = new Set(); // enemyIds whose loot has been rolled (one-shot on death)
+    this._bounds          = { minX: WALL, maxX: WALL, minY: WALL, maxY: WALL }; // overwritten by _loadFloor
 
-    this._spawnGoblins();
-    this._spawnDog();
-    this._spawnSkeleton();
-    this._spawnChest();
-    this._spawnTrap();
+    this._loadFloor(1);
 
     // ── Movement ──────────────────────────────────────────────────────────────────
     this.onMessage('move', (client, { dx, dy }) => {
@@ -193,6 +183,34 @@ export class DungeonRoom extends Room {
       console.log(`[DungeonRoom] ${client.sessionId} looted corpse ${enemyId}: ${summary}`);
     });
 
+    // ── Descend stairs ────────────────────────────────────────────────────────────
+    // Single-room model: when one player descends, the floor swaps for everyone.
+    // All players are teleported to the new floor's spawn and given a long rest.
+    this.onMessage('descend', (client, { stairId }) => {
+      const player = this.state.players.get(client.sessionId);
+      const stair  = this.state.stairs.get(String(stairId));
+      if (!player || !player.alive || !stair) return;
+      if (stair.locked) return;
+      const dx = player.x - stair.x;
+      const dy = player.y - stair.y;
+      if (Math.sqrt(dx * dx + dy * dy) > CHEST_LOOT_RANGE_PX) return;
+
+      const toFloor = stair.toFloor;
+      this._loadFloor(toFloor);
+
+      const floor = FLOOR_REGISTRY[toFloor];
+      for (const [sid, p] of this.state.players) {
+        p.x  = floor.playerSpawn.x;
+        p.y  = floor.playerSpawn.y;
+        p.vx = 0; p.vy = 0;
+        this._longRest(p, sid);
+      }
+      this.broadcast('combat_log', {
+        message: `── Descending to Floor ${toFloor} — long rest taken (HP, rage, Second Wind restored) ──`,
+      });
+      console.log(`[DungeonRoom] Floor ${toFloor} loaded; ${this.state.players.size} player(s) descended`);
+    });
+
     // ── Hotbar management ─────────────────────────────────────────────────────────
     this.onMessage('assign_hotbar', (client, { itemId, slot }) => {
       const player = this.state.players.get(client.sessionId);
@@ -259,9 +277,10 @@ export class DungeonRoom extends Room {
         : computeAC(null, dexMod, false);
     }
 
+    const spawn = FLOOR_REGISTRY[this.state.floor]?.playerSpawn ?? { x: 0, y: 0 };
     const player = new PlayerState();
-    player.x     = FIGHTER_SPAWN.x;
-    player.y     = FIGHTER_SPAWN.y;
+    player.x     = spawn.x;
+    player.y     = spawn.y;
     player.hp    = maxHp;
     player.maxHp = maxHp;
     player.ac    = ac;
@@ -323,35 +342,69 @@ export class DungeonRoom extends Room {
     console.log('[DungeonRoom] disposed');
   }
 
-  // ── Spawn helpers ─────────────────────────────────────────────────────────────
+  // ── Floor loading ─────────────────────────────────────────────────────────────
 
-  _spawnChest() {
-    const chest = new ChestState();
-    chest.id   = 'chest_0';
-    chest.x    = CHEST_SPAWN.x;
-    chest.y    = CHEST_SPAWN.y;
-    chest.open = false;
-    chest.items.push(
-      'shield', 'dagger', 'greataxe', 'mace',
-      'half_plate',
-      'healing_potion', 'bless_potion', 'longstrider_potion', 'false_life_potion',
-    );
-    this.state.chests.set('chest_0', chest);
-    console.log('[DungeonRoom] Spawned chest');
-  }
+  /**
+   * Tear down the current floor's entities and load floor `n` from FLOOR_REGISTRY.
+   * Players are not modified here — descend handler resets position + rests them.
+   * Initial onCreate call: just populates floor 1 against empty state.
+   */
+  _loadFloor(n) {
+    const floor = FLOOR_REGISTRY[n];
+    if (!floor) {
+      console.warn(`[DungeonRoom] _loadFloor: no floor data for ${n}`);
+      return;
+    }
 
-  _spawnGoblins() {
-    GOBLIN_SPAWNS.forEach((pos, i) => {
-      this._spawnEnemy(`goblin_${i}`, GOBLIN, pos);
-    });
-  }
+    this.state.enemies.clear();
+    this.state.chests.clear();
+    this.state.traps.clear();
+    this.state.stairs.clear();
+    this._enemyDefs.clear();
+    this._lootRolled.clear();
 
-  _spawnDog() {
-    this._spawnEnemy('dog_0', DOG, DOG_SPAWN);
-  }
+    for (const e of floor.enemies) {
+      const def = ENEMY_REGISTRY[e.type];
+      if (!def) {
+        console.warn(`[DungeonRoom] unknown enemy type '${e.type}' on floor ${n}`);
+        continue;
+      }
+      this._spawnEnemy(e.id, def, { x: e.x, y: e.y });
+    }
+    for (const c of floor.chests) {
+      const chest = new ChestState();
+      chest.id   = c.id;
+      chest.x    = c.x;
+      chest.y    = c.y;
+      chest.open = false;
+      for (const item of c.items) chest.items.push(item);
+      this.state.chests.set(c.id, chest);
+    }
+    for (const t of floor.traps) {
+      const trap = new TrapState();
+      trap.id = t.id;
+      trap.x  = t.x;
+      trap.y  = t.y;
+      trap.cooldownMs = 0;
+      this.state.traps.set(t.id, trap);
+    }
+    for (const s of floor.stairs) {
+      const stair = new StairState();
+      stair.id      = s.id;
+      stair.x       = s.x;
+      stair.y       = s.y;
+      stair.toFloor = s.toFloor;
+      stair.locked  = !!s.lockedUntilAllEnemiesDead;
+      this.state.stairs.set(s.id, stair);
+    }
 
-  _spawnSkeleton() {
-    this._spawnEnemy('skeleton_0', SKELETON, SKELETON_SPAWN);
+    this.state.floor = n;
+    this._bounds.minX = WALL;
+    this._bounds.maxX = floor.width  - WALL;
+    this._bounds.minY = WALL;
+    this._bounds.maxY = floor.height - WALL;
+
+    console.log(`[DungeonRoom] Floor ${n} loaded: ${floor.enemies.length} enemies, ${floor.chests.length} chests, ${floor.traps.length} traps, ${floor.stairs.length} stairs (${floor.width}x${floor.height})`);
   }
 
   _spawnEnemy(id, def, pos) {
@@ -367,23 +420,37 @@ export class DungeonRoom extends Room {
     enemy.aiState = 'idle';
     this.state.enemies.set(id, enemy);
     this._enemyDefs.set(id, def);
-    console.log(`[DungeonRoom] Spawned ${def.type} (${id}) at (${pos.x}, ${pos.y})`);
   }
 
-  _spawnTrap() {
-    const trap = new TrapState();
-    trap.id    = 'trap_0';
-    trap.x     = TRAP_SPAWN.x;
-    trap.y     = TRAP_SPAWN.y;
-    trap.cooldownMs = 0;
-    this.state.traps.set('trap_0', trap);
-    console.log(`[DungeonRoom] Spawned spike trap at (${TRAP_SPAWN.x}, ${TRAP_SPAWN.y})`);
+  /**
+   * SRD-style long rest: HP to max, temp HP cleared, Second Wind + rage uses
+   * refreshed, all timed conditions dropped (rage, bless, longstrider, false
+   * life). Called for each player on descend.
+   */
+  _longRest(player, sessionId) {
+    player.hp     = player.maxHp;
+    player.tempHp = 0;
+    player.secondWindAvailable = true;
+
+    const classDef = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
+    player.rageUsesRemaining = classDef.rageUses ?? 0;
+
+    player.rageRemainingMs        = 0;
+    player.blessRemainingMs       = 0;
+    player.longstriderRemainingMs = 0;
+    player.falseLifeRemainingMs   = 0;
+    while (player.conditions.length > 0) player.conditions.pop();
+
+    const prefix = `${sessionId}_`;
+    for (const key of [...this._conditionTimers.keys()]) {
+      if (key.startsWith(prefix)) this._conditionTimers.delete(key);
+    }
   }
 
   // ── Per-tick logic ────────────────────────────────────────────────────────────
 
   _tick(dt) {
-    MovementSystem.update(this.state, dt, BOUNDS);
+    MovementSystem.update(this.state, dt, this._bounds);
 
     const aiLogs = AISystem.update(this.state, dt, this._enemyDefs, MELEE_HIT_RANGE_PX);
     for (const msg of aiLogs) this.broadcast('combat_log', { message: msg });
@@ -396,10 +463,21 @@ export class DungeonRoom extends Room {
     this._tickConditions(dt);
     this._rollLootForFreshDeaths();
 
-    const allDead = [...this.state.enemies.values()].every(e => !e.alive);
-    if (allDead && this.state.phase === 'playing') {
-      this.state.phase = 'complete';
-      console.log('[DungeonRoom] All enemies defeated');
+    // Stair unlock: any stair gated on enemies-dead flips open the first tick
+    // after the last enemy dies. The transition fires once per stair (locked=false
+    // is the gate to the broadcast). A floor with no stairs is a no-op.
+    if (this.state.stairs.size > 0) {
+      const allDead = [...this.state.enemies.values()].every(e => !e.alive);
+      if (allDead) {
+        for (const [, stair] of this.state.stairs) {
+          if (stair.locked) {
+            stair.locked = false;
+            this.broadcast('combat_log', {
+              message: `Stair to Floor ${stair.toFloor} unlocked.`,
+            });
+          }
+        }
+      }
     }
   }
 
@@ -532,6 +610,13 @@ export class DungeonRoom extends Room {
       this._conditionTimers.set(`${sessionId}_false_life`, c.conditionDurationMs);
       this.broadcast('combat_log', {
         message: `${c.label}: ${className} gains ${tempHp} temp HP (${c.conditionDurationMs / 1000}s)`,
+      });
+    } else if (c.type === 'extract') {
+      // Sets the run-complete phase. Client (DungeonScene) watches state.phase
+      // and routes to the run-summary overlay. This is the only non-death exit.
+      this.state.phase = 'complete';
+      this.broadcast('combat_log', {
+        message: `${c.label}: ${className} vanishes in a flash of light.`,
       });
     }
 

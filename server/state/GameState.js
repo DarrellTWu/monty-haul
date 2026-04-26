@@ -5,6 +5,7 @@ import { PlayerState } from './PlayerState.js';
 import { EnemyState } from './EnemyState.js';
 import { ChestState } from './ChestState.js';
 import { TrapState } from './TrapState.js';
+import { StairState } from './StairState.js';
 
 export class GameState extends Schema {
   constructor() {
@@ -13,7 +14,9 @@ export class GameState extends Schema {
     this.enemies = new MapSchema();
     this.chests = new MapSchema();
     this.traps = new MapSchema();
+    this.stairs = new MapSchema();
     this.phase = 'playing';
+    this.floor = 1; // current floor number; populated by DungeonRoom._loadFloor
   }
 }
 
@@ -22,5 +25,7 @@ defineTypes(GameState, {
   enemies: { map: EnemyState },
   chests: { map: ChestState },
   traps: { map: TrapState },
+  stairs: { map: StairState },
   phase: 'string',
+  floor: 'number',
 });
