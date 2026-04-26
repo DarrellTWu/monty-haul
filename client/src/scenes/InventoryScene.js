@@ -67,6 +67,14 @@ const ARMOR_BAG_DISPLAY = {
   half_plate: { label: 'Half Plate',  detail: 'AC 15+DEX med' },
 };
 
+// Crafting materials — bag-only items, no equip / hotbar / consume affordance.
+// Server silently rejects equip/hotbar attempts; the row stays selectable so
+// future drop / craft actions have a hook point.
+const MATERIAL_DISPLAY = {
+  skeleton_bone: { label: 'Skeleton Bone', detail: 'crafting material' },
+  wolf_pelt:     { label: 'Wolf Pelt',     detail: 'crafting material' },
+};
+
 // Full description shown in the equipped armor slot.
 const ARMOR_SLOT_DISPLAY = {
   chain_mail: 'Chain Mail — AC 16  (heavy, STR 13)',
@@ -118,8 +126,9 @@ export class InventoryScene extends Phaser.Scene {
     this.add.text(lx, ly, 'CHARACTER', STYLE_SUBHEAD); ly += 20;
     this._nameText = this.add.text(lx, ly, 'Fighter', STYLE_HEADER); ly += 24;
     this._classDescText = this.add.text(lx, ly, 'Level 1  Human Fighter', STYLE_BODY); ly += 18;
-    this._hpText = this.add.text(lx, ly, 'HP  —', STYLE_BODY); ly += 16;
-    this._acText = this.add.text(lx, ly, 'AC  —', STYLE_BODY); ly += 20;
+    this._hpText   = this.add.text(lx, ly, 'HP  —',   STYLE_BODY); ly += 16;
+    this._acText   = this.add.text(lx, ly, 'AC  —',   STYLE_BODY); ly += 16;
+    this._goldText = this.add.text(lx, ly, 'GOLD —',  STYLE_BODY); ly += 20;
 
     // Ability scores.
     this.add.text(lx, ly, 'ABILITY SCORES', STYLE_SUBHEAD); ly += 16;
@@ -361,6 +370,7 @@ export class InventoryScene extends Phaser.Scene {
 
     this._hpText.setText(`HP   ${player.hp} / ${player.maxHp}`);
     this._acText.setText(`AC   ${player.ac}`);
+    this._goldText.setText(`GOLD ${player.gold ?? 0} gp`);
 
     // Weapon slot.
     const weapon = player.equippedWeaponId;
@@ -596,7 +606,7 @@ export class InventoryScene extends Phaser.Scene {
     sendUnequip(slot);
   }
 
-  /** Display label for any equippable item id. */
+  /** Display label for any bag item id. */
   _itemLabel(id) {
     const w = WEAPON_DISPLAY[id];
     if (w) return `${w.label.padEnd(11)}  ${w.detail}`;
@@ -606,6 +616,8 @@ export class InventoryScene extends Phaser.Scene {
     if (a) return `${a.label.padEnd(11)}  ${a.detail}`;
     const c = CONSUMABLE_DISPLAY[id];
     if (c) return `${c.label.padEnd(14)}  ${c.detail}`;
+    const m = MATERIAL_DISPLAY[id];
+    if (m) return `${m.label.padEnd(14)}  ${m.detail}`;
     return id;
   }
 

@@ -2,7 +2,7 @@
 // Hub layout: left panel cycles through sub-screens (Class, Stash, future additions);
 // right panel is a persistent Raider Config summary. Enter Dungeon lives on the right.
 
-import { getStash, getRaiderPack, stashToRaider, raiderToStash } from '../store/stash.js';
+import { getStash, getRaiderPack, stashToRaider, raiderToStash, getHubGold } from '../store/stash.js';
 
 // Panel geometry
 const LP = { x: 30,  y: 70, w: 760, h: 600 }; // left panel
@@ -24,18 +24,22 @@ const ITEM_META = {
   bless_potion:        { label: 'Bless Potion',     detail: '+1d4 atk 60s'     },
   longstrider_potion:  { label: 'Longstrider Pot',  detail: '+10ft spd 2m'     },
   false_life_potion:   { label: 'False Life Pot',   detail: '1d4+4 tmp HP 2m'  },
+  skeleton_bone:       { label: 'Skeleton Bone',    detail: 'crafting material'},
+  wolf_pelt:           { label: 'Wolf Pelt',        detail: 'crafting material'},
 };
 
 const STASH_ORDER = [
   'longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword',
   'chain_mail','half_plate','shield',
   'healing_potion','bless_potion','longstrider_potion','false_life_potion',
+  'skeleton_bone','wolf_pelt',
 ];
 
 const STASH_SECTIONS = [
   { label: 'Weapons',        ids: new Set(['longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword']) },
   { label: 'Armor & Shield', ids: new Set(['chain_mail','half_plate','shield']) },
   { label: 'Potions',        ids: new Set(['healing_potion','bless_potion','longstrider_potion','false_life_potion']) },
+  { label: 'Materials',      ids: new Set(['skeleton_bone','wolf_pelt']) },
 ];
 
 // Class display metadata for the hub UI.
@@ -83,6 +87,15 @@ export class HubScene extends Phaser.Scene {
     this.add.text(640, 38, "MONTY HAUL'S DUNGEON CRAWL", {
       fontSize: '26px', color: '#ffdd88', fontFamily: 'monospace',
     }).setOrigin(0.5);
+
+    // Vault — gold lives at the hub, not on the raider. Sits at screen level
+    // (outside both panels) since it's a property of the home, not the run config.
+    this.add.text(RP.x + RP.w, 30, 'VAULT', {
+      fontSize: '10px', color: '#556677', fontFamily: 'monospace',
+    }).setOrigin(1, 0);
+    this.add.text(RP.x + RP.w, 42, `${getHubGold()} gp`, {
+      fontSize: '15px', color: '#ffcc44', fontFamily: 'monospace',
+    }).setOrigin(1, 0);
 
     this._drawShells();
     this._buildSubNav();
