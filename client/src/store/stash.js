@@ -4,6 +4,7 @@
 
 const STASH_KEY       = 'mh_stash';
 const RAIDER_PACK_KEY = 'mh_raider_pack';
+const HUB_GOLD_KEY    = 'mh_hub_gold';
 
 const INITIAL_STASH = [
   { id: 'longsword',           qty: 1 },
@@ -42,6 +43,7 @@ function _save(key, value) {
 // Seed on first ever load. Does not overwrite existing data.
 if (!localStorage.getItem(STASH_KEY))       _save(STASH_KEY,       INITIAL_STASH.map(e => ({ ...e })));
 if (!localStorage.getItem(RAIDER_PACK_KEY)) _save(RAIDER_PACK_KEY, []);
+if (localStorage.getItem(HUB_GOLD_KEY) === null) _save(HUB_GOLD_KEY, 0);
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -96,4 +98,27 @@ export function setRaiderPack(ids) {
   const map = {};
   for (const id of ids) map[id] = (map[id] ?? 0) + 1;
   _save(RAIDER_PACK_KEY, Object.entries(map).map(([id, qty]) => ({ id, qty })));
+}
+
+// ── Hub gold ──────────────────────────────────────────────────────────────────
+// Persistent gp wallet at the hub. Run-scope gold is separate (server-side
+// player.gold); on successful extraction the client adds it to hub gold.
+// Death does nothing — run gold is simply not transferred.
+
+export function getHubGold() {
+  const raw = _load(HUB_GOLD_KEY, 0);
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Increment hub gold by `n`. Called post-extract with player.gold. */
+export function addHubGold(n) {
+  const delta = Math.floor(Number(n) || 0);
+  if (delta === 0) return;
+  _save(HUB_GOLD_KEY, getHubGold() + delta);
+}
+
+/** Overwrite hub gold. Rarely needed — exposed for resets / future server sync. */
+export function setHubGold(n) {
+  _save(HUB_GOLD_KEY, Math.max(0, Math.floor(Number(n) || 0)));
 }
