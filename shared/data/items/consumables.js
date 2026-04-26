@@ -35,9 +35,18 @@ export const FALSE_LIFE_POTION = {
   diceBonus: 4,                 // 1d4+4 temp HP (SRD base level)
 };
 
+// One-shot extraction. Using it ends the run successfully — the only
+// non-death exit from the dungeon. No targeting, no save, no roll.
+export const EXTRACTION_SCROLL = {
+  id: 'extraction_scroll',
+  label: 'Scroll of Extraction',
+  type: 'extract',
+};
+
 export const CONSUMABLE_REGISTRY = {
   healing_potion:    HEALING_POTION,
   bless_potion:      BLESS_POTION,
   longstrider_potion: LONGSTRIDER_POTION,
   false_life_potion:  FALSE_LIFE_POTION,
+  extraction_scroll:  EXTRACTION_SCROLL,
 };

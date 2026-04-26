@@ -34,6 +34,7 @@ export const ITEM_GOLD_VALUE = {
   longstrider_potion: 75,
   false_life_potion:  100,
   bless_potion:       250,
+  extraction_scroll:  100,
 
   // Crafting materials — nominal sell value so nothing is permanently
   // unsellable; crafting use should still dominate.
