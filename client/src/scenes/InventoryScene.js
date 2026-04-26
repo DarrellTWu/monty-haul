@@ -97,6 +97,8 @@ const STYLE_FEAT     = { fontSize: '11px', color: '#88aacc',  fontFamily: 'monos
 // Double-click threshold in ms.
 const DBLCLICK_MS = 300;
 
+const BAG_ITEM_H = 28;  // row height for bag items (px)
+
 export class InventoryScene extends Phaser.Scene {
   constructor() {
     super({ key: 'InventoryScene' });
@@ -327,6 +329,25 @@ export class InventoryScene extends Phaser.Scene {
     this.add.text(rx, hotbarY - 16, 'HOTBAR  (drag abilities or items here, press 1-0)', STYLE_SUBHEAD);
     this._hotbarSlots = this._buildHotbar(rx, hotbarY);
 
+    // Bag scroll setup — defines the clipping viewport, shared mask, overflow hint,
+    // and mouse-wheel listener.  All downstream bag methods read these instance fields.
+    this._bagScrollOffset   = 0;
+    this._bagViewportBottom = hotbarY - 28;
+    this._bagViewportH      = this._bagViewportBottom - this._bagStartY;
+    const bagRx = DIVIDER_X + 20;
+    const bagW  = PANEL_X + PANEL_W - bagRx - 4;
+    this._bagMaskGfx = this.make.graphics();
+    this._bagMaskGfx.fillRect(bagRx, this._bagStartY, bagW, this._bagViewportH);
+    this._bagMask = this._bagMaskGfx.createGeometryMask();
+    this._bagOverflowText = this.add.text(
+      bagRx, this._bagViewportBottom + 2, '', { ...STYLE_HINT, color: '#445566' },
+    );
+    this.input.on('wheel', (pointer, _gameObjects, _dx, deltaY) => {
+      const inBag = pointer.x >= bagRx && pointer.x <= bagRx + bagW
+                 && pointer.y >= this._bagStartY && pointer.y <= this._bagViewportBottom;
+      if (inBag) this._scrollBag(Math.sign(deltaY) * BAG_ITEM_H);
+    });
+
     // Global drop handler (weapon/offhand slots + hotbar).
     this.input.on('drop', (pointer, gameObject, dropZone) => {
       const itemId   = gameObject.getData('itemId');
@@ -472,33 +493,37 @@ export class InventoryScene extends Phaser.Scene {
     }
     this._bagBtns = [];
 
-    // If the previously-selected item is no longer in the bag, deselect.
+    // Clamp scroll to the valid range for the new inventory size.
+    const maxScroll = Math.max(0, player.inventory.length * BAG_ITEM_H - this._bagViewportH);
+    this._bagScrollOffset = Math.min(Math.max(this._bagScrollOffset, 0), maxScroll);
+
     if (this._selectedItemId && ![...player.inventory].includes(this._selectedItemId)) {
       this._selectedItemId = null;
     }
 
-    let ry = this._bagStartY;
     const rx = DIVIDER_X + 20;
 
-    for (const itemId of player.inventory) {
-      const label   = this._itemLabel(itemId);
-      const blocked = this._isBlocked(itemId, player);
+    for (let i = 0; i < player.inventory.length; i++) {
+      const itemId   = player.inventory[i];
+      const logicalY = i * BAG_ITEM_H;
+      const actualY  = this._bagStartY + logicalY - this._bagScrollOffset;
+      const label    = this._itemLabel(itemId);
+      const blocked  = this._isBlocked(itemId, player);
 
-      const btn = this._makeItemButton(rx, ry, label, itemId);
-      btn.setVisible(!blocked);
+      const btn = this._makeItemButton(rx, actualY, label, itemId, logicalY);
+      btn.setVisible(!blocked).setMask(this._bagMask);
 
-      // Grayed-out overlay shown when SRD constraint blocks equip.
-      const blockedText = this.add.text(rx, ry, `${label}  ✗`, {
+      const blockedText = this.add.text(rx, actualY, `${label}  ✗`, {
         ...STYLE_BLOCKED,
         backgroundColor: '#0d0d14',
         padding: { x: 8, y: 4 },
-      }).setVisible(blocked);
+      }).setVisible(blocked).setMask(this._bagMask);
 
-      this._bagBtns.push({ id: itemId, btn, blockedText });
-      ry += 28;
+      this._bagBtns.push({ id: itemId, btn, blockedText, logicalY });
     }
 
     this._updateSelection();
+    this._updateOverflow(player.inventory.length);
   }
 
   /**
@@ -632,14 +657,14 @@ export class InventoryScene extends Phaser.Scene {
    * The key fix vs. the old code: equip is NEVER sent on pointerdown, so the
    * button cannot be destroyed mid-drag by a server state update.
    */
-  _makeItemButton(x, y, label, itemId) {
+  _makeItemButton(x, y, label, itemId, logicalY) {
     const btn = this.add.text(x, y, label, {
       ...STYLE_ITEM,
       backgroundColor: '#1a1a2e',
       padding: { x: 8, y: 4 },
     }).setInteractive({ useHandCursor: true, draggable: true });
 
-    btn.setData({ itemId, originX: x, originY: y });
+    btn.setData({ itemId, logicalY, originX: x });
     this.input.setDraggable(btn);
 
     let isDragging  = false;
@@ -651,11 +676,15 @@ export class InventoryScene extends Phaser.Scene {
 
     btn.on('drag', (ptr, dragX, dragY) => {
       isDragging = true;
+      btn.clearMask();
       btn.setPosition(dragX, dragY).setDepth(10);
     });
 
     btn.on('dragend', () => {
-      btn.setPosition(x, y).setDepth(0);
+      // Snap back to wherever the item currently sits after any scroll that happened
+      // during the drag.
+      btn.setMask(this._bagMask);
+      btn.setPosition(x, this._bagStartY + logicalY - this._bagScrollOffset).setDepth(0);
       // dragend fires before drop; isDragging stays true so pointerup skips click logic.
     });
 
@@ -701,6 +730,27 @@ export class InventoryScene extends Phaser.Scene {
     obj.on('dragend', () => {
       obj.setPosition(originX, originY).setDepth(0);
     });
+  }
+
+  _scrollBag(delta) {
+    const maxScroll = Math.max(0, this._bagBtns.length * BAG_ITEM_H - this._bagViewportH);
+    this._bagScrollOffset = Math.max(0, Math.min(this._bagScrollOffset + delta, maxScroll));
+    for (const { btn, blockedText, logicalY } of this._bagBtns) {
+      const y = this._bagStartY + logicalY - this._bagScrollOffset;
+      btn.setY(y);
+      blockedText.setY(y);
+    }
+    this._updateOverflow(this._bagBtns.length);
+  }
+
+  _updateOverflow(itemCount) {
+    const hiddenBelow = itemCount * BAG_ITEM_H - this._bagViewportH - this._bagScrollOffset;
+    if (hiddenBelow > 0) {
+      const moreCount = Math.ceil(hiddenBelow / BAG_ITEM_H);
+      this._bagOverflowText.setText(`↓ ${moreCount} more  (scroll)`).setVisible(true);
+    } else {
+      this._bagOverflowText.setVisible(false);
+    }
   }
 
   /** Non-draggable equipment slot button (click to equip-here or unequip). */
