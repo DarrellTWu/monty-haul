@@ -131,6 +131,13 @@ Each class file exports a const with these fields (see fighter.js / monk.js as r
 - `rageUses` — optional number of rage uses (Barbarian only for now)
 - `feat` — starting feat id string
 
+## Loadout Model
+`DungeonRoom.onJoin` branches on `options.items.length`:
+- **Empty** → class default weapon/armor equipped, bag empty (free starter loadout)
+- **Non-empty** → no class defaults; items go to bag, server auto-equips first weapon/armor/shield, auto-assigns consumables to hotbar
+
+Class default gear extracted at run-end enters the raider pack normally and triggers the non-empty branch on the next run.
+
 ## Client-Server Message Protocol
 All messages handled in `DungeonRoom.js` onCreate.
 

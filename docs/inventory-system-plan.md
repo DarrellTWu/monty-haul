@@ -26,9 +26,12 @@ Both are `[{ id: string, qty: number }]` arrays. Moving an item between containe
 
 **Initial state** (seeded once into localStorage if empty): 1× each weapon/armor/shield, 2× each potion — the same list already displayed in HubScene.
 
-**On dungeon entry**: the raider pack is flattened to a plain `string[]` and passed to the server as starting inventory. The raider always enters with their class's default starter gear pre-equipped; pack items go into the bag.
+**On dungeon entry**: the raider pack is flattened to a plain `string[]` and passed to the server as `options.items`. Entry behavior branches on whether the pack is empty:
 
-**On run completion**: the server's `player.inventory + equipped items` are read by the client and used to overwrite the raider pack in the store.
+- **Empty pack** — raider enters with class default weapon and armor pre-equipped, bag empty. This is the "free starter loadout" path.
+- **Non-empty pack** — class defaults are not provided. All pack items go to the bag, then the server does an auto-equip pass (first weapon → weapon slot, first armor → armor slot, first shield → offhand if no two-handed weapon equipped). Consumables are auto-assigned to the first available hotbar slots. The raider is fully responsible for their own loadout.
+
+**On run completion**: the server's `player.inventory + equipped items` are read by the client and used to overwrite the raider pack in the store. Class default gear extracted this way is treated like any other item — it enters the raider pack and counts as a custom loadout on the next run.
 
 ---
 
