@@ -203,16 +203,29 @@ export class DungeonRoom extends Room {
   }
 
   onJoin(client, options = {}) {
-    const classDef = CLASS_REGISTRY[options.class] ?? DEFAULT_CLASS;
-    const conMod   = getModifier(classDef.baseAbilityScores.con);
-    const maxHp    = classDef.getStartingHp(conMod);
-    const dexMod   = getModifier(classDef.baseAbilityScores.dex);
-    let ac;
-    if (!classDef.startingArmorId && classDef.unarmoredDefense) {
-      const udMod = getModifier(classDef.baseAbilityScores[classDef.unarmoredDefense]);
-      ac = 10 + dexMod + udMod;
+    const classDef    = CLASS_REGISTRY[options.class] ?? DEFAULT_CLASS;
+    const conMod      = getModifier(classDef.baseAbilityScores.con);
+    const maxHp       = classDef.getStartingHp(conMod);
+    const dexMod      = getModifier(classDef.baseAbilityScores.dex);
+    const raiderItems = options.items ?? [];
+
+    // Empty pack → class defaults equipped (free starter loadout).
+    // Non-empty pack → raider enters unequipped; all items go to bag.
+    let startingWeapon, startingArmor, ac;
+    if (raiderItems.length === 0) {
+      startingWeapon = classDef.startingWeaponId;
+      startingArmor  = classDef.startingArmorId;
+      if (!startingArmor && classDef.unarmoredDefense) {
+        ac = 10 + dexMod + getModifier(classDef.baseAbilityScores[classDef.unarmoredDefense]);
+      } else {
+        ac = computeAC(ARMOR_REGISTRY[startingArmor], dexMod, false);
+      }
     } else {
-      ac = computeAC(ARMOR_REGISTRY[classDef.startingArmorId], dexMod, false);
+      startingWeapon = '';
+      startingArmor  = '';
+      ac = classDef.unarmoredDefense
+        ? 10 + dexMod + getModifier(classDef.baseAbilityScores[classDef.unarmoredDefense])
+        : computeAC(null, dexMod, false);
     }
 
     const player = new PlayerState();
@@ -224,15 +237,51 @@ export class DungeonRoom extends Room {
     player.level = 1;
     player.alive = true;
     player.class            = classDef.id;
-    player.equippedWeaponId = classDef.startingWeaponId;
-    player.equippedArmorId  = classDef.startingArmorId;
+    player.equippedWeaponId = startingWeapon;
+    player.equippedArmorId  = startingArmor;
     for (const feature of classDef.classFeatures) player.hotbar.push(feature);
     for (let i = classDef.classFeatures.length; i < 10; i++) player.hotbar.push('');
     player.rageUsesRemaining = classDef.rageUses ?? 0;
-    for (const id of (options.items ?? [])) player.inventory.push(id);
+    for (const id of raiderItems) player.inventory.push(id);
+
+    if (raiderItems.length > 0) {
+      // Auto-equip first weapon, armor, and shield found in bag.
+      for (const id of [...player.inventory]) {
+        if (!player.equippedWeaponId && WEAPON_REGISTRY[id]) {
+          player.inventory.splice(player.inventory.indexOf(id), 1);
+          player.equippedWeaponId = id;
+        } else if (!player.equippedArmorId && ARMOR_REGISTRY[id]) {
+          player.inventory.splice(player.inventory.indexOf(id), 1);
+          player.equippedArmorId = id;
+        } else if (!player.offhandId && SHIELD_REGISTRY[id]) {
+          const twoHanded = WEAPON_REGISTRY[player.equippedWeaponId]?.properties?.includes('two-handed');
+          if (!twoHanded) {
+            player.inventory.splice(player.inventory.indexOf(id), 1);
+            player.offhandId = id;
+          }
+        }
+      }
+      this._recomputeAC(player);
+    }
+
+    // Auto-assign consumables to the first available hotbar slots.
+    for (const id of [...player.inventory]) {
+      if (!CONSUMABLE_REGISTRY[id]) continue;
+      let alreadyBound = false;
+      for (let i = 0; i < player.hotbar.length; i++) {
+        if (player.hotbar[i] === id) { alreadyBound = true; break; }
+      }
+      if (alreadyBound) continue;
+      let slot = -1;
+      for (let i = 0; i < player.hotbar.length; i++) {
+        if (player.hotbar[i] === '') { slot = i; break; }
+      }
+      if (slot === -1) break;
+      player.hotbar[slot] = id;
+    }
 
     this.state.players.set(client.sessionId, player);
-    console.log(`[DungeonRoom] ${client.sessionId} joined as ${classDef.id} — HP ${maxHp} AC ${ac}`);
+    console.log(`[DungeonRoom] ${client.sessionId} joined as ${classDef.id} — HP ${maxHp} AC ${player.ac}`);
   }
 
   onLeave(client) {

@@ -10,7 +10,7 @@
 // PLACEHOLDER ROOM: the room boundary is a simple rectangle.
 // When tilemaps arrive, replace _drawRoom() with a Tilemap layer.
 
-import { joinDungeon, sendLoot, sendUseHotbar } from '../network/ColyseusClient.js';
+import { joinDungeon, sendLoot, sendUseHotbar, leave as leaveRoom } from '../network/ColyseusClient.js';
 import { InputHandler } from '../input/InputHandler.js';
 import { CHEST_LOOT_RANGE_PX, TRAP_RADIUS_PX } from '../../../shared/data/constants.js';
 import { getRaiderPackFlat, setRaiderPack } from '../store/stash.js';
@@ -384,7 +384,7 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   async _exitToHub() {
-    try { await this._room?.leave(); } catch { /* ignore if already disconnected */ }
+    try { await leaveRoom(); } catch { /* ignore if already disconnected */ }
     this.scene.stop('HUDScene');
     this.scene.stop('InventoryScene');
     this.scene.start('HubScene', { view: 'stash' });
