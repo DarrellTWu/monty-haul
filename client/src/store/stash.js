@@ -138,3 +138,31 @@ export function buyItem(id, price) {
   _save(STASH_KEY, stash);
   return true;
 }
+
+/**
+ * Atomically consume a recipe's inputs and add its output to the stash.
+ * `recipe` is { inputs: [{ id, qty }], output: { id, qty } } — the registry
+ * shape from shared/data/crafting/recipes.js.
+ * Returns false if any input is short; no partial deductions on failure.
+ */
+export function craftRecipe(recipe) {
+  if (!recipe?.inputs || !recipe?.output) return false;
+  const stash = getStash();
+
+  // Validate every input first so we never partially consume on failure.
+  for (const { id, qty } of recipe.inputs) {
+    const entry = stash.find(e => e.id === id);
+    if (!entry || entry.qty < qty) return false;
+  }
+
+  for (const { id, qty } of recipe.inputs) {
+    const entry = stash.find(e => e.id === id);
+    entry.qty -= qty;
+  }
+  const out = stash.find(e => e.id === recipe.output.id);
+  if (out) out.qty += recipe.output.qty;
+  else     stash.push({ id: recipe.output.id, qty: recipe.output.qty });
+
+  _save(STASH_KEY, stash.filter(e => e.qty > 0));
+  return true;
+}

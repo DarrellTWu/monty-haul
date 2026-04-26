@@ -2,8 +2,10 @@
 // Hub layout: left panel cycles through sub-screens (Class, Stash, future additions);
 // right panel is a persistent Raider Config summary. Enter Dungeon lives on the right.
 
-import { getStash, getRaiderPack, stashToRaider, raiderToStash, getHubGold, buyItem } from '../store/stash.js';
+import { getStash, getRaiderPack, stashToRaider, raiderToStash, getHubGold, buyItem, craftRecipe } from '../store/stash.js';
 import { VENDOR_CATALOG } from '../../../shared/data/shop.js';
+import { BENCH_REGISTRY } from '../../../shared/data/crafting/benches.js';
+import { recipesForBench } from '../../../shared/data/crafting/recipes.js';
 
 // Panel geometry
 const LP = { x: 30,  y: 70, w: 760, h: 600 }; // left panel
@@ -102,6 +104,7 @@ export class HubScene extends Phaser.Scene {
     this._selectedClass = null;
     this._leftView      = this._initData.view === 'stash' ? 'stash' : 'class';
     this._shopVendor    = 'potions';
+    this._craftBench    = 'forge';
     this._leftObjs      = [];
     this._rightObjs     = [];
 
@@ -143,6 +146,7 @@ export class HubScene extends Phaser.Scene {
       { id: 'class', label: 'Class' },
       { id: 'stash', label: 'Stash' },
       { id: 'shop',  label: 'Shop'  },
+      { id: 'craft', label: 'Craft' },
     ];
     this._subNavBtns = {};
     let tx = LP.x + 16;
@@ -183,6 +187,7 @@ export class HubScene extends Phaser.Scene {
   _showLeftContent() {
     if      (this._leftView === 'class') this._showClassScreen();
     else if (this._leftView === 'shop')  this._showShopScreen();
+    else if (this._leftView === 'craft') this._showCraftScreen();
     else                                 this._showStashScreen();
   }
 
@@ -361,6 +366,126 @@ export class HubScene extends Phaser.Scene {
   _onPurchase() {
     this._refreshVault();
     this._refreshShopScreen();
+  }
+
+  // ── Crafting screen ──────────────────────────────────────────────────────────
+
+  _showCraftScreen() {
+    const x = LP.x + 20;
+    let   y = LP.y + 52;
+
+    this._l(this.add.text(x, y, 'CRAFTING', {
+      fontSize: '12px', color: '#aaaacc', fontFamily: 'monospace',
+    }));
+    this._l(this.add.text(LP.x + LP.w - 20, y, 'click [ Craft ] to consume mats  ›', {
+      fontSize: '10px', color: '#445566', fontFamily: 'monospace',
+    }).setOrigin(1, 0));
+    y += 22;
+
+    // Bench sub-nav (six benches, all clickable; planned ones still navigable).
+    let bx = x;
+    for (const bench of Object.values(BENCH_REGISTRY)) {
+      const active = this._craftBench === bench.id;
+      const btn = this._l(this.add.text(bx, y, `[ ${bench.label} ]`, {
+        fontSize: '12px',
+        color: active ? '#ffcc44' : (bench.status === 'open' ? '#8888aa' : '#556677'),
+        fontFamily: 'monospace',
+      }).setInteractive());
+      btn.on('pointerover', () => { if (this._craftBench !== bench.id) btn.setColor('#aabbdd'); });
+      btn.on('pointerout',  () => {
+        if (this._craftBench !== bench.id) {
+          btn.setColor(bench.status === 'open' ? '#8888aa' : '#556677');
+        }
+      });
+      btn.on('pointerdown', () => {
+        if (this._craftBench === bench.id) return;
+        this._craftBench = bench.id;
+        this._refreshCraftScreen();
+      });
+      bx += btn.width + 10;
+    }
+    y += 26;
+
+    this._l(this.add.graphics()
+      .lineStyle(1, 0x223355)
+      .lineBetween(x, y, LP.x + LP.w - 20, y));
+    y += 12;
+
+    // Selected bench header.
+    const bench = BENCH_REGISTRY[this._craftBench];
+    this._l(this.add.text(x, y, bench.label.toUpperCase(), {
+      fontSize: '14px', color: '#ccddff', fontFamily: 'monospace', fontStyle: 'bold',
+    })); y += 18;
+    this._l(this.add.text(x, y, bench.blurb, {
+      fontSize: '11px', color: '#778899', fontFamily: 'monospace',
+    })); y += 22;
+
+    if (bench.status !== 'open') {
+      this._l(this.add.text(x + 8, y, '(coming soon)', {
+        fontSize: '12px', color: '#445566', fontFamily: 'monospace',
+      }));
+      return;
+    }
+
+    // Recipe list — affordability is checked from current stash quantities.
+    const stash   = getStash();
+    const stashOf = (id) => (stash.find(e => e.id === id)?.qty ?? 0);
+    const recipes = recipesForBench(bench.id);
+
+    if (recipes.length === 0) {
+      this._l(this.add.text(x + 8, y, '(no recipes available)', {
+        fontSize: '12px', color: '#445566', fontFamily: 'monospace',
+      }));
+      return;
+    }
+
+    for (const recipe of recipes) {
+      const affordable = recipe.inputs.every(({ id, qty }) => stashOf(id) >= qty);
+
+      const inputsStr = recipe.inputs.map(({ id, qty }) => {
+        const meta = ITEM_META[id] ?? { label: id };
+        return `${qty}× ${meta.label}`;
+      }).join(' + ');
+
+      const outMeta = ITEM_META[recipe.output.id] ?? { label: recipe.output.id };
+      const outStr  = `${recipe.output.qty > 1 ? recipe.output.qty + '× ' : ''}${outMeta.label}`;
+
+      const rowColor = affordable ? '#ffdd88' : '#445566';
+      this._l(this.add.text(x + 8, y, recipe.label.padEnd(14), {
+        fontSize: '12px', color: rowColor, fontFamily: 'monospace',
+      }));
+      this._l(this.add.text(x + 8 + 110, y, `${inputsStr}  →  ${outStr}`, {
+        fontSize: '12px', color: rowColor, fontFamily: 'monospace',
+      }));
+
+      const buyX = LP.x + LP.w - 24;
+      const craftBtn = this._l(this.add.text(buyX, y, '[ Craft ]', {
+        fontSize: '12px',
+        color: affordable ? '#88ccff' : '#334455',
+        fontFamily: 'monospace',
+      }).setOrigin(1, 0));
+
+      if (affordable) {
+        craftBtn.setInteractive();
+        craftBtn.on('pointerover', () => craftBtn.setColor('#ffffff'));
+        craftBtn.on('pointerout',  () => craftBtn.setColor('#88ccff'));
+        craftBtn.on('pointerdown', () => {
+          if (craftRecipe(recipe)) this._onCraft();
+        });
+      }
+      y += 20;
+    }
+  }
+
+  _refreshCraftScreen() {
+    for (const obj of this._leftObjs) obj.destroy();
+    this._leftObjs = [];
+    this._showCraftScreen();
+  }
+
+  /** Called after a successful Craft: rebuild the recipe list (mat counts changed). */
+  _onCraft() {
+    this._refreshCraftScreen();
   }
 
   _selectClass(classId) {
