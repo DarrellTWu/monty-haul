@@ -70,6 +70,11 @@ export function sendLoot(chestId) {
   _room?.send('loot', { chestId });
 }
 
+/** Loot a dead enemy's corpse by id. */
+export function sendLootCorpse(enemyId) {
+  _room?.send('loot_corpse', { enemyId });
+}
+
 /**
  * Assign an item or ability to a hotbar slot.
  * @param {string} itemId - consumable id or 'second_wind'

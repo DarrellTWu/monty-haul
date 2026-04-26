@@ -10,10 +10,10 @@
 // PLACEHOLDER ROOM: the room boundary is a simple rectangle.
 // When tilemaps arrive, replace _drawRoom() with a Tilemap layer.
 
-import { joinDungeon, sendLoot, sendUseHotbar, leave as leaveRoom } from '../network/ColyseusClient.js';
+import { joinDungeon, sendLoot, sendLootCorpse, sendUseHotbar, leave as leaveRoom } from '../network/ColyseusClient.js';
 import { InputHandler } from '../input/InputHandler.js';
 import { CHEST_LOOT_RANGE_PX, TRAP_RADIUS_PX } from '../../../shared/data/constants.js';
-import { getRaiderPackFlat, setRaiderPack } from '../store/stash.js';
+import { getRaiderPackFlat, setRaiderPack, addHubGold } from '../store/stash.js';
 
 // Visual config — swap these out when sprites land.
 const PLAYER_RADIUS   = 16;
@@ -21,6 +21,7 @@ const ENEMY_RADIUS    = 12;
 const PLAYER_COLOR    = 0x4488ff;
 const ENEMY_COLOR     = 0x44cc44;
 const DEAD_COLOR      = 0x444444;
+const CORPSE_LOOTABLE_COLOR = 0x886633;  // dim gold/brown for unlooted corpses
 const HP_BAR_WIDTH    = 32;
 const HP_BAR_HEIGHT   = 5;
 const HP_BAR_OFFSET_Y = 22;
@@ -105,7 +106,7 @@ export class DungeonScene extends Phaser.Scene {
     // Input.
     this._input = new InputHandler(this);
     this._input.onInventoryDown = () => this._toggleInventory();
-    this._input.onInteract      = () => this._tryLootNearbyChest();
+    this._input.onInteract      = () => this._tryLootNearby();
     this._input.onHotbar        = (slot) => sendUseHotbar(slot);
 
     this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
@@ -172,27 +173,53 @@ export class DungeonScene extends Phaser.Scene {
       if (!gfx) continue;
       gfx.circle.setPosition(enemy.x, enemy.y);
       if (!enemy.alive) {
-        gfx.circle.setFillStyle(DEAD_COLOR);
         gfx.hpBar.setVisible(false);
+        const hasLoot = !enemy.looted && (enemy.lootGold > 0 || enemy.lootItems.length > 0);
+        gfx.circle.setFillStyle(hasLoot ? CORPSE_LOOTABLE_COLOR : DEAD_COLOR);
+        if (hasLoot && myPlayer) {
+          const dx = myPlayer.x - enemy.x;
+          const dy = myPlayer.y - enemy.y;
+          gfx.lootHint.setPosition(enemy.x, enemy.y + 22);
+          gfx.lootHint.setVisible(Math.sqrt(dx * dx + dy * dy) < CHEST_LOOT_RANGE_PX);
+        } else {
+          gfx.lootHint.setVisible(false);
+        }
       } else {
         this._updateHpBar(gfx.hpBar, enemy.x, enemy.y, enemy.hp, enemy.maxHp);
+        gfx.lootHint.setVisible(false);
       }
     }
   }
 
-  _tryLootNearbyChest() {
+  _tryLootNearby() {
     if (!this._room) return;
     const myPlayer = this._room.state.players.get(this._room.sessionId);
     if (!myPlayer) return;
+
+    // Find the closest unlooted target — chest or corpse — within range.
+    let bestKind = null;
+    let bestId   = null;
+    let bestDist = CHEST_LOOT_RANGE_PX;
+
     for (const [id, { chestState }] of this._chestGfx) {
       if (chestState.open) continue;
       const dx = myPlayer.x - chestState.x;
       const dy = myPlayer.y - chestState.y;
-      if (Math.sqrt(dx * dx + dy * dy) < CHEST_LOOT_RANGE_PX) {
-        sendLoot(id);
-        break;
-      }
+      const d  = Math.sqrt(dx * dx + dy * dy);
+      if (d < bestDist) { bestDist = d; bestKind = 'chest'; bestId = id; }
     }
+
+    for (const [id, enemy] of this._room.state.enemies) {
+      if (enemy.alive || enemy.looted) continue;
+      if (enemy.lootGold === 0 && enemy.lootItems.length === 0) continue;
+      const dx = myPlayer.x - enemy.x;
+      const dy = myPlayer.y - enemy.y;
+      const d  = Math.sqrt(dx * dx + dy * dy);
+      if (d < bestDist) { bestDist = d; bestKind = 'corpse'; bestId = id; }
+    }
+
+    if (bestKind === 'chest')  sendLoot(bestId);
+    if (bestKind === 'corpse') sendLootCorpse(bestId);
   }
 
   _toggleInventory() {
@@ -266,13 +293,25 @@ export class DungeonScene extends Phaser.Scene {
     const circle = this.add.arc(entityState.x, entityState.y, radius, 0, 360);
     circle.setFillStyle(color).setDepth(2);
     const hpBar = this.add.graphics().setDepth(3);
-    const store  = kind === 'player' ? this._playerGfx : this._enemyGfx;
-    store.set(id, { circle, hpBar });
+    if (kind === 'enemy') {
+      // Corpse loot hint — hidden until the enemy dies, has loot, and player is in range.
+      const lootHint = this.add.text(entityState.x, entityState.y + 22, 'F: Loot', {
+        fontSize: '11px', color: '#ffdd88', fontFamily: 'monospace',
+      }).setOrigin(0.5).setDepth(1).setVisible(false);
+      this._enemyGfx.set(id, { circle, hpBar, lootHint });
+    } else {
+      this._playerGfx.set(id, { circle, hpBar });
+    }
   }
 
   _destroyEntityGfx(id, store) {
     const gfx = store.get(id);
-    if (gfx) { gfx.circle.destroy(); gfx.hpBar.destroy(); store.delete(id); }
+    if (gfx) {
+      gfx.circle.destroy();
+      gfx.hpBar.destroy();
+      gfx.lootHint?.destroy();
+      store.delete(id);
+    }
   }
 
   _updateHpBar(gfx, x, y, hp, maxHp) {
@@ -293,10 +332,17 @@ export class DungeonScene extends Phaser.Scene {
   _onRunComplete() {
     const player = this._room.state.players.get(this._room.sessionId);
     const items  = player ? this._collectItems(player) : [];
+    const gold   = player?.gold ?? 0;
     setRaiderPack(items);
-    const packLines = items.length === 0
-      ? ['(nothing — only default class gear)']
-      : this._groupItems(items).map(({ label, qty }) => `· ${label}${qty > 1 ? `  ×${qty}` : ''}`);
+    addHubGold(gold); // no-op if 0
+
+    const packLines = [];
+    if (gold > 0) packLines.push(`· ${gold} gp`);
+    if (items.length > 0) {
+      packLines.push(...this._groupItems(items).map(({ label, qty }) => `· ${label}${qty > 1 ? `  ×${qty}` : ''}`));
+    }
+    if (packLines.length === 0) packLines.push('(nothing — only default class gear)');
+
     this._showRunSummary({
       title:      '── RUN COMPLETE ──',
       titleColor: '#88ffaa',
