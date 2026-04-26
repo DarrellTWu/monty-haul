@@ -13,8 +13,14 @@ import { CONSUMABLE_REGISTRY } from '../data/items/consumables.js';
 
 // Pool resolvers: name (without '@') → function returning an array of item ids.
 // Resolved at roll time so newly-added registry entries are picked up automatically.
+//
+// `potion_any` excludes consumables whose type is 'extract' (Scroll of
+// Extraction and any future meta-consumables): those are run-control items,
+// not loot. Add new run-control types to this filter as they're introduced.
 const POOLS = {
-  potion_any: () => Object.keys(CONSUMABLE_REGISTRY),
+  potion_any: () => Object.values(CONSUMABLE_REGISTRY)
+    .filter(c => c.type !== 'extract')
+    .map(c => c.id),
 };
 
 /**

@@ -196,23 +196,39 @@ test('multiple drop entries roll independently in order', () => {
 
 console.log('\nrollLoot — pool references');
 
-test('@potion_any picks first registry entry on rng=0', () => {
-  const ids = Object.keys(CONSUMABLE_REGISTRY);
+// Mirror of POOLS.potion_any in shared/logic/loot.js. Must stay in sync —
+// the explicit "no extraction_scroll" test below pins the exclusion intent.
+const POTION_IDS = Object.values(CONSUMABLE_REGISTRY)
+  .filter(c => c.type !== 'extract')
+  .map(c => c.id);
+
+test('@potion_any picks first pool entry on rng=0', () => {
   const result = rollLoot(
     { gold: null, drops: [{ itemId: '@potion_any', chance: 1, qty: 1 }] },
     seq(0.0, 0.0), // chance roll, then pool pick
   );
   assert.equal(result.items.length, 1);
-  assert.equal(result.items[0], ids[0]);
+  assert.equal(result.items[0], POTION_IDS[0]);
 });
 
-test('@potion_any picks last registry entry on rng→1', () => {
-  const ids = Object.keys(CONSUMABLE_REGISTRY);
+test('@potion_any picks last pool entry on rng→1', () => {
   const result = rollLoot(
     { gold: null, drops: [{ itemId: '@potion_any', chance: 1, qty: 1 }] },
     seq(0.0, 0.999),
   );
-  assert.equal(result.items[0], ids[ids.length - 1]);
+  assert.equal(result.items[0], POTION_IDS[POTION_IDS.length - 1]);
+});
+
+test('@potion_any never returns extraction_scroll (run-control item, not loot)', () => {
+  // Many trials with random rngs; extraction_scroll must never appear.
+  const rng = lcg(99);
+  for (let i = 0; i < 5000; i++) {
+    const result = rollLoot(
+      { gold: null, drops: [{ itemId: '@potion_any', chance: 1, qty: 1 }] },
+      rng,
+    );
+    assert.notEqual(result.items[0], 'extraction_scroll');
+  }
 });
 
 test('failed chance does NOT consume pool rng', () => {
@@ -326,8 +342,8 @@ test('determinism: same seed produces identical output', () => {
   assert.deepEqual(a, b);
 });
 
-test('@potion_any uniformly samples all registry entries', () => {
-  // Over many trials, each registered potion should appear with roughly equal frequency.
+test('@potion_any uniformly samples all pool entries', () => {
+  // Over many trials, each pool member should appear with roughly equal frequency.
   const rng = lcg(7);
   const counts = {};
   for (let i = 0; i < 8000; i++) {
@@ -337,11 +353,10 @@ test('@potion_any uniformly samples all registry entries', () => {
     );
     counts[result.items[0]] = (counts[result.items[0]] ?? 0) + 1;
   }
-  const ids = Object.keys(CONSUMABLE_REGISTRY);
-  const expected = 8000 / ids.length;
-  for (const id of ids) {
+  const expected = 8000 / POTION_IDS.length;
+  for (const id of POTION_IDS) {
     const got = counts[id] ?? 0;
-    // 4 potions, 8000 trials → ~2000 each. Allow ±15% spread.
+    // ~2000 each for 4 potions. Allow ±15% spread.
     assert.ok(
       got > expected * 0.85 && got < expected * 1.15,
       `${id}: expected ~${expected}, got ${got}`,
