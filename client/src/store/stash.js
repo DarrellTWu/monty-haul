@@ -21,6 +21,7 @@ const INITIAL_STASH = [
   { id: 'bless_potion',        qty: 2 },
   { id: 'longstrider_potion',  qty: 2 },
   { id: 'false_life_potion',   qty: 2 },
+  { id: 'extraction_scroll',   qty: 1 },
 ];
 
 function _load(key, fallback) {

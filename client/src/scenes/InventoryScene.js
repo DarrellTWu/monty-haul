@@ -59,6 +59,7 @@ const CONSUMABLE_DISPLAY = {
   bless_potion:      { label: 'Bless Potion',      detail: '+1d4 atk 60s', short: 'Bless'    },
   longstrider_potion: { label: 'Longstrider Pot',  detail: '+10ft spd 2m', short: 'Stride'   },
   false_life_potion:  { label: 'False Life Pot',   detail: '1d4+4 tmp HP 2m', short: 'F.Life' },
+  extraction_scroll:  { label: 'Extraction Scroll', detail: 'exit dungeon', short: 'Extract' },
 };
 
 // Armor display: bag label and equipped-slot label are different sizes.

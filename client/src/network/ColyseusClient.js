@@ -75,6 +75,11 @@ export function sendLootCorpse(enemyId) {
   _room?.send('loot_corpse', { enemyId });
 }
 
+/** Descend the named stair. Server validates lock + range and swaps the floor. */
+export function sendDescend(stairId) {
+  _room?.send('descend', { stairId });
+}
+
 /**
  * Assign an item or ability to a hotbar slot.
  * @param {string} itemId - consumable id or 'second_wind'

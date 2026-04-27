@@ -10,9 +10,10 @@
 // PLACEHOLDER ROOM: the room boundary is a simple rectangle.
 // When tilemaps arrive, replace _drawRoom() with a Tilemap layer.
 
-import { joinDungeon, sendLoot, sendLootCorpse, sendUseHotbar, leave as leaveRoom } from '../network/ColyseusClient.js';
+import { joinDungeon, sendLoot, sendLootCorpse, sendDescend, sendUseHotbar, leave as leaveRoom } from '../network/ColyseusClient.js';
 import { InputHandler } from '../input/InputHandler.js';
 import { CHEST_LOOT_RANGE_PX, TRAP_RADIUS_PX } from '../../../shared/data/constants.js';
+import { FLOOR_REGISTRY } from '../../../shared/data/floors/index.js';
 import { getRaiderPackFlat, setRaiderPack, addHubGold } from '../store/stash.js';
 
 // Visual config — swap these out when sprites land.
@@ -26,10 +27,7 @@ const HP_BAR_WIDTH    = 32;
 const HP_BAR_HEIGHT   = 5;
 const HP_BAR_OFFSET_Y = 22;
 
-// Room dimensions must match DungeonRoom.js server constants.
-const ROOM_WIDTH  = 1600;
-const ROOM_HEIGHT = 1200;
-const WALL        = 40;
+const WALL = 40; // wall thickness; dimensions come from FLOOR_REGISTRY[state.floor]
 
 export class DungeonScene extends Phaser.Scene {
   constructor() {
@@ -41,20 +39,23 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   async create() {
-    this._room      = null;
-    this._playerGfx = new Map();  // sessionId → { circle, hpBar }
-    this._enemyGfx  = new Map();  // enemyId   → { circle, hpBar }
-    this._chestGfx  = new Map();  // chestId   → { gfx, hint, chestState }
-    this._trapGfx   = new Map();  // trapId    → { gfx, trapState }
-    this._input     = null;
-    this._runEnded  = false;
-    this._lastHitBy = 'an enemy';
+    this._room        = null;
+    this._playerGfx   = new Map();  // sessionId → { circle, hpBar }
+    this._enemyGfx    = new Map();  // enemyId   → { circle, hpBar, lootHint }
+    this._chestGfx    = new Map();  // chestId   → { gfx, hint, chestState }
+    this._trapGfx     = new Map();  // trapId    → { gfx, warnText, trapState }
+    this._stairGfx    = new Map();  // stairId   → { gfx, label, hint, stairState }
+    this._roomGfx     = null;       // background room rectangle (recreated on floor change)
+    this._currentFloor = 0;         // last-rendered floor; drives floor-change detection
+    this._input       = null;
+    this._runEnded    = false;
+    this._lastHitBy   = 'an enemy';
 
-    this._drawRoom();
-
-    this._statusText = this.add.text(ROOM_WIDTH / 2, ROOM_HEIGHT / 2, 'Connecting…', {
+    // Connecting overlay sits in screen space until join resolves and we know
+    // the floor (room dimensions / camera bounds depend on it).
+    this._statusText = this.add.text(640, 360, 'Connecting…', {
       fontSize: '24px', color: '#ffffff',
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setScrollFactor(0);
 
     try {
       this._room = await joinDungeon(this._joinOpts);
@@ -65,6 +66,8 @@ export class DungeonScene extends Phaser.Scene {
       console.error('[DungeonScene] Failed to join room:', err);
       return;
     }
+
+    this._applyFloorLayout(this._room.state.floor);
 
     // Entity add/remove handlers.
     this._room.state.players.onAdd((player, sessionId) => {
@@ -82,13 +85,29 @@ export class DungeonScene extends Phaser.Scene {
     this._room.state.enemies.onAdd((enemy, id) => {
       this._createEntityGfx(id, enemy, 'enemy');
     });
+    this._room.state.enemies.onRemove((enemy, id) => {
+      this._destroyEntityGfx(id, this._enemyGfx);
+    });
 
     this._room.state.chests.onAdd((chest, id) => {
       this._createChestGfx(id, chest);
     });
+    this._room.state.chests.onRemove((chest, id) => {
+      this._destroyChestGfx(id);
+    });
 
     this._room.state.traps.onAdd((trap, id) => {
       this._createTrapGfx(id, trap);
+    });
+    this._room.state.traps.onRemove((trap, id) => {
+      this._destroyTrapGfx(id);
+    });
+
+    this._room.state.stairs.onAdd((stair, id) => {
+      this._createStairGfx(id, stair);
+    });
+    this._room.state.stairs.onRemove((stair, id) => {
+      this._destroyStairGfx(id);
     });
 
     // Relay combat log messages to HUDScene; track last entity to hit the player.
@@ -106,16 +125,18 @@ export class DungeonScene extends Phaser.Scene {
     // Input.
     this._input = new InputHandler(this);
     this._input.onInventoryDown = () => this._toggleInventory();
-    this._input.onInteract      = () => this._tryLootNearby();
+    this._input.onInteract      = () => this._tryInteractNearby();
     this._input.onHotbar        = (slot) => sendUseHotbar(slot);
 
-    this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
     this.scene.launch('HUDScene');
 
     this._room.state.onChange(() => {
       if (this._room.state.phase === 'complete' && !this._runEnded) {
         this._runEnded = true;
         this._onRunComplete();
+      }
+      if (this._room.state.floor !== this._currentFloor) {
+        this._applyFloorLayout(this._room.state.floor);
       }
     });
   }
@@ -167,6 +188,20 @@ export class DungeonScene extends Phaser.Scene {
       warnText.setAlpha(active ? 1 : 0.3);
     }
 
+    // Stair visuals — color shifts when unlocked; F: Descend hint when in range.
+    for (const [, { gfx, label, hint, stairState }] of this._stairGfx) {
+      this._drawStairBox(gfx, stairState);
+      label.setText(stairState.locked ? 'Stairs (locked)' : 'Stairs ↓');
+      label.setColor(stairState.locked ? '#666688' : '#ffaa55');
+      if (!stairState.locked && myPlayer) {
+        const dx = myPlayer.x - stairState.x;
+        const dy = myPlayer.y - stairState.y;
+        hint.setVisible(Math.sqrt(dx * dx + dy * dy) < CHEST_LOOT_RANGE_PX);
+      } else {
+        hint.setVisible(false);
+      }
+    }
+
     // Enemy visuals.
     for (const [id, enemy] of state.enemies) {
       const gfx = this._enemyGfx.get(id);
@@ -191,12 +226,12 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
-  _tryLootNearby() {
+  _tryInteractNearby() {
     if (!this._room) return;
     const myPlayer = this._room.state.players.get(this._room.sessionId);
     if (!myPlayer) return;
 
-    // Find the closest unlooted target — chest or corpse — within range.
+    // Find the closest interactable — chest, corpse, or unlocked stair — in range.
     let bestKind = null;
     let bestId   = null;
     let bestDist = CHEST_LOOT_RANGE_PX;
@@ -218,8 +253,17 @@ export class DungeonScene extends Phaser.Scene {
       if (d < bestDist) { bestDist = d; bestKind = 'corpse'; bestId = id; }
     }
 
+    for (const [id, { stairState }] of this._stairGfx) {
+      if (stairState.locked) continue;
+      const dx = myPlayer.x - stairState.x;
+      const dy = myPlayer.y - stairState.y;
+      const d  = Math.sqrt(dx * dx + dy * dy);
+      if (d < bestDist) { bestDist = d; bestKind = 'stair'; bestId = id; }
+    }
+
     if (bestKind === 'chest')  sendLoot(bestId);
     if (bestKind === 'corpse') sendLootCorpse(bestId);
+    if (bestKind === 'stair')  sendDescend(bestId);
   }
 
   _toggleInventory() {
@@ -234,17 +278,36 @@ export class DungeonScene extends Phaser.Scene {
 
   // ── Private helpers ──────────────────────────────────────────────────────────
 
-  _drawRoom() {
+  /**
+   * Apply floor-level layout: redraw the room background and reset camera
+   * bounds for the new floor's dimensions. Entity gfx are NOT touched here —
+   * the server's MapSchema clear/repopulate fires onRemove/onAdd, which the
+   * registered handlers translate into per-entity destroy/create.
+   */
+  _applyFloorLayout(floorNumber) {
+    const floor = FLOOR_REGISTRY[floorNumber];
+    if (!floor) {
+      console.warn(`[DungeonScene] no FLOOR_REGISTRY entry for floor ${floorNumber}`);
+      return;
+    }
+    if (this._roomGfx) this._roomGfx.destroy();
+    this._roomGfx      = this._drawRoom(floor.width, floor.height);
+    this._currentFloor = floorNumber;
+    this.cameras.main.setBounds(0, 0, floor.width, floor.height);
+  }
+
+  _drawRoom(width, height) {
     const gfx = this.add.graphics();
     gfx.fillStyle(0x2a2a3a);
-    gfx.fillRect(WALL, WALL, ROOM_WIDTH - WALL * 2, ROOM_HEIGHT - WALL * 2);
+    gfx.fillRect(WALL, WALL, width - WALL * 2, height - WALL * 2);
     gfx.fillStyle(0x111118);
-    gfx.fillRect(0, 0, ROOM_WIDTH, WALL);
-    gfx.fillRect(0, ROOM_HEIGHT - WALL, ROOM_WIDTH, WALL);
-    gfx.fillRect(0, 0, WALL, ROOM_HEIGHT);
-    gfx.fillRect(ROOM_WIDTH - WALL, 0, WALL, ROOM_HEIGHT);
+    gfx.fillRect(0, 0, width, WALL);
+    gfx.fillRect(0, height - WALL, width, WALL);
+    gfx.fillRect(0, 0, WALL, height);
+    gfx.fillRect(width - WALL, 0, WALL, height);
     gfx.lineStyle(2, 0x5555aa);
-    gfx.strokeRect(WALL, WALL, ROOM_WIDTH - WALL * 2, ROOM_HEIGHT - WALL * 2);
+    gfx.strokeRect(WALL, WALL, width - WALL * 2, height - WALL * 2);
+    return gfx;
   }
 
   _createChestGfx(id, chestState) {
@@ -268,6 +331,61 @@ export class DungeonScene extends Phaser.Scene {
       fontSize: '10px', color: '#ff4444', fontFamily: 'monospace',
     }).setOrigin(0.5).setDepth(1);
     this._trapGfx.set(id, { gfx, warnText, trapState });
+  }
+
+  _createStairGfx(id, stairState) {
+    const { x, y } = stairState;
+    const gfx = this.add.graphics().setDepth(1);
+    this._drawStairBox(gfx, stairState);
+    const label = this.add.text(x, y - 26, stairState.locked ? 'Stairs (locked)' : 'Stairs ↓', {
+      fontSize: '11px', color: stairState.locked ? '#666688' : '#ffaa55', fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(1);
+    const hint = this.add.text(x, y + 22, 'F: Descend', {
+      fontSize: '11px', color: '#aaffaa', fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(1).setVisible(false);
+    this._stairGfx.set(id, { gfx, label, hint, stairState });
+  }
+
+  _drawStairBox(gfx, stairState) {
+    gfx.clear();
+    const fill   = stairState.locked ? 0x222236 : 0x553311;
+    const border = stairState.locked ? 0x444466 : 0xff9933;
+    gfx.fillStyle(fill);
+    gfx.fillRect(stairState.x - 20, stairState.y - 14, 40, 28);
+    gfx.lineStyle(2, border);
+    gfx.strokeRect(stairState.x - 20, stairState.y - 14, 40, 28);
+    // Down arrow inside the box
+    gfx.fillStyle(border);
+    gfx.fillTriangle(
+      stairState.x - 7, stairState.y - 4,
+      stairState.x + 7, stairState.y - 4,
+      stairState.x,     stairState.y + 7,
+    );
+  }
+
+  _destroyChestGfx(id) {
+    const e = this._chestGfx.get(id);
+    if (!e) return;
+    e.gfx.destroy();
+    e.hint.destroy();
+    this._chestGfx.delete(id);
+  }
+
+  _destroyTrapGfx(id) {
+    const e = this._trapGfx.get(id);
+    if (!e) return;
+    e.gfx.destroy();
+    e.warnText.destroy();
+    this._trapGfx.delete(id);
+  }
+
+  _destroyStairGfx(id) {
+    const e = this._stairGfx.get(id);
+    if (!e) return;
+    e.gfx.destroy();
+    e.label.destroy();
+    e.hint.destroy();
+    this._stairGfx.delete(id);
   }
 
   _drawTrapDiamond(gfx, x, y, active) {
@@ -346,7 +464,7 @@ export class DungeonScene extends Phaser.Scene {
     this._showRunSummary({
       title:      '── RUN COMPLETE ──',
       titleColor: '#88ffaa',
-      bodyLines:  ['All enemies defeated.', '', 'Extracting with:'],
+      bodyLines:  ['Extraction successful.', '', 'Extracting with:'],
       packLines,
     });
   }
