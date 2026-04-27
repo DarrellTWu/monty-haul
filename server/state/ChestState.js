@@ -10,6 +10,7 @@ export class ChestState extends Schema {
     this.y = 0;
     this.open = false;
     this.items = new ArraySchema(); // item ids available to loot
+    this.lockedBy = '';             // sessionId of the player currently looting; '' = free
   }
 }
 
@@ -19,4 +20,5 @@ defineTypes(ChestState, {
   y: 'number',
   open: 'boolean',
   items: { array: 'string' },
+  lockedBy: 'string',
 });

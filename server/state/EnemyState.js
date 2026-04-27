@@ -20,6 +20,7 @@ export class EnemyState extends Schema {
     this.lootGold  = 0;                  // populated on death from LOOT_TABLE_REGISTRY
     this.lootItems = new ArraySchema();  // item ids available to loot from corpse
     this.looted    = false;              // flips true after a player loots the corpse
+    this.lockedBy  = '';                 // sessionId of the player currently looting; '' = free
   }
 }
 
@@ -39,4 +40,5 @@ defineTypes(EnemyState, {
   lootGold:  'number',
   lootItems: { array: 'string' },
   looted:    'boolean',
+  lockedBy:  'string',
 });

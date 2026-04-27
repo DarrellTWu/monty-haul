@@ -81,17 +81,17 @@ D&D 5e SRD mechanics adapted for real-time play.
 Many files in docs/tech_spec.md are planned, not yet built. What actually exists:
 
 **Server**
-- `rooms/DungeonRoom.js` — message routing + equip/loot/hotbar/trap logic; rolls loot on enemy death; handles `loot_corpse` and `descend`. Floors are loaded from `FLOOR_REGISTRY` via `_loadFloor(n)` (clears entity maps + repopulates from floor data); player position + long rest applied on descend. Run completes only via Scroll of Extraction (`extract` consumable type) — no auto-complete on enemies-dead.
+- `rooms/DungeonRoom.js` — message routing + equip/loot/hotbar/trap logic; rolls loot on enemy death; handles `open_container`, `close_container`, `take_item`, `take_gold`, `drop_item`, and `descend` (loot_corpse / loot removed in favour of container protocol). Floors are loaded from `FLOOR_REGISTRY` via `_loadFloor(n)` (clears entity maps + repopulates from floor data); player position + long rest applied on descend. Run completes only via Scroll of Extraction (`extract` consumable type) — no auto-complete on enemies-dead.
 - `systems/` — CombatSystem.js, MovementSystem.js, AISystem.js (called from tick loop)
-- `state/` — PlayerState, EnemyState, GameState (incl. `floor`, `stairs` map), ChestState, TrapState, StairState
+- `state/` — PlayerState, EnemyState (incl. `lockedBy`), GameState (incl. `floor`, `stairs` map), ChestState (incl. `lockedBy`), TrapState, StairState
 - `persistence/`, `matchmaking/` — not yet built
 
 **Client** (no `rendering/` or `ui/` subdirectories)
 - `scenes/HubScene.js` — entry point (auto-starts); two-panel layout: left cycles sub-screens (Class, Stash, Shop, Craft), right is persistent Raider Config + Enter Dungeon; screen-level VAULT display (top-right) shows hub gold; passes `{ class, items }` to DungeonScene; auto-opens Stash tab when `init({ view: 'stash' })`. Sub-state: `_shopVendor` (`'potions' | 'armor'`), `_craftBench` (one of the six BENCH_REGISTRY ids). Stash rows expose `[ Sell N gp ]`; raider panel shows `[ Dump All to Stash ]` when pack non-empty.
 - `scenes/DungeonScene.js` — gameplay rendering, input wiring; receives `{ class, items }` via init(data); detects run complete/death, shows run summary overlay, calls `setRaiderPack` and `addHubGold(player.gold)` on extract; F-key triggers `_tryInteractNearby` which dispatches to chest, corpse, or unlocked stair; lootable corpses render dim gold with an "F: Loot" hint; stairs render as a brown box (orange when unlocked) with "F: Descend"; room dimensions + camera bounds redraw on `state.floor` change; per-entity `onRemove` handlers tear down old-floor gfx when the server clears MapSchemas during descend.
 - `scenes/HUDScene.js` — conditions, cooldown rings, hotbar overlay
-- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI; shows live `GOLD N gp` line under HP/AC; renders materials (skeleton_bone, wolf_pelt) in the bag. Bag groups duplicate items into a single row with `× N` qty (display-only — server inventory stays flat); fixed-height scrollable viewport clipped by a shared `GeometryMask`, reachable via mouse wheel; mask cleared on drag-start, restored on drag-end. Double-click routes by item type: weapons/armor → `sendEquip`, consumables → `sendAssignHotbar` to first free slot, materials → no-op.
-- `network/ColyseusClient.js` — `joinDungeon(opts)` forwards opts (incl. class + items) to server; `sendLoot` (chests), `sendLootCorpse` (corpses), `sendDescend` (stairs)
+- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI; shows live `GOLD N gp` line under HP/AC; renders materials (skeleton_bone, wolf_pelt) in the bag. Bag groups duplicate items into a single row with `× N` qty (display-only — server inventory stays flat); fixed-height scrollable viewport clipped by a shared `GeometryMask`, reachable via mouse wheel; mask cleared on drag-start, restored on drag-end. Double-click routes by item type: weapons/armor → `sendEquip`, consumables → `sendAssignHotbar` to first free slot, materials → no-op. **Loot mode**: launched by DungeonScene with `{ lootSource: { kind, id } }`; replaces the left character-sheet column with a loot panel showing container gold and items; `[→ Drop]` buttons push bag items into the container; `sendOpenContainer` on create, `sendCloseContainer` on shutdown. `_lootHandshakeSeen` prevents premature auto-close before the server confirms the lock.
+- `network/ColyseusClient.js` — `joinDungeon(opts)` forwards opts (incl. class + items) to server; loot container protocol: `sendOpenContainer`, `sendCloseContainer`, `sendTakeItem`, `sendTakeGold`, `sendDropItem`; `sendDescend` (stairs)
 - `input/InputHandler.js`
 - `store/stash.js` — localStorage-backed item store; two containers (stash + raider pack) plus persistent hub gold (`mh_hub_gold`). Reads: `getStash`, `getRaiderPack`, `getRaiderPackFlat`, `getHubGold`. Mutations: `stashToRaider`, `raiderToStash`, `dumpRaiderPackToStash`, `setRaiderPack`, `addHubGold`, `setHubGold`, `buyItem`, `sellItem`, `craftRecipe`. Seeded with all items + 0 gold on first load; designed for drop-in Supabase swap. ALL hub-side state mutations route through this file — single migration point.
 
@@ -99,8 +99,13 @@ Many files in docs/tech_spec.md are planned, not yet built. What actually exists
 - `data/` — constants.js, values.js (ITEM_GOLD_VALUE + sellPrice), shop.js (VENDOR_CATALOG), weapons/melee.js, armor/armor.js, items/(consumables+shields+materials), enemies/tier1.js, classes/fighter.js, classes/barbarian.js, classes/monk.js, classes/index.js (CLASS_REGISTRY), loot/tier1.js (LOOT_TABLE_REGISTRY), crafting/benches.js (BENCH_REGISTRY), crafting/recipes.js (RECIPE_REGISTRY + recipesForBench), floors/floor1.js + floor2.js + index.js (FLOOR_REGISTRY)
 - `logic/combat.js` — full attack resolution
 - `logic/loot.js` — pure `rollLoot(table, rng?)` returning `{ gold, items }`; supports literal item ids and `@pool` references. The `@potion_any` pool filters out consumables with `type === 'extract'` (Scroll of Extraction is run-control, not loot).
+- `logic/loot-window.js` — pure container-lock protocol: `tryOpenContainer`, `tryCloseContainer`, `releaseLocksHeldBy`, `tickContainerLocks`, `tryTakeItem`, `tryTakeGold`, `tryDropItem`, `checkLootAccess`, `refreshSourceFlags`. Imported by both DungeonRoom and server tests. No framework deps.
 - `tests/combat.test.js`, `tests/loot.test.js`
 - `types/` — player.js, enemy.js, weapon.js
+
+**Server tests** (in `server/tests/`, run with `node server/tests/<file>`)
+- `server/tests/container-lock.test.js` — 21 tests for `tryOpenContainer`, `tryCloseContainer`, `releaseLocksHeldBy`, `tickContainerLocks`
+- `server/tests/loot-flow.test.js` — 35 tests for `tryTakeItem`, `tryTakeGold`, `tryDropItem`, hotbar-cleanup, and lock gate enforcement
 - `data/subclasses/`, `logic/conditions.js`, `logic/ai.js` — not yet built
 
 ## Agent Task Context
@@ -118,7 +123,8 @@ Before any game logic task, read these files:
   - `rageRemainingMs, rageUsesRemaining` — Barbarian rage tracking (synced for HUD ring + inventory)
   - `gold` — run-scope wallet; transferred to hub via `addHubGold` on extract, lost on death
 - `server/state/EnemyState.js` — synced enemy schema. Loot fields:
-  - `lootGold, lootItems, looted` — populated on first tick after death from `LOOT_TABLE_REGISTRY[type]` via `rollLoot`; `looted` flips true when a player picks up the corpse via `loot_corpse`
+  - `lootGold, lootItems, looted` — populated on first tick after death from `LOOT_TABLE_REGISTRY[type]` via `rollLoot`; `looted` is true when gold===0 and lootItems is empty (bidirectional — can flip back if items are dropped in)
+  - `lockedBy` — sessionId of the player currently holding the loot-window lock ('' = free); cleared automatically by `tickContainerLocks` when player goes out of range/dies or by `releaseLocksHeldBy` on disconnect
 - The specific file being modified
 - A structural reference file if creating something new
 
@@ -152,14 +158,18 @@ All messages handled in `DungeonRoom.js` onCreate.
 - `attack` — attempt melee attack
 - `equip` `{ itemId, slot? }` — slot: `'weapon'|'offhand'|'armor'` or omit for auto-detect
 - `unequip` `{ slot }` — slot: `'weapon'|'offhand'|'armor'`
-- `loot` `{ chestId }` — open chest (server validates range)
-- `loot_corpse` `{ enemyId }` — take gold + items from a dead enemy (server validates dead, !looted, in range)
+- `open_container` `{ sourceKind, sourceId }` — claim loot-window lock on a chest (`sourceKind='chest'`) or corpse (`sourceKind='corpse'`); server replies `container_lock_denied` if already locked by another player
+- `close_container` `{ sourceKind, sourceId }` — release the lock; no-op if caller doesn't hold it
+- `take_item` `{ sourceKind, sourceId, itemIndex }` — move item at index from container into player inventory; validates lock, range, index bounds
+- `take_gold` `{ sourceId }` — transfer all gold from a corpse to the player; validates lock and range
+- `drop_item` `{ sourceKind, sourceId, inventoryIndex }` — move item at inventory index into the container; validates lock and range; clears hotbar binding if last copy of that item
 - `descend` `{ stairId }` — descend the named stair (server validates exists, !locked, in range; swaps floor for everyone in the room)
 - `assign_hotbar` `{ itemId, slot }` — bind ability/consumable id to hotbar index 0–9
 - `use_hotbar` `{ slot }` — activate hotbar slot 0–9. Consumable types: `healing`, `bless`, `longstrider`, `false_life`, `extract` (sets `state.phase = 'complete'`, ending the run)
 
 **Server → Client**
 - `combat_log` `{ message }` — text line pushed to the HUD combat log
+- `container_lock_denied` `{ sourceKind, sourceId, holder }` — sent when `open_container` is rejected; InventoryScene shows a HUD log line and closes
 
 ## Loot System
 - Tables live in `shared/data/loot/tier1.js` keyed by enemy id (LOOT_TABLE_REGISTRY).

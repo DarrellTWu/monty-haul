@@ -16,7 +16,11 @@
 // PROTOTYPE NOTES:
 //   Fighter ability scores are hardcoded (no schema field yet).
 
-import { getRoom, sendEquip, sendUnequip, sendAssignHotbar } from '../network/ColyseusClient.js';
+import {
+  getRoom, sendEquip, sendUnequip, sendAssignHotbar,
+  sendOpenContainer, sendCloseContainer,
+  sendTakeItem, sendTakeGold, sendDropItem,
+} from '../network/ColyseusClient.js';
 
 // Panel geometry (expanded height to fit saving throws + class features + hotbar).
 const PANEL_X   = 190;
@@ -125,11 +129,29 @@ export class InventoryScene extends Phaser.Scene {
     super({ key: 'InventoryScene' });
   }
 
+  /**
+   * Optional loot mode. Pass `{ lootSource: { kind, id } }` to open the scene
+   * with a loot panel replacing the character sheet on the left side. The
+   * scene owns the open/close handshake — it sends open_container on create
+   * and close_container on shutdown.
+   */
+  init(data) {
+    this._lootSource = data?.lootSource ?? null;
+  }
+
   create() {
     this.cameras.main.setScroll(0, 0);
 
     // Selection state: which bag item is currently selected (single-click).
     this._selectedItemId = null;
+    this._lootMode = !!this._lootSource;
+    // Set of game objects that belong to the left-column loot panel; rebuilt
+    // when source contents change so we can destroy the previous batch cleanly.
+    this._lootRowGfx = [];
+    this._lastLootSnapshot = '';
+    // Track the drop-button gfx attached to each bag row so _rebuildBag can
+    // tear them down before rebuilding.
+    this._dropBtns = [];
 
     // ── Background ────────────────────────────────────────────────────────────
     const overlay = this.add.graphics();
@@ -143,81 +165,91 @@ export class InventoryScene extends Phaser.Scene {
     overlay.lineBetween(DIVIDER_X, PANEL_Y + 12, DIVIDER_X, PANEL_Y + PANEL_H - 12);
 
     // ── Left column ───────────────────────────────────────────────────────────
+    // In normal mode the left column is the character sheet. In loot mode it
+    // becomes the loot panel — _refresh guards every char-sheet field for null.
     const lx = PANEL_X + 20;
-    let ly = PANEL_Y + 18;
 
-    this.add.text(lx, ly, 'CHARACTER', STYLE_SUBHEAD); ly += 20;
-    this._nameText = this.add.text(lx, ly, 'Fighter', STYLE_HEADER); ly += 24;
-    this._classDescText = this.add.text(lx, ly, 'Level 1  Human Fighter', STYLE_BODY); ly += 18;
-    this._hpText   = this.add.text(lx, ly, 'HP  —',   STYLE_BODY); ly += 16;
-    this._acText   = this.add.text(lx, ly, 'AC  —',   STYLE_BODY); ly += 16;
-    this._goldText = this.add.text(lx, ly, 'GOLD —',  STYLE_BODY); ly += 20;
-
-    // Ability scores.
-    this.add.text(lx, ly, 'ABILITY SCORES', STYLE_SUBHEAD); ly += 16;
-    for (const [stat, score] of Object.entries(FIGHTER_SCORES)) {
-      this.add.text(lx, ly, `${stat.padEnd(4)}  ${String(score).padStart(2)}   (${modStr(score)})`, STYLE_BODY);
-      ly += 15;
-    }
-    ly += 4;
-
-    // Saving throws.
-    this.add.text(lx, ly, 'SAVING THROWS  (● proficient)', STYLE_SUBHEAD); ly += 15;
-    for (const stat of ['str', 'dex', 'con', 'int', 'wis', 'cha']) {
-      this.add.text(lx, ly, saveBonus(stat), STYLE_BODY);
-      ly += 14;
-    }
-    ly += 6;
-
-    // Class features — read player.class at scene open (set by server on join).
-    const _ir = getRoom();
-    const _ip = _ir?.state.players.get(_ir?.sessionId);
-    const playerClass = _ip?.class ?? 'fighter';
-
-    this.add.text(lx, ly, 'CLASS FEATURES', STYLE_SUBHEAD); ly += 15;
-
-    if (playerClass === 'barbarian') {
-      this._abilityKey  = 'rage';
-      this._abilityText = this.add.text(lx, ly, '💢 Rage  [2 uses]', STYLE_ITEM);
-      this._makeDraggable(this._abilityText, 'rage', lx, ly);
-      { let d = false;
-        this._abilityText.on('pointerdown', () => { d = false; });
-        this._abilityText.on('drag',        () => { d = true;  });
-        this._abilityText.on('pointerup',   () => {
-          if (!d) { this._selectedItemId = (this._selectedItemId === 'rage') ? null : 'rage'; this._updateSelection(); }
-          d = false;
-        });
-      }
-      ly += 13;
-      this.add.text(lx, ly, '+2 dmg, resist phys dmg (30s)  drag→hotbar', STYLE_NOTE); ly += 17;
-    } else if (playerClass === 'monk') {
-      this.add.text(lx, ly, 'Unarmored Defense', STYLE_BODY); ly += 13;
-      this.add.text(lx, ly, 'AC = 10 + DEX + WIS  (no armor or shield)', STYLE_NOTE); ly += 17;
-      this.add.text(lx, ly, 'Martial Arts', STYLE_BODY); ly += 13;
-      this.add.text(lx, ly, 'DEX attacks · d4 unarmed · bonus unarmed strike', STYLE_NOTE); ly += 17;
-      this._abilityKey  = null;
-      this._abilityText = null;
+    if (this._lootMode) {
+      this._nameText = null; this._classDescText = null;
+      this._hpText = null; this._acText = null; this._goldText = null;
+      this._abilityKey = null; this._abilityText = null;
+      this._buildLootPanel(lx, PANEL_Y + 18);
     } else {
-      this.add.text(lx, ly, 'Fighting Style: Dueling', STYLE_BODY); ly += 13;
-      this.add.text(lx, ly, '+2 dmg (one-hand, no weapon offhand)', STYLE_NOTE); ly += 17;
-      this._abilityKey  = 'second_wind';
-      this._abilityText = this.add.text(lx, ly, '⚡ Second Wind  [READY]', STYLE_ITEM);
-      this._makeDraggable(this._abilityText, 'second_wind', lx, ly);
-      { let d = false;
-        this._abilityText.on('pointerdown', () => { d = false; });
-        this._abilityText.on('drag',        () => { d = true;  });
-        this._abilityText.on('pointerup',   () => {
-          if (!d) { this._selectedItemId = (this._selectedItemId === 'second_wind') ? null : 'second_wind'; this._updateSelection(); }
-          d = false;
-        });
-      }
-      ly += 13;
-      this.add.text(lx, ly, 'Heal 1d10+1 HP (1/short rest)  drag→hotbar', STYLE_NOTE); ly += 17;
-    }
+      let ly = PANEL_Y + 18;
 
-    // Feat.
-    this.add.text(lx, ly, 'FEAT: Alert  (variant human)', STYLE_FEAT); ly += 13;
-    this.add.text(lx, ly, '+5 initiative, cannot be surprised', STYLE_NOTE);
+      this.add.text(lx, ly, 'CHARACTER', STYLE_SUBHEAD); ly += 20;
+      this._nameText = this.add.text(lx, ly, 'Fighter', STYLE_HEADER); ly += 24;
+      this._classDescText = this.add.text(lx, ly, 'Level 1  Human Fighter', STYLE_BODY); ly += 18;
+      this._hpText   = this.add.text(lx, ly, 'HP  —',   STYLE_BODY); ly += 16;
+      this._acText   = this.add.text(lx, ly, 'AC  —',   STYLE_BODY); ly += 16;
+      this._goldText = this.add.text(lx, ly, 'GOLD —',  STYLE_BODY); ly += 20;
+
+      // Ability scores.
+      this.add.text(lx, ly, 'ABILITY SCORES', STYLE_SUBHEAD); ly += 16;
+      for (const [stat, score] of Object.entries(FIGHTER_SCORES)) {
+        this.add.text(lx, ly, `${stat.padEnd(4)}  ${String(score).padStart(2)}   (${modStr(score)})`, STYLE_BODY);
+        ly += 15;
+      }
+      ly += 4;
+
+      // Saving throws.
+      this.add.text(lx, ly, 'SAVING THROWS  (● proficient)', STYLE_SUBHEAD); ly += 15;
+      for (const stat of ['str', 'dex', 'con', 'int', 'wis', 'cha']) {
+        this.add.text(lx, ly, saveBonus(stat), STYLE_BODY);
+        ly += 14;
+      }
+      ly += 6;
+
+      // Class features — read player.class at scene open (set by server on join).
+      const _ir = getRoom();
+      const _ip = _ir?.state.players.get(_ir?.sessionId);
+      const playerClass = _ip?.class ?? 'fighter';
+
+      this.add.text(lx, ly, 'CLASS FEATURES', STYLE_SUBHEAD); ly += 15;
+
+      if (playerClass === 'barbarian') {
+        this._abilityKey  = 'rage';
+        this._abilityText = this.add.text(lx, ly, '💢 Rage  [2 uses]', STYLE_ITEM);
+        this._makeDraggable(this._abilityText, 'rage', lx, ly);
+        { let d = false;
+          this._abilityText.on('pointerdown', () => { d = false; });
+          this._abilityText.on('drag',        () => { d = true;  });
+          this._abilityText.on('pointerup',   () => {
+            if (!d) { this._selectedItemId = (this._selectedItemId === 'rage') ? null : 'rage'; this._updateSelection(); }
+            d = false;
+          });
+        }
+        ly += 13;
+        this.add.text(lx, ly, '+2 dmg, resist phys dmg (30s)  drag→hotbar', STYLE_NOTE); ly += 17;
+      } else if (playerClass === 'monk') {
+        this.add.text(lx, ly, 'Unarmored Defense', STYLE_BODY); ly += 13;
+        this.add.text(lx, ly, 'AC = 10 + DEX + WIS  (no armor or shield)', STYLE_NOTE); ly += 17;
+        this.add.text(lx, ly, 'Martial Arts', STYLE_BODY); ly += 13;
+        this.add.text(lx, ly, 'DEX attacks · d4 unarmed · bonus unarmed strike', STYLE_NOTE); ly += 17;
+        this._abilityKey  = null;
+        this._abilityText = null;
+      } else {
+        this.add.text(lx, ly, 'Fighting Style: Dueling', STYLE_BODY); ly += 13;
+        this.add.text(lx, ly, '+2 dmg (one-hand, no weapon offhand)', STYLE_NOTE); ly += 17;
+        this._abilityKey  = 'second_wind';
+        this._abilityText = this.add.text(lx, ly, '⚡ Second Wind  [READY]', STYLE_ITEM);
+        this._makeDraggable(this._abilityText, 'second_wind', lx, ly);
+        { let d = false;
+          this._abilityText.on('pointerdown', () => { d = false; });
+          this._abilityText.on('drag',        () => { d = true;  });
+          this._abilityText.on('pointerup',   () => {
+            if (!d) { this._selectedItemId = (this._selectedItemId === 'second_wind') ? null : 'second_wind'; this._updateSelection(); }
+            d = false;
+          });
+        }
+        ly += 13;
+        this.add.text(lx, ly, 'Heal 1d10+1 HP (1/short rest)  drag→hotbar', STYLE_NOTE); ly += 17;
+      }
+
+      // Feat.
+      this.add.text(lx, ly, 'FEAT: Alert  (variant human)', STYLE_FEAT); ly += 13;
+      this.add.text(lx, ly, '+5 initiative, cannot be surprised', STYLE_NOTE);
+    }
 
     // ── Right column ──────────────────────────────────────────────────────────
     const rx = DIVIDER_X + 20;
@@ -390,10 +422,38 @@ export class InventoryScene extends Phaser.Scene {
     // ── Footer ────────────────────────────────────────────────────────────────
     this.add.text(
       PANEL_X + PANEL_W - 10, PANEL_Y + PANEL_H - 8,
-      'I  close', STYLE_HINT,
+      this._lootMode ? 'Esc / I  close (releases lock)' : 'I  close', STYLE_HINT,
     ).setOrigin(1, 1);
 
     this.input.keyboard.on('keydown-I', () => { this.scene.stop(); });
+
+    // ── Loot-mode lifecycle ──────────────────────────────────────────────────
+    // Scene owns the open/close handshake. Caller just sends `lootSource` on
+    // launch; scene handles the rest. Lock is released on any close path
+    // (Esc, I, scene.stop from another path, range/death auto-close).
+    if (this._lootMode) {
+      sendOpenContainer(this._lootSource.kind, this._lootSource.id);
+      this._lootHandshakeSeen = false;
+
+      this.input.keyboard.on('keydown-ESC', () => { this.scene.stop(); });
+
+      const room = getRoom();
+      if (room) {
+        room.onMessage('container_lock_denied', ({ sourceKind, sourceId }) => {
+          if (sourceKind === this._lootSource?.kind && sourceId === this._lootSource?.id) {
+            const hud = this.scene.get('HUDScene');
+            if (hud?.addLog) hud.addLog('Container is being looted by another raider.');
+            this.scene.stop();
+          }
+        });
+      }
+
+      this.events.once('shutdown', () => {
+        if (this._lootSource) {
+          sendCloseContainer(this._lootSource.kind, this._lootSource.id);
+        }
+      });
+    }
 
     this._refresh();
   }
@@ -410,9 +470,28 @@ export class InventoryScene extends Phaser.Scene {
     const player = room.state.players.get(room.sessionId);
     if (!player) return;
 
-    this._hpText.setText(`HP   ${player.hp} / ${player.maxHp}`);
-    this._acText.setText(`AC   ${player.ac}`);
-    this._goldText.setText(`GOLD ${player.gold ?? 0} gp`);
+    // Loot-mode auto-close: if the source vanishes (descend) or the lock is
+    // released by the server (range/death/disconnect), close the scene. We
+    // gate on _lootHandshakeSeen so the brief window before open_container
+    // round-trips doesn't slam the scene shut.
+    if (this._lootMode) {
+      const src = this._readLootSource();
+      if (!src) {
+        if (this._lootHandshakeSeen) this.scene.stop();
+        return;
+      }
+      if (src.lockedBy === room.sessionId) {
+        this._lootHandshakeSeen = true;
+      } else if (this._lootHandshakeSeen) {
+        this.scene.stop();
+        return;
+      }
+      this._refreshLootPanel(src);
+    }
+
+    if (this._hpText)   this._hpText.setText(`HP   ${player.hp} / ${player.maxHp}`);
+    if (this._acText)   this._acText.setText(`AC   ${player.ac}`);
+    if (this._goldText) this._goldText.setText(`GOLD ${player.gold ?? 0} gp`);
 
     // Weapon slot.
     const weapon = player.equippedWeaponId;
@@ -471,9 +550,11 @@ export class InventoryScene extends Phaser.Scene {
           .setColor(sel ? '#88ddff' : (raging || uses > 0) ? '#ff8844' : '#665533');
       }
     }
-    const cn = player.class ? player.class[0].toUpperCase() + player.class.slice(1) : 'Fighter';
-    this._nameText.setText(cn);
-    if (this._classDescText) this._classDescText.setText(`Level ${player.level}  Human ${cn}`);
+    if (this._nameText) {
+      const cn = player.class ? player.class[0].toUpperCase() + player.class.slice(1) : 'Fighter';
+      this._nameText.setText(cn);
+      if (this._classDescText) this._classDescText.setText(`Level ${player.level}  Human ${cn}`);
+    }
 
     // Bag — rebuild only when inventory changes.
     const snapshot = [...player.inventory].join(',');
@@ -512,7 +593,9 @@ export class InventoryScene extends Phaser.Scene {
       btn.destroy();
       blockedText.destroy();
     }
-    this._bagBtns = [];
+    for (const dropBtn of this._dropBtns) dropBtn.destroy();
+    this._bagBtns  = [];
+    this._dropBtns = [];
 
     // Group inventory by id (preserving first-seen order) so duplicate items
     // collapse into a single row showing "× N". Server inventory stays flat —
@@ -556,10 +639,126 @@ export class InventoryScene extends Phaser.Scene {
       }).setVisible(blocked).setMask(this._bagMask);
 
       this._bagBtns.push({ id: itemId, btn, blockedText, logicalY });
+
+      // Loot mode: per-row [→] button drops one copy of this item into the
+      // open container. Sends the first flat-inventory index that holds the id.
+      if (this._lootMode) {
+        const dropX  = PANEL_X + PANEL_W - 36;
+        const dropBtn = this.add.text(dropX, actualY, '[ → Drop ]', {
+          ...STYLE_HINT,
+          color: '#88ddff',
+          backgroundColor: '#0d0d14',
+          padding: { x: 6, y: 4 },
+        })
+          .setOrigin(1, 0)
+          .setInteractive({ useHandCursor: true })
+          .setMask(this._bagMask);
+        dropBtn.setData({ logicalY });
+        dropBtn.on('pointerdown', () => this._onDropClick(itemId));
+        this._dropBtns.push(dropBtn);
+      }
     }
 
     this._updateSelection();
     this._updateOverflow(grouped.length);
+  }
+
+  /** Loot-mode click handler — drop one copy of `itemId` into the open container. */
+  _onDropClick(itemId) {
+    if (!this._lootMode || !this._lootSource) return;
+    const room = getRoom();
+    const player = room?.state.players.get(room?.sessionId);
+    if (!player) return;
+    const idx = [...player.inventory].indexOf(itemId);
+    if (idx === -1) return;
+    sendDropItem(this._lootSource.kind, this._lootSource.id, idx);
+  }
+
+  // ── Loot panel ────────────────────────────────────────────────────────────
+
+  /** Read the loot source schema from current room state, or null if missing. */
+  _readLootSource() {
+    if (!this._lootSource) return null;
+    const room = getRoom();
+    if (!room) return null;
+    const { kind, id } = this._lootSource;
+    if (kind === 'chest')  return room.state.chests.get(id)  ?? null;
+    if (kind === 'corpse') return room.state.enemies.get(id) ?? null;
+    return null;
+  }
+
+  /**
+   * Build the loot-panel skeleton on the left side. Static text only —
+   * the dynamic rows (gold + items) are built by _refreshLootPanel.
+   */
+  _buildLootPanel(lx, ly) {
+    const src = this._readLootSource();
+    const titleText = this._lootSource.kind === 'corpse'
+      ? `${(src?.type ?? 'corpse').toUpperCase()}  CORPSE`
+      : 'CHEST';
+    this.add.text(lx, ly, 'LOOT', STYLE_SUBHEAD); ly += 20;
+    this.add.text(lx, ly, titleText, STYLE_HEADER); ly += 28;
+    this.add.text(lx, ly, 'click [ Take ] to move into your bag', STYLE_NOTE); ly += 14;
+    this.add.text(lx, ly, '[ → Drop ] on bag rows to put items here', STYLE_NOTE); ly += 22;
+
+    // Anchor for dynamic rows.
+    this._lootRowsX = lx;
+    this._lootRowsY = ly;
+    this._lootEmptyText = this.add.text(lx, ly, '(empty)', { ...STYLE_NOTE, color: '#445566' }).setVisible(false);
+  }
+
+  /**
+   * Rebuild the gold + item rows from the source's current contents. Called
+   * from _refresh whenever the source's snapshot string changes. Recreating
+   * rows on every change is fine — there are at most a few items per source.
+   */
+  _refreshLootPanel(src) {
+    const itemsArr = this._lootSource.kind === 'corpse' ? src.lootItems : src.items;
+    const gold     = this._lootSource.kind === 'corpse' ? (src.lootGold ?? 0) : 0;
+    const snapshot = `${gold}|${[...itemsArr].join(',')}`;
+    if (snapshot === this._lastLootSnapshot) return;
+    this._lastLootSnapshot = snapshot;
+
+    for (const obj of this._lootRowGfx) obj.destroy();
+    this._lootRowGfx = [];
+
+    let ry = this._lootRowsY;
+    const rowH = 22;
+
+    // Gold (corpses only, when > 0).
+    if (this._lootSource.kind === 'corpse' && gold > 0) {
+      const goldLabel = this.add.text(this._lootRowsX, ry, `💰  ${gold} gp`, {
+        ...STYLE_ITEM, color: '#ffdd44',
+      });
+      const takeBtn = this.add.text(this._lootRowsX + 220, ry, '[ Take ]', {
+        ...STYLE_HINT, color: '#88ddff', backgroundColor: '#0d0d14',
+        padding: { x: 6, y: 3 },
+      }).setInteractive({ useHandCursor: true });
+      takeBtn.on('pointerdown', () => sendTakeGold(this._lootSource.id));
+      this._lootRowGfx.push(goldLabel, takeBtn);
+      ry += rowH;
+    }
+
+    // Per-item rows. Index in the source array is what take_item expects.
+    for (let i = 0; i < itemsArr.length; i++) {
+      const itemId = itemsArr[i];
+      const itemLabel = this.add.text(this._lootRowsX, ry, this._itemLabel(itemId), STYLE_ITEM);
+      const takeBtn   = this.add.text(this._lootRowsX + 220, ry, '[ Take ]', {
+        ...STYLE_HINT, color: '#88ddff', backgroundColor: '#0d0d14',
+        padding: { x: 6, y: 3 },
+      }).setInteractive({ useHandCursor: true });
+      // Capture i — the index can shift as earlier items are removed, but we
+      // bind to the index at click time by re-reading source state.
+      const itemIndex = i;
+      takeBtn.on('pointerdown', () => {
+        sendTakeItem(this._lootSource.kind, this._lootSource.id, itemIndex);
+      });
+      this._lootRowGfx.push(itemLabel, takeBtn);
+      ry += rowH;
+    }
+
+    const isEmpty = itemsArr.length === 0 && gold === 0;
+    this._lootEmptyText.setVisible(isEmpty).setY(this._lootRowsY);
   }
 
   /**
@@ -797,6 +996,9 @@ export class InventoryScene extends Phaser.Scene {
       const y = this._bagStartY + logicalY - this._bagScrollOffset;
       btn.setY(y);
       blockedText.setY(y);
+    }
+    for (const dropBtn of this._dropBtns) {
+      dropBtn.setY(this._bagStartY + dropBtn.getData('logicalY') - this._bagScrollOffset);
     }
     this._updateOverflow(this._bagBtns.length);
   }

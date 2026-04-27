@@ -10,7 +10,7 @@
 // PLACEHOLDER ROOM: the room boundary is a simple rectangle.
 // When tilemaps arrive, replace _drawRoom() with a Tilemap layer.
 
-import { joinDungeon, sendLoot, sendLootCorpse, sendDescend, sendUseHotbar, leave as leaveRoom } from '../network/ColyseusClient.js';
+import { joinDungeon, sendDescend, sendUseHotbar, leave as leaveRoom } from '../network/ColyseusClient.js';
 import { InputHandler } from '../input/InputHandler.js';
 import { CHEST_LOOT_RANGE_PX, TRAP_RADIUS_PX } from '../../../shared/data/constants.js';
 import { FLOOR_REGISTRY } from '../../../shared/data/floors/index.js';
@@ -144,6 +144,10 @@ export class DungeonScene extends Phaser.Scene {
   update() {
     if (!this._room) return;
 
+    // Input is suppressed whenever an overlay scene (inventory or loot) is up,
+    // and re-enabled the moment it closes — covers Esc / I / range-auto-close
+    // paths uniformly without each path needing to call back here.
+    if (this._input) this._input.enabled = !this.scene.isActive('InventoryScene');
     this._input?.update();
 
     const state    = this._room.state;
@@ -261,19 +265,23 @@ export class DungeonScene extends Phaser.Scene {
       if (d < bestDist) { bestDist = d; bestKind = 'stair'; bestId = id; }
     }
 
-    if (bestKind === 'chest')  sendLoot(bestId);
-    if (bestKind === 'corpse') sendLootCorpse(bestId);
-    if (bestKind === 'stair')  sendDescend(bestId);
+    if (bestKind === 'chest' || bestKind === 'corpse') {
+      // Defensive: input gating should prevent F while a scene is up, but
+      // skip-if-active is cheap insurance against double launches.
+      if (this.scene.isActive('InventoryScene')) return;
+      this.scene.launch('InventoryScene', { lootSource: { kind: bestKind, id: bestId } });
+      return;
+    }
+    if (bestKind === 'stair') sendDescend(bestId);
   }
 
   _toggleInventory() {
     if (this.scene.isActive('InventoryScene')) {
       this.scene.stop('InventoryScene');
-      this._input.enabled = true;
     } else {
       this.scene.launch('InventoryScene');
-      this._input.enabled = false;
     }
+    // _input.enabled is derived from scene state in update(), no need to set here.
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────

@@ -65,14 +65,29 @@ export function sendUnequip(slot) {
   _room?.send('unequip', { slot });
 }
 
-/** Loot a chest by id. */
-export function sendLoot(chestId) {
-  _room?.send('loot', { chestId });
+/**
+ * Loot-window protocol. open_container claims an exclusive lock on the source
+ * (chest or corpse); subsequent take/drop/gold messages require the lock.
+ * close_container releases. Server also auto-releases on range/death/disconnect.
+ */
+export function sendOpenContainer(sourceKind, sourceId) {
+  _room?.send('open_container', { sourceKind, sourceId });
 }
 
-/** Loot a dead enemy's corpse by id. */
-export function sendLootCorpse(enemyId) {
-  _room?.send('loot_corpse', { enemyId });
+export function sendCloseContainer(sourceKind, sourceId) {
+  _room?.send('close_container', { sourceKind, sourceId });
+}
+
+export function sendTakeItem(sourceKind, sourceId, itemIndex) {
+  _room?.send('take_item', { sourceKind, sourceId, itemIndex });
+}
+
+export function sendTakeGold(sourceId) {
+  _room?.send('take_gold', { sourceId });
+}
+
+export function sendDropItem(sourceKind, sourceId, inventoryIndex) {
+  _room?.send('drop_item', { sourceKind, sourceId, inventoryIndex });
 }
 
 /** Descend the named stair. Server validates lock + range and swaps the floor. */

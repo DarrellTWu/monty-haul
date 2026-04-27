@@ -14,6 +14,10 @@ import { GOBLIN, DOG, SKELETON }     from '../../shared/data/enemies/tier1.js';
 import { FLOOR_REGISTRY }            from '../../shared/data/floors/index.js';
 import { getModifier, resolveSave, rollDice } from '../../shared/logic/combat.js';
 import { rollLoot }                  from '../../shared/logic/loot.js';
+import {
+  tryOpenContainer, tryCloseContainer, releaseLocksHeldBy, tickContainerLocks,
+  tryTakeItem, tryTakeGold, tryDropItem,
+} from '../../shared/logic/loot-window.js';
 import { LOOT_TABLE_REGISTRY }       from '../../shared/data/loot/tier1.js';
 import { ARMOR_REGISTRY, computeAC } from '../../shared/data/armor/armor.js';
 import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, GREATSWORD, DAGGER, MACE } from '../../shared/data/weapons/melee.js';
@@ -141,46 +145,41 @@ export class DungeonRoom extends Room {
       }
     });
 
-    // ── Chest looting ─────────────────────────────────────────────────────────────
-    this.onMessage('loot', (client, { chestId }) => {
-      const player = this.state.players.get(client.sessionId);
-      const chest  = this.state.chests.get(String(chestId));
-      if (!player || !chest || chest.open) return;
-      const dx = player.x - chest.x;
-      const dy = player.y - chest.y;
-      if (Math.sqrt(dx * dx + dy * dy) > CHEST_LOOT_RANGE_PX) return;
-      for (const item of chest.items) player.inventory.push(item);
-      chest.items.splice(0, chest.items.length);
-      chest.open = true;
-      console.log(`[DungeonRoom] ${client.sessionId} looted chest ${chestId}`);
+    // ── Container lock (loot window open/close) ──────────────────────────────────
+    // First player to send `open_container` claims the lock; others are denied
+    // until the locker closes, walks out of range, dies, descends, or disconnects.
+    // The lock is the gate for take_item / take_gold / drop_item below.
+    this.onMessage('open_container', (client, { sourceKind, sourceId }) => {
+      const result = tryOpenContainer(this.state, client.sessionId, sourceKind, sourceId, CHEST_LOOT_RANGE_PX);
+      if (!result.ok) {
+        if (result.reason === 'denied') {
+          client.send('container_lock_denied', { sourceKind, sourceId, holder: result.holder });
+        }
+        return;
+      }
+      console.log(`[DungeonRoom] ${client.sessionId} locked ${sourceKind} ${sourceId}`);
     });
 
-    // ── Corpse looting ────────────────────────────────────────────────────────────
-    // Server validates: enemy exists, dead, not yet looted, player in range.
-    // Transfers gold to player.gold and items to player.inventory in one shot.
-    this.onMessage('loot_corpse', (client, { enemyId }) => {
-      const player = this.state.players.get(client.sessionId);
-      const enemy  = this.state.enemies.get(String(enemyId));
-      if (!player || !player.alive || !enemy) return;
-      if (enemy.alive || enemy.looted) return;
-      const dx = player.x - enemy.x;
-      const dy = player.y - enemy.y;
-      if (Math.sqrt(dx * dx + dy * dy) > CHEST_LOOT_RANGE_PX) return;
+    this.onMessage('close_container', (client, { sourceKind, sourceId }) => {
+      if (tryCloseContainer(this.state, client.sessionId, sourceKind, sourceId)) {
+        console.log(`[DungeonRoom] ${client.sessionId} released ${sourceKind} ${sourceId}`);
+      }
+    });
 
-      const gold = enemy.lootGold;
-      const items = [...enemy.lootItems];
-      player.gold += gold;
-      for (const id of items) player.inventory.push(id);
-      enemy.lootGold = 0;
-      enemy.lootItems.splice(0, enemy.lootItems.length);
-      enemy.looted = true;
+    // ── Item flow into / out of locked containers ─────────────────────────────────
+    // All three handlers route through shared/logic/loot-window.js — the gate
+    // (alive, source present, corpse dead, in range, lock owned) is one predicate
+    // there, not duplicated here.
+    this.onMessage('take_item', (client, { sourceKind, sourceId, itemIndex }) => {
+      tryTakeItem(this.state, client.sessionId, sourceKind, sourceId, itemIndex, CHEST_LOOT_RANGE_PX);
+    });
 
-      const summary = [
-        gold > 0 ? `${gold} gp` : null,
-        items.length > 0 ? items.join(', ') : null,
-      ].filter(Boolean).join(' + ') || 'nothing';
-      this.broadcast('combat_log', { message: `Looted ${enemy.type}: ${summary}` });
-      console.log(`[DungeonRoom] ${client.sessionId} looted corpse ${enemyId}: ${summary}`);
+    this.onMessage('take_gold', (client, { sourceId }) => {
+      tryTakeGold(this.state, client.sessionId, sourceId, CHEST_LOOT_RANGE_PX);
+    });
+
+    this.onMessage('drop_item', (client, { sourceKind, sourceId, inventoryIndex }) => {
+      tryDropItem(this.state, client.sessionId, sourceKind, sourceId, inventoryIndex, CHEST_LOOT_RANGE_PX);
     });
 
     // ── Descend stairs ────────────────────────────────────────────────────────────
@@ -335,6 +334,7 @@ export class DungeonRoom extends Room {
   }
 
   onLeave(client) {
+    releaseLocksHeldBy(this.state, client.sessionId);
     this.state.players.delete(client.sessionId);
   }
 
@@ -466,6 +466,7 @@ export class DungeonRoom extends Room {
     this._tickTraps(dt);
     this._tickConditions(dt);
     this._rollLootForFreshDeaths();
+    tickContainerLocks(this.state, CHEST_LOOT_RANGE_PX);
 
     // Stair unlock: any stair gated on enemies-dead flips open the first tick
     // after the last enemy dies. The transition fires once per stair (locked=false
