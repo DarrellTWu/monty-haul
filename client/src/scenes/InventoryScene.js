@@ -514,21 +514,36 @@ export class InventoryScene extends Phaser.Scene {
     }
     this._bagBtns = [];
 
-    // Clamp scroll to the valid range for the new inventory size.
-    const maxScroll = Math.max(0, player.inventory.length * BAG_ITEM_H - this._bagViewportH);
+    // Group inventory by id (preserving first-seen order) so duplicate items
+    // collapse into a single row showing "× N". Server inventory stays flat —
+    // this is purely a display transform.
+    const grouped = [];
+    const seenAt  = new Map(); // id → grouped[] index
+    for (const id of player.inventory) {
+      const idx = seenAt.get(id);
+      if (idx === undefined) {
+        seenAt.set(id, grouped.length);
+        grouped.push({ id, qty: 1 });
+      } else {
+        grouped[idx].qty++;
+      }
+    }
+
+    const maxScroll = Math.max(0, grouped.length * BAG_ITEM_H - this._bagViewportH);
     this._bagScrollOffset = Math.min(Math.max(this._bagScrollOffset, 0), maxScroll);
 
-    if (this._selectedItemId && ![...player.inventory].includes(this._selectedItemId)) {
+    if (this._selectedItemId && !seenAt.has(this._selectedItemId)) {
       this._selectedItemId = null;
     }
 
     const rx = DIVIDER_X + 20;
 
-    for (let i = 0; i < player.inventory.length; i++) {
-      const itemId   = player.inventory[i];
+    for (let i = 0; i < grouped.length; i++) {
+      const { id: itemId, qty } = grouped[i];
       const logicalY = i * BAG_ITEM_H;
       const actualY  = this._bagStartY + logicalY - this._bagScrollOffset;
-      const label    = this._itemLabel(itemId);
+      const baseLabel = this._itemLabel(itemId);
+      const label    = qty > 1 ? `${baseLabel}  × ${qty}` : baseLabel;
       const blocked  = this._isBlocked(itemId, player);
 
       const btn = this._makeItemButton(rx, actualY, label, itemId, logicalY);
@@ -544,7 +559,7 @@ export class InventoryScene extends Phaser.Scene {
     }
 
     this._updateSelection();
-    this._updateOverflow(player.inventory.length);
+    this._updateOverflow(grouped.length);
   }
 
   /**
@@ -720,8 +735,14 @@ export class InventoryScene extends Phaser.Scene {
       lastClickMs = now;
 
       if (delta < DBLCLICK_MS) {
-        // Double-click: auto-equip to server-chosen default slot.
-        sendEquip(itemId);
+        // Double-click: route to the right server message based on item type.
+        // Consumables (incl. extraction_scroll) → bind to first free hotbar slot;
+        // weapons/armor/shield → server's auto-equip; materials → no-op.
+        if (CONSUMABLE_DISPLAY[itemId]) {
+          this._assignConsumableToHotbar(itemId);
+        } else if (!MATERIAL_DISPLAY[itemId]) {
+          sendEquip(itemId);
+        }
         this._selectedItemId = null;
       } else {
         // Single-click: toggle selection.
@@ -740,6 +761,22 @@ export class InventoryScene extends Phaser.Scene {
     });
 
     return btn;
+  }
+
+  /**
+   * Bind a consumable to the first empty hotbar slot. No-op if it's already
+   * bound somewhere (avoids surprising "the potion jumped to a different key"
+   * behavior) or if every slot is full.
+   */
+  _assignConsumableToHotbar(itemId) {
+    const room = getRoom();
+    const player = room?.state.players.get(room?.sessionId);
+    if (!player) return;
+    const hotbar = [...player.hotbar];
+    if (hotbar.includes(itemId)) return;
+    const firstFree = hotbar.findIndex(b => b === '');
+    if (firstFree === -1) return;
+    sendAssignHotbar(itemId, firstFree);
   }
 
   /** Make any existing game object draggable (used for Second Wind ability text). */
