@@ -7,24 +7,24 @@
 # Current Implementation State
 > **Read this before the rest of the spec.** The sections below describe the target architecture. This section describes what actually exists now.
 
-**Active phase:** Prototype between Phase 1 and Phase 2. Single-room multiplayer works. Cohort branches, floor progression, Supabase persistence, and the hub are not yet implemented. The map is a single flat room used for prototyping mechanics and combat systems.
+**Active phase:** Prototype between Phase 1 and Phase 2. Single-room multiplayer works. The hub, basic floor progression (floor 1 → floor 2 via locked stair, scroll-only extraction), and a debug-tuning floor 2 are in place. Cohort branches, procedural floor generation, and Supabase persistence are not yet implemented. Floors are hand-authored data in `shared/data/floors/`.
 
 ## Files That Exist Today
 
 **server/**
-- `rooms/DungeonRoom.js` — session lifecycle, all message handling, equip/unequip/loot/hotbar/trap logic; rolls loot on enemy death and handles `loot_corpse`
+- `rooms/DungeonRoom.js` — session lifecycle, all message handling, equip/unequip/loot/hotbar/trap logic; rolls loot on enemy death; handles `loot_corpse` and `descend`. Floors loaded from `FLOOR_REGISTRY` via `_loadFloor(n)` (clears entity MapSchemas — guarded on size>0 to avoid an OPERATION.CLEAR patch poisoning initial state sync — and repopulates from floor data). Descend swaps the floor for everyone and applies `_longRest` (HP, rage uses, Second Wind, drops timed conditions). Run completion is scroll-only (`extract` consumable type sets `state.phase = 'complete'`); the auto-complete-on-all-enemies-dead trigger is removed.
 - `systems/CombatSystem.js` — multiplayer wrapper around shared/logic/combat.js
 - `systems/MovementSystem.js` — applies velocity to players and enemies each tick
 - `systems/AISystem.js` — enemy state machine (idle → aggro → attack)
-- `state/` — PlayerState (incl. `gold`), EnemyState (incl. `lootGold`/`lootItems`/`looted`), GameState, ChestState, TrapState
+- `state/` — PlayerState (incl. `gold`), EnemyState (incl. `lootGold`/`lootItems`/`looted`), GameState (incl. `floor`/`stairs`), ChestState, TrapState, StairState
 - `index.js` — Colyseus server entry point
 
 **client/src/** (no `rendering/` or `ui/` subdirectories yet)
 - `scenes/HubScene.js` — entry point; two-panel layout: left cycles sub-screens (Class, Stash, Shop, Craft), right is persistent Raider Config + Enter Dungeon; screen-level VAULT display (top-right) shows hub gold; passes `{ class, items }` to DungeonScene; auto-opens Stash tab when `init({ view: 'stash' })`. Shop tab routes through two sub-vendors (potions, armor) reading `VENDOR_CATALOG`; Craft tab routes through six benches reading `BENCH_REGISTRY`. Stash rows expose `[ Sell N gp ]`; raider panel exposes `[ Dump All to Stash ]` when pack non-empty.
-- `scenes/DungeonScene.js` — main gameplay: renders server state, wires input; receives class+items via `init(data)`; lootable corpses render dim gold with an "F: Loot" hint; F key dispatches to chest or corpse via `_tryLootNearby`; on extract, calls `setRaiderPack` and `addHubGold(player.gold)`
+- `scenes/DungeonScene.js` — main gameplay: renders server state, wires input; receives class+items via `init(data)`; lootable corpses render dim gold with an "F: Loot" hint; F key dispatches to chest, corpse, or unlocked stair via `_tryInteractNearby`; on extract, calls `setRaiderPack` and `addHubGold(player.gold)`. Stair gfx + label tracked in `_stairGfx` map; locked = grey, unlocked = brown with arrow + "F: Descend" hint. Room dimensions + camera bounds redraw via `_applyFloorLayout` on `state.floor` change. Per-entity `onRemove` handlers (enemies, chests, traps, stairs) translate server-side CLEAR ops on descend into per-entity gfx destroy — no orphan visuals.
 - `scenes/HUDScene.js` — overlay: HP, condition rings, cooldown arc, hotbar, combat log
-- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI; live `GOLD N gp` line under HP/AC; renders crafting materials in the bag. Bag is a fixed-height scrollable viewport clipped by a shared `GeometryMask`, scrolled with the mouse wheel; the mask clears on drag-start and restores on drag-end so dragged items aren't clipped while moving to equip slots / hotbar.
-- `network/ColyseusClient.js` — room join/leave, all sendX helpers (`sendLoot` for chests, `sendLootCorpse` for corpses); `joinDungeon(opts)` forwards opts (incl. class + items) to server
+- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI; live `GOLD N gp` line under HP/AC; renders crafting materials in the bag. Bag groups duplicate items into a single row with `× N` qty (display-only — server inventory stays flat). Fixed-height scrollable viewport clipped by a shared `GeometryMask`, scrolled with the mouse wheel; mask clears on drag-start and restores on drag-end. Double-click routes by item type: weapons/armor/shield → `sendEquip`, consumables → `sendAssignHotbar` to first free slot (no-op if already bound or hotbar full), materials → no-op.
+- `network/ColyseusClient.js` — room join/leave, all sendX helpers (`sendLoot` for chests, `sendLootCorpse` for corpses, `sendDescend` for stairs); `joinDungeon(opts)` forwards opts (incl. class + items) to server
 - `store/stash.js` — localStorage-backed item store (stash + raider pack + hub gold). Reads: `getStash`, `getRaiderPack`, `getRaiderPackFlat`, `getHubGold`. Mutations: `stashToRaider`, `raiderToStash`, `dumpRaiderPackToStash`, `setRaiderPack`, `addHubGold`, `setHubGold`, `buyItem`, `sellItem`, `craftRecipe`. Seeded with all items + 0 gold on first load; designed for drop-in Supabase swap. ALL hub-side state mutations route through this file — single migration point.
 - `input/InputHandler.js` — WASD/attack/hotbar key bindings
 - `main.js` — Phaser config and scene registration; HubScene is first (auto-starts)
@@ -33,9 +33,10 @@
 - `data/constants.js`, `data/weapons/melee.js`, `data/armor/armor.js`
 - `data/values.js` — canonical `ITEM_GOLD_VALUE` map (SRD prices for weapons/armor/potions, nominal values for materials) and `sellPrice(id)` helper (1/4× value, floor, min 1 gp). Single source of truth — shop buy prices and stash sell prices both derive from this.
 - `data/shop.js` — `VENDOR_CATALOG` keyed by vendor (potions, armor); each entry `{ id, price }` with prices computed from `ITEM_GOLD_VALUE`.
-- `data/items/consumables.js`, `data/items/shields.js`, `data/items/materials.js` (skeleton_bone, wolf_pelt — crafting materials, bag-only)
+- `data/items/consumables.js` (incl. `extraction_scroll`, type `extract` — run-control, only sourced from the floor 2 entry chest), `data/items/shields.js`, `data/items/materials.js` (skeleton_bone, wolf_pelt — crafting materials, bag-only)
 - `data/enemies/tier1.js` (goblin, dog, skeleton)
-- `data/loot/tier1.js` — LOOT_TABLE_REGISTRY keyed by enemy id; each table is `{ gold, drops }`. Drop entries support literal item ids and `@pool_name` references (currently `@potion_any` → CONSUMABLE_REGISTRY).
+- `data/floors/floor1.js` + `floor2.js` + `index.js` — `FLOOR_REGISTRY` keyed by floor number. Each floor: `{ width, height, playerSpawn, enemies[], chests[], traps[], stairs[] }`. Floor 1 = original prototype room + locked stair to floor 2. Floor 2 = 4000×4000 debug-tuning room with three arms (N=goblins, E=skeletons, W=dogs) of 1/2/4/6/8/10 enemies per sub-room (300 px spacing > 200 px aggro radius), entry chest holding extraction scroll + 10× each potion. Both floors' contents are tuned for combat testing — not final design.
+- `data/loot/tier1.js` — LOOT_TABLE_REGISTRY keyed by enemy id; each table is `{ gold, drops }`. Drop entries support literal item ids and `@pool_name` references (currently `@potion_any` → CONSUMABLE_REGISTRY filtered to exclude `extract` type).
 - `data/classes/fighter.js`, `data/classes/barbarian.js`, `data/classes/monk.js`, `data/classes/index.js` — CLASS_REGISTRY pattern; add new classes here
 - `data/crafting/benches.js` — `BENCH_REGISTRY` of six benches (forge, binder, artificer, apothecary, scriptorium, refinery); each has `status: 'open' | 'planned'`. Planned benches render a "coming soon" placeholder in the hub.
 - `data/crafting/recipes.js` — `RECIPE_REGISTRY` keyed by recipe id; shape `{ id, label, bench, inputs: [{ id, qty }], output: { id, qty } }`. `recipesForBench(benchId)` helper. Phase 1 seeds two recipes (Tan Hide at the Forge, Bone Brew at the Apothecary).

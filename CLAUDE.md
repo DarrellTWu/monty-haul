@@ -81,24 +81,24 @@ D&D 5e SRD mechanics adapted for real-time play.
 Many files in docs/tech_spec.md are planned, not yet built. What actually exists:
 
 **Server**
-- `rooms/DungeonRoom.js` — message routing + equip/loot/hotbar/trap logic; rolls loot on enemy death and handles `loot_corpse`
+- `rooms/DungeonRoom.js` — message routing + equip/loot/hotbar/trap logic; rolls loot on enemy death; handles `loot_corpse` and `descend`. Floors are loaded from `FLOOR_REGISTRY` via `_loadFloor(n)` (clears entity maps + repopulates from floor data); player position + long rest applied on descend. Run completes only via Scroll of Extraction (`extract` consumable type) — no auto-complete on enemies-dead.
 - `systems/` — CombatSystem.js, MovementSystem.js, AISystem.js (called from tick loop)
-- `state/` — PlayerState, EnemyState, GameState, ChestState, TrapState
+- `state/` — PlayerState, EnemyState, GameState (incl. `floor`, `stairs` map), ChestState, TrapState, StairState
 - `persistence/`, `matchmaking/` — not yet built
 
 **Client** (no `rendering/` or `ui/` subdirectories)
 - `scenes/HubScene.js` — entry point (auto-starts); two-panel layout: left cycles sub-screens (Class, Stash, Shop, Craft), right is persistent Raider Config + Enter Dungeon; screen-level VAULT display (top-right) shows hub gold; passes `{ class, items }` to DungeonScene; auto-opens Stash tab when `init({ view: 'stash' })`. Sub-state: `_shopVendor` (`'potions' | 'armor'`), `_craftBench` (one of the six BENCH_REGISTRY ids). Stash rows expose `[ Sell N gp ]`; raider panel shows `[ Dump All to Stash ]` when pack non-empty.
-- `scenes/DungeonScene.js` — gameplay rendering, input wiring; receives `{ class, items }` via init(data); detects run complete/death, shows run summary overlay, calls `setRaiderPack` and `addHubGold(player.gold)` on extract; F-key triggers `_tryLootNearby` which dispatches to chest or corpse; lootable corpses render dim gold with an "F: Loot" hint
+- `scenes/DungeonScene.js` — gameplay rendering, input wiring; receives `{ class, items }` via init(data); detects run complete/death, shows run summary overlay, calls `setRaiderPack` and `addHubGold(player.gold)` on extract; F-key triggers `_tryInteractNearby` which dispatches to chest, corpse, or unlocked stair; lootable corpses render dim gold with an "F: Loot" hint; stairs render as a brown box (orange when unlocked) with "F: Descend"; room dimensions + camera bounds redraw on `state.floor` change; per-entity `onRemove` handlers tear down old-floor gfx when the server clears MapSchemas during descend.
 - `scenes/HUDScene.js` — conditions, cooldown rings, hotbar overlay
-- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI; shows live `GOLD N gp` line under HP/AC; renders materials (skeleton_bone, wolf_pelt) in the bag. Bag is a fixed-height scrollable viewport: items past the visible area are clipped by a shared `GeometryMask` and reachable via mouse wheel; mask is cleared on drag-start and restored on drag-end so dragged items aren't clipped while moving to equip slots or hotbar.
-- `network/ColyseusClient.js` — `joinDungeon(opts)` forwards opts (incl. class + items) to server; `sendLoot` (chests), `sendLootCorpse` (corpses)
+- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI; shows live `GOLD N gp` line under HP/AC; renders materials (skeleton_bone, wolf_pelt) in the bag. Bag groups duplicate items into a single row with `× N` qty (display-only — server inventory stays flat); fixed-height scrollable viewport clipped by a shared `GeometryMask`, reachable via mouse wheel; mask cleared on drag-start, restored on drag-end. Double-click routes by item type: weapons/armor → `sendEquip`, consumables → `sendAssignHotbar` to first free slot, materials → no-op.
+- `network/ColyseusClient.js` — `joinDungeon(opts)` forwards opts (incl. class + items) to server; `sendLoot` (chests), `sendLootCorpse` (corpses), `sendDescend` (stairs)
 - `input/InputHandler.js`
 - `store/stash.js` — localStorage-backed item store; two containers (stash + raider pack) plus persistent hub gold (`mh_hub_gold`). Reads: `getStash`, `getRaiderPack`, `getRaiderPackFlat`, `getHubGold`. Mutations: `stashToRaider`, `raiderToStash`, `dumpRaiderPackToStash`, `setRaiderPack`, `addHubGold`, `setHubGold`, `buyItem`, `sellItem`, `craftRecipe`. Seeded with all items + 0 gold on first load; designed for drop-in Supabase swap. ALL hub-side state mutations route through this file — single migration point.
 
 **Shared**
-- `data/` — constants.js, values.js (ITEM_GOLD_VALUE + sellPrice), shop.js (VENDOR_CATALOG), weapons/melee.js, armor/armor.js, items/(consumables+shields+materials), enemies/tier1.js, classes/fighter.js, classes/barbarian.js, classes/monk.js, classes/index.js (CLASS_REGISTRY), loot/tier1.js (LOOT_TABLE_REGISTRY), crafting/benches.js (BENCH_REGISTRY), crafting/recipes.js (RECIPE_REGISTRY + recipesForBench)
+- `data/` — constants.js, values.js (ITEM_GOLD_VALUE + sellPrice), shop.js (VENDOR_CATALOG), weapons/melee.js, armor/armor.js, items/(consumables+shields+materials), enemies/tier1.js, classes/fighter.js, classes/barbarian.js, classes/monk.js, classes/index.js (CLASS_REGISTRY), loot/tier1.js (LOOT_TABLE_REGISTRY), crafting/benches.js (BENCH_REGISTRY), crafting/recipes.js (RECIPE_REGISTRY + recipesForBench), floors/floor1.js + floor2.js + index.js (FLOOR_REGISTRY)
 - `logic/combat.js` — full attack resolution
-- `logic/loot.js` — pure `rollLoot(table, rng?)` returning `{ gold, items }`; supports literal item ids and `@pool` references (currently `@potion_any`)
+- `logic/loot.js` — pure `rollLoot(table, rng?)` returning `{ gold, items }`; supports literal item ids and `@pool` references. The `@potion_any` pool filters out consumables with `type === 'extract'` (Scroll of Extraction is run-control, not loot).
 - `tests/combat.test.js`, `tests/loot.test.js`
 - `types/` — player.js, enemy.js, weapon.js
 - `data/subclasses/`, `logic/conditions.js`, `logic/ai.js` — not yet built
@@ -154,8 +154,9 @@ All messages handled in `DungeonRoom.js` onCreate.
 - `unequip` `{ slot }` — slot: `'weapon'|'offhand'|'armor'`
 - `loot` `{ chestId }` — open chest (server validates range)
 - `loot_corpse` `{ enemyId }` — take gold + items from a dead enemy (server validates dead, !looted, in range)
+- `descend` `{ stairId }` — descend the named stair (server validates exists, !locked, in range; swaps floor for everyone in the room)
 - `assign_hotbar` `{ itemId, slot }` — bind ability/consumable id to hotbar index 0–9
-- `use_hotbar` `{ slot }` — activate hotbar slot 0–9
+- `use_hotbar` `{ slot }` — activate hotbar slot 0–9. Consumable types: `healing`, `bless`, `longstrider`, `false_life`, `extract` (sets `state.phase = 'complete'`, ending the run)
 
 **Server → Client**
 - `combat_log` `{ message }` — text line pushed to the HUD combat log
@@ -166,6 +167,13 @@ All messages handled in `DungeonRoom.js` onCreate.
 - `itemId` accepts literal ids OR `@pool_name` references resolved by `shared/logic/loot.js` (currently only `@potion_any` → CONSUMABLE_REGISTRY). Add new pools to the POOLS map in loot.js.
 - DungeonRoom._tick calls `_rollLootForFreshDeaths()` each tick — idempotent via `_lootRolled` Set guard. Enemies with no table drop nothing silently.
 - All numeric tuning (dice, chances, gold ranges) lives in the table file, not in logic.
+
+## Floor System
+- Floors are declarative data in `shared/data/floors/` keyed by floor number in `FLOOR_REGISTRY`. Each floor: `{ width, height, playerSpawn, enemies[], chests[], traps[], stairs[] }`. Add a new floor by adding a file + registry entry — no logic changes.
+- Server `_loadFloor(n)` clears the entity MapSchemas (guarded on `size > 0` to avoid an `OPERATION.CLEAR` patch poisoning the initial sync — see commit `f2a8d12`) and repopulates from the floor data; sets `state.floor = n` and updates `_bounds` for MovementSystem. Initial onCreate calls `_loadFloor(1)`.
+- Stairs with `lockedUntilAllEnemiesDead: true` start `locked = true`; flip on the first tick where every enemy is dead, broadcast a "Stair to Floor N unlocked" log line. Floors with no stairs (e.g. floor 2) are exit-only via Scroll of Extraction.
+- Descend (`descend { stairId }`) calls `_loadFloor(toFloor)`, teleports all players to the new spawn, and applies `_longRest`: HP → maxHp, tempHp 0, Second Wind refreshed, rage uses reset to class default, all timed conditions dropped (rage, bless, longstrider, false_life). Broadcasts a long-rest combat-log line.
+- Client (`DungeonScene`) detects `state.floor` change in `state.onChange` → `_applyFloorLayout` redraws the room background and resets camera bounds. Per-entity `onRemove` handlers translate the server's CLEAR ops into per-entity gfx destroy. Floor 2 contents (1, 2, 4, 6, 8, 10 enemies per arm × 3 arms; entry chest with scroll + 10× each potion) are tuned for combat testing — not final design.
 
 ## Hub Economy & Crafting
 - **Pricing source of truth**: `shared/data/values.js` exports `ITEM_GOLD_VALUE` (SRD prices for weapons/armor/potions, nominal values for materials) and `sellPrice(id)` (1/4× value, floor, min 1 gp). Both shop buy prices and stash sell prices read from this map — single source, no drift.
@@ -179,6 +187,7 @@ All messages handled in `DungeonRoom.js` onCreate.
 - docs/gdd.md — Game design document, combat system, class roster, items
 - docs/gdd_crafting.md — Conceptual crafting & itemization GDD (three-part item model, biomes, recipe acquisition, six benches)
 - docs/loot-system-plan.md — loot tables, gold tracking, corpse looting design and build plan
+- docs/floor-2-plan.md — floor system + Scroll of Extraction build plan (floor data, descend flow, long rest, debug-tuning floor 2)
 
 ## Keeping Docs Current
 After completing any task, flag to the user if the changes warrant updates to CLAUDE.md or docs/tech_spec.md. Triggers include:
