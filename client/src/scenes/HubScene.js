@@ -5,7 +5,9 @@
 import {
   getStash, getRaiderPack, stashToRaider, raiderToStash, getHubGold,
   buyItem, sellItem, craftRecipe, dumpRaiderPackToStash,
+  initFromServer, getPlayerId,
 } from '../store/stash.js';
+import { HubAPI } from '../network/HubAPI.js';
 import { VENDOR_CATALOG } from '../../../shared/data/shop.js';
 import { sellPrice } from '../../../shared/data/values.js';
 import { BENCH_REGISTRY } from '../../../shared/data/crafting/benches.js';
@@ -122,19 +124,152 @@ export class HubScene extends Phaser.Scene {
 
   create() {
     this._selectedClass  = null;
-    this._abilityScores  = null; // set when a class is selected; passed to DungeonScene on enter
+    this._abilityScores  = null;
     this._leftView       = this._initData.view === 'stash' ? 'stash' : 'class';
     this._shopVendor     = 'potions';
     this._craftBench     = 'forge';
     this._leftObjs       = [];
     this._rightObjs      = [];
+    this._loginObjs      = [];
+    this._keyHandler     = null;
 
+    const playerId = getPlayerId();
+    if (!playerId) {
+      this._showLoginScreen();
+      return;
+    }
+
+    this._loadingText = this.add.text(640, 360, 'Loading...', {
+      fontSize: '18px', color: '#556677', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+
+    this._loadHubFromServer(playerId);
+  }
+
+  // ── Login flow ────────────────────────────────────────────────────────────────
+
+  _showLoginScreen() {
+    const cx = 640, cy = 340;
+
+    this._loginObjs.push(this.add.text(cx, cy - 120, "MONTY HAUL'S DUNGEON CRAWL", {
+      fontSize: '26px', color: '#ffdd88', fontFamily: 'monospace',
+    }).setOrigin(0.5));
+
+    const panel = this.add.graphics();
+    panel.fillStyle(0x12121e, 0.97);
+    panel.fillRect(cx - 240, cy - 70, 480, 180);
+    panel.lineStyle(1, 0x334466);
+    panel.strokeRect(cx - 240, cy - 70, 480, 180);
+    this._loginObjs.push(panel);
+
+    this._loginObjs.push(this.add.text(cx, cy - 44, 'RAIDER NAME', {
+      fontSize: '12px', color: '#556677', fontFamily: 'monospace',
+    }).setOrigin(0.5));
+
+    this._loginInputDisplay = this.add.text(cx, cy - 8, '█', {
+      fontSize: '22px', color: '#ffcc44', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+    this._loginObjs.push(this._loginInputDisplay);
+
+    this._loginObjs.push(this.add.graphics()
+      .lineStyle(1, 0x334466)
+      .lineBetween(cx - 200, cy + 22, cx + 200, cy + 22));
+
+    this._loginStatusText = this.add.text(cx, cy + 44, 'type your name and press Enter', {
+      fontSize: '11px', color: '#445566', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+    this._loginObjs.push(this._loginStatusText);
+
+    const enterBtn = this.add.text(cx, cy + 80, '[ Enter the Dungeon ]', {
+      fontSize: '15px', color: '#334455', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+    this._loginObjs.push(enterBtn);
+    this._loginEnterBtn = enterBtn;
+
+    this._loginUsername = '';
+
+    this._keyHandler = (e) => {
+      if (e.key === 'Backspace') {
+        this._loginUsername = this._loginUsername.slice(0, -1);
+      } else if (e.key === 'Enter') {
+        if (this._loginUsername.trim()) this._submitLogin();
+      } else if (e.key.length === 1 && this._loginUsername.length < 20) {
+        this._loginUsername += e.key;
+      }
+      const display = this._loginUsername || '';
+      this._loginInputDisplay?.setText(display + '█');
+      const ready = !!this._loginUsername.trim();
+      this._loginEnterBtn?.setColor(ready ? '#ffcc44' : '#334455');
+      if (ready) {
+        this._loginEnterBtn?.setInteractive();
+        this._loginEnterBtn?.removeAllListeners();
+        this._loginEnterBtn?.on('pointerdown', () => this._submitLogin());
+        this._loginEnterBtn?.on('pointerover', () => this._loginEnterBtn.setColor('#ffffff'));
+        this._loginEnterBtn?.on('pointerout',  () => this._loginEnterBtn.setColor('#ffcc44'));
+      }
+    };
+    window.addEventListener('keydown', this._keyHandler);
+  }
+
+  async _submitLogin() {
+    const username = this._loginUsername.trim();
+    if (!username) return;
+    this._loginStatusText?.setText('Connecting...');
+    this._loginEnterBtn?.setColor('#556677');
+
+    try {
+      const data = await HubAPI.login(username);
+      if (!data.ok) {
+        this._loginStatusText?.setText('Could not connect — is the server running?');
+        return;
+      }
+      this._cleanupLogin();
+      initFromServer(data.playerId, data);
+      this._buildHub();
+    } catch {
+      this._loginStatusText?.setText('Could not connect — is the server running?');
+    }
+  }
+
+  async _loadHubFromServer(playerId) {
+    try {
+      const data = await HubAPI.getState(playerId);
+      this._loadingText?.destroy();
+      this._loadingText = null;
+      if (!data.ok) {
+        // Player not in server store (server restarted) — fall back to login.
+        localStorage.removeItem('mh_player_id');
+        this._showLoginScreen();
+        return;
+      }
+      initFromServer(playerId, data);
+      this._buildHub();
+    } catch {
+      this._loadingText?.destroy();
+      this._loadingText = null;
+      this._showLoginScreen();
+    }
+  }
+
+  _cleanupLogin() {
+    if (this._keyHandler) {
+      window.removeEventListener('keydown', this._keyHandler);
+      this._keyHandler = null;
+    }
+    for (const obj of this._loginObjs) obj.destroy();
+    this._loginObjs = [];
+    this._loginInputDisplay = null;
+    this._loginStatusText   = null;
+    this._loginEnterBtn     = null;
+  }
+
+  // ── Hub build (was create() body) ─────────────────────────────────────────────
+
+  _buildHub() {
     this.add.text(640, 38, "MONTY HAUL'S DUNGEON CRAWL", {
       fontSize: '26px', color: '#ffdd88', fontFamily: 'monospace',
     }).setOrigin(0.5);
 
-    // Vault — gold lives at the hub, not on the raider. Sits at screen level
-    // (outside both panels) since it's a property of the home, not the run config.
     this.add.text(RP.x + RP.w, 30, 'VAULT', {
       fontSize: '10px', color: '#556677', fontFamily: 'monospace',
     }).setOrigin(1, 0);
@@ -267,7 +402,6 @@ export class HubScene extends Phaser.Scene {
     const spent   = pointsSpent(scores);
     const remaining = POINT_BUY_BUDGET - spent;
 
-    // Header row with live point counter.
     this._l(this.add.text(x, y, 'ABILITY SCORES', {
       fontSize: '11px', color: '#aaaacc', fontFamily: 'monospace',
     }));
@@ -282,7 +416,6 @@ export class HubScene extends Phaser.Scene {
       .lineBetween(x, y, LP.x + LP.w - 20, y));
     y += 10;
 
-    // One row per ability score.
     for (const key of STAT_KEYS) {
       const score   = scores[key];
       const cost    = POINT_COST[score] ?? 0;
@@ -290,7 +423,6 @@ export class HubScene extends Phaser.Scene {
       const canDec  = score > SCORE_MIN;
       const canInc  = score < SCORE_MAX && (nextCost - cost) <= remaining;
 
-      // [−] button
       const decBtn = this._l(this.add.text(x + 8, y, '[ − ]', {
         fontSize: '12px',
         color: canDec ? '#88ccff' : '#334455',
@@ -306,13 +438,11 @@ export class HubScene extends Phaser.Scene {
         });
       }
 
-      // Stat label, value, modifier — fixed-width columns for alignment.
       this._l(this.add.text(x + 55, y,
         `${STAT_LABELS[key]}  ${String(score).padStart(2)}  ${scoreModStr(score)}`,
         { fontSize: '12px', color: '#cccccc', fontFamily: 'monospace' },
       ));
 
-      // [+] button — label shows the point cost of the next increment.
       const incCost  = nextCost - cost;
       const incLabel = score < SCORE_MAX ? `[+](${incCost})` : '[ + ]';
       const incBtn = this._l(this.add.text(x + 168, y, incLabel, {
@@ -333,14 +463,12 @@ export class HubScene extends Phaser.Scene {
       y += 18;
     }
 
-    // Divider before derived stats.
     y += 4;
     this._l(this.add.graphics()
       .lineStyle(1, 0x223355)
       .lineBetween(x, y, LP.x + LP.w - 20, y));
     y += 10;
 
-    // Estimated starting HP from CON mod + class hit die.
     const classDef = CLASS_REGISTRY[this._selectedClass];
     if (classDef) {
       const conMod = scoreMod(scores.con);
@@ -351,7 +479,6 @@ export class HubScene extends Phaser.Scene {
       y += 18;
     }
 
-    // Reset button.
     const resetBtn = this._l(this.add.text(x + 8, y, '[ Reset to Class Defaults ]', {
       fontSize: '11px', color: '#8888aa', fontFamily: 'monospace',
     }).setInteractive());
@@ -396,10 +523,10 @@ export class HubScene extends Phaser.Scene {
         ).setInteractive());
         row.on('pointerover',  () => row.setColor('#ffffff'));
         row.on('pointerout',   () => row.setColor('#ffdd88'));
-        row.on('pointerdown',  () => { stashToRaider(id); this._onPackChanged(); });
+        row.on('pointerdown',  () => {
+          stashToRaider(id).then(ok => { if (ok) this._onPackChanged(); });
+        });
 
-        // Right-aligned Sell button. Items with no defined value (sellPrice 0)
-        // simply render no button — they're not sellable.
         const price = sellPrice(id);
         if (price > 0) {
           const sellBtn = this._l(this.add.text(LP.x + LP.w - 20, y, `[ Sell ${price} gp ]`, {
@@ -408,7 +535,7 @@ export class HubScene extends Phaser.Scene {
           sellBtn.on('pointerover', () => sellBtn.setColor('#ffffff'));
           sellBtn.on('pointerout',  () => sellBtn.setColor('#88ccff'));
           sellBtn.on('pointerdown', () => {
-            if (sellItem(id, price)) this._onSold();
+            sellItem(id, price).then(ok => { if (ok) this._onSold(); });
           });
         }
 
@@ -436,7 +563,6 @@ export class HubScene extends Phaser.Scene {
     }).setOrigin(1, 0));
     y += 22;
 
-    // Vendor sub-nav (Potions / Armor).
     const vendors = [{ id: 'potions', label: 'Potion Vendor' }, { id: 'armor', label: 'Armor Vendor' }];
     let vx = x;
     for (const { id, label } of vendors) {
@@ -462,7 +588,6 @@ export class HubScene extends Phaser.Scene {
       .lineBetween(x, y, LP.x + LP.w - 20, y));
     y += 12;
 
-    // Item list for the active vendor.
     const gold  = getHubGold();
     const items = VENDOR_CATALOG[this._shopVendor] ?? [];
 
@@ -488,7 +613,7 @@ export class HubScene extends Phaser.Scene {
         buyBtn.on('pointerover', () => buyBtn.setColor('#ffffff'));
         buyBtn.on('pointerout',  () => buyBtn.setColor('#88ccff'));
         buyBtn.on('pointerdown', () => {
-          if (buyItem(id, price)) this._onPurchase();
+          buyItem(id, price).then(ok => { if (ok) this._onPurchase(); });
         });
       }
 
@@ -496,19 +621,16 @@ export class HubScene extends Phaser.Scene {
     }
   }
 
-  /** Update the always-visible vault counter from the live store. */
   _refreshVault() {
     if (this._vaultGoldText) this._vaultGoldText.setText(`${getHubGold()} gp`);
   }
 
-  /** Rebuild just the shop screen (cheaper than the whole left panel). */
   _refreshShopScreen() {
     for (const obj of this._leftObjs) obj.destroy();
     this._leftObjs = [];
     this._showShopScreen();
   }
 
-  /** Called after a successful Buy: vault display, shop list, raider panel (stash count). */
   _onPurchase() {
     this._refreshVault();
     this._refreshShopScreen();
@@ -528,7 +650,6 @@ export class HubScene extends Phaser.Scene {
     }).setOrigin(1, 0));
     y += 22;
 
-    // Bench sub-nav (six benches, all clickable; planned ones still navigable).
     let bx = x;
     for (const bench of Object.values(BENCH_REGISTRY)) {
       const active = this._craftBench === bench.id;
@@ -557,7 +678,6 @@ export class HubScene extends Phaser.Scene {
       .lineBetween(x, y, LP.x + LP.w - 20, y));
     y += 12;
 
-    // Selected bench header.
     const bench = BENCH_REGISTRY[this._craftBench];
     this._l(this.add.text(x, y, bench.label.toUpperCase(), {
       fontSize: '14px', color: '#ccddff', fontFamily: 'monospace', fontStyle: 'bold',
@@ -573,7 +693,6 @@ export class HubScene extends Phaser.Scene {
       return;
     }
 
-    // Recipe list — affordability is checked from current stash quantities.
     const stash   = getStash();
     const stashOf = (id) => (stash.find(e => e.id === id)?.qty ?? 0);
     const recipes = recipesForBench(bench.id);
@@ -616,7 +735,7 @@ export class HubScene extends Phaser.Scene {
         craftBtn.on('pointerover', () => craftBtn.setColor('#ffffff'));
         craftBtn.on('pointerout',  () => craftBtn.setColor('#88ccff'));
         craftBtn.on('pointerdown', () => {
-          if (craftRecipe(recipe)) this._onCraft();
+          craftRecipe(recipe).then(ok => { if (ok) this._onCraft(); });
         });
       }
       y += 20;
@@ -629,7 +748,6 @@ export class HubScene extends Phaser.Scene {
     this._showCraftScreen();
   }
 
-  /** Called after a successful Craft: rebuild the recipe list (mat counts changed). */
   _onCraft() {
     this._refreshCraftScreen();
   }
@@ -656,7 +774,6 @@ export class HubScene extends Phaser.Scene {
       fontSize: '13px', color: '#aaaacc', fontFamily: 'monospace',
     })); y += 26;
 
-    // ── Class ──────────────────────────────────────────────────────────────────
     this._r(this.add.text(x, y, 'CLASS', {
       fontSize: '11px', color: '#556677', fontFamily: 'monospace',
     })); y += 15;
@@ -678,13 +795,11 @@ export class HubScene extends Phaser.Scene {
     }
     y += 10;
 
-    // ── Divider ────────────────────────────────────────────────────────────────
     this._r(this.add.graphics()
       .lineStyle(1, 0x223355)
       .lineBetween(RP.x + 8, y, RP.x + RP.w - 8, y));
     y += 12;
 
-    // ── Pack ───────────────────────────────────────────────────────────────────
     this._r(this.add.text(x, y, 'PACK', {
       fontSize: '11px', color: '#556677', fontFamily: 'monospace',
     }));
@@ -711,11 +826,12 @@ export class HubScene extends Phaser.Scene {
         ).setInteractive());
         row.on('pointerover',  () => row.setColor('#ffffff'));
         row.on('pointerout',   () => row.setColor('#88ccff'));
-        row.on('pointerdown',  () => { raiderToStash(id); this._onPackChanged(); });
+        row.on('pointerdown',  () => {
+          raiderToStash(id).then(ok => { if (ok) this._onPackChanged(); });
+        });
         y += 16;
       }
 
-      // Bulk action — only shown when there's something to dump.
       y += 4;
       const dumpBtn = this._r(this.add.text(x + 8, y, '[ Dump All to Stash ]', {
         fontSize: '11px', color: '#aabbdd', fontFamily: 'monospace',
@@ -723,11 +839,10 @@ export class HubScene extends Phaser.Scene {
       dumpBtn.on('pointerover', () => dumpBtn.setColor('#ffffff'));
       dumpBtn.on('pointerout',  () => dumpBtn.setColor('#aabbdd'));
       dumpBtn.on('pointerdown', () => {
-        if (dumpRaiderPackToStash()) this._onPackChanged();
+        dumpRaiderPackToStash().then(ok => { if (ok) this._onPackChanged(); });
       });
     }
 
-    // ── Enter Dungeon ──────────────────────────────────────────────────────────
     const active = !!this._selectedClass;
     const btnY   = RP.y + RP.h - 36;
     const enterBtn = this._r(this.add.text(RP.x + RP.w / 2, btnY, '[ Enter Dungeon ]', {
@@ -743,7 +858,6 @@ export class HubScene extends Phaser.Scene {
     });
   }
 
-  /** Called when stash/pack changes: rebuilds stash view (if active) + raider panel. */
   _onPackChanged() {
     if (this._leftView === 'stash') {
       for (const obj of this._leftObjs) obj.destroy();
@@ -753,7 +867,6 @@ export class HubScene extends Phaser.Scene {
     this._buildRaiderPanel();
   }
 
-  /** Called after a successful Sell: stash view + vault counter; raider panel unaffected. */
   _onSold() {
     this._refreshVault();
     if (this._leftView === 'stash') {

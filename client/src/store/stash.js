@@ -1,199 +1,99 @@
 // client/src/store/stash.js
-// Persistent item store: two containers (stash + raider pack), backed by localStorage.
-// This is the only file that changes when Supabase replaces localStorage.
+// Server-backed item store. In-memory cache populated from the /hub API.
+// Sync reads return from cache. Async mutations call the server and update cache.
+// This is the only file that changes when the backing store changes (was localStorage).
 
-const STASH_KEY       = 'mh_stash';
-const RAIDER_PACK_KEY = 'mh_raider_pack';
-const HUB_GOLD_KEY    = 'mh_hub_gold';
+import { HubAPI } from '../network/HubAPI.js';
 
-const INITIAL_STASH = [
-  { id: 'longsword',           qty: 1 },
-  { id: 'shortsword',          qty: 1 },
-  { id: 'dagger',              qty: 1 },
-  { id: 'handaxe',             qty: 1 },
-  { id: 'mace',                qty: 1 },
-  { id: 'greataxe',            qty: 1 },
-  { id: 'greatsword',          qty: 1 },
-  { id: 'chain_mail',          qty: 1 },
-  { id: 'half_plate',          qty: 1 },
-  { id: 'shield',              qty: 1 },
-  { id: 'healing_potion',      qty: 2 },
-  { id: 'bless_potion',        qty: 2 },
-  { id: 'longstrider_potion',  qty: 2 },
-  { id: 'false_life_potion',   qty: 2 },
-  { id: 'extraction_scroll',   qty: 1 },
-];
+const PLAYER_ID_KEY = 'mh_player_id';
 
-function _load(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
+let _playerId = localStorage.getItem(PLAYER_ID_KEY) ?? null;
+let _cache    = { stash: [], gold: 0, raiderPack: [] };
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Called by HubScene after login or state load.
+ * Populates the cache and persists the playerId for the next session.
+ */
+export function initFromServer(playerId, { stash, gold, raiderPack }) {
+  _playerId = playerId;
+  localStorage.setItem(PLAYER_ID_KEY, playerId);
+  _cache = { stash: stash ?? [], gold: gold ?? 0, raiderPack: raiderPack ?? [] };
 }
 
-function _save(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Silently ignore — localStorage unavailable (e.g. private browsing quota exceeded).
-  }
-}
+export function getPlayerId() { return _playerId; }
 
-// Seed on first ever load. Does not overwrite existing data.
-if (!localStorage.getItem(STASH_KEY))       _save(STASH_KEY,       INITIAL_STASH.map(e => ({ ...e })));
-if (!localStorage.getItem(RAIDER_PACK_KEY)) _save(RAIDER_PACK_KEY, []);
-if (localStorage.getItem(HUB_GOLD_KEY) === null) _save(HUB_GOLD_KEY, 0);
+// ── Sync reads (from cache) ───────────────────────────────────────────────────
 
-// ── Public API ────────────────────────────────────────────────────────────────
-
-export function getStash()      { return _load(STASH_KEY,       []); }
-export function getRaiderPack() { return _load(RAIDER_PACK_KEY, []); }
-
-/** Move 1× of item from stash → raider pack. Returns false if item not in stash. */
-export function stashToRaider(id) {
-  const stash = getStash();
-  const pack  = getRaiderPack();
-  const src   = stash.find(e => e.id === id);
-  if (!src || src.qty < 1) return false;
-
-  src.qty -= 1;
-  const dst = pack.find(e => e.id === id);
-  if (dst) dst.qty += 1;
-  else pack.push({ id, qty: 1 });
-
-  _save(STASH_KEY,       stash.filter(e => e.qty > 0));
-  _save(RAIDER_PACK_KEY, pack);
-  return true;
-}
-
-/** Move 1× of item from raider pack → stash. Returns false if item not in pack. */
-export function raiderToStash(id) {
-  const stash = getStash();
-  const pack  = getRaiderPack();
-  const src   = pack.find(e => e.id === id);
-  if (!src || src.qty < 1) return false;
-
-  src.qty -= 1;
-  const dst = stash.find(e => e.id === id);
-  if (dst) dst.qty += 1;
-  else stash.push({ id, qty: 1 });
-
-  _save(STASH_KEY,       stash);
-  _save(RAIDER_PACK_KEY, pack.filter(e => e.qty > 0));
-  return true;
-}
-
-/** Bulk-move every item in the raider pack → stash. Returns false if pack empty. */
-export function dumpRaiderPackToStash() {
-  const pack = getRaiderPack();
-  if (pack.length === 0) return false;
-  const stash = getStash();
-  for (const { id, qty } of pack) {
-    const dst = stash.find(e => e.id === id);
-    if (dst) dst.qty += qty;
-    else     stash.push({ id, qty });
-  }
-  _save(STASH_KEY,       stash);
-  _save(RAIDER_PACK_KEY, []);
-  return true;
-}
+export function getStash()      { return _cache.stash; }
+export function getRaiderPack() { return _cache.raiderPack; }
+export function getHubGold()    { return _cache.gold; }
 
 /** Flat id array for passing to the server on dungeon join. */
 export function getRaiderPackFlat() {
   const ids = [];
-  for (const { id, qty } of getRaiderPack()) {
+  for (const { id, qty } of _cache.raiderPack) {
     for (let i = 0; i < qty; i++) ids.push(id);
   }
   return ids;
 }
 
-/** Overwrite raider pack from a flat id array. Called post-run with surviving items. */
+// ── Async mutations ───────────────────────────────────────────────────────────
+
+function _apply(result) {
+  if (result.ok) {
+    if (result.stash      !== undefined) _cache.stash      = result.stash;
+    if (result.gold       !== undefined) _cache.gold       = result.gold;
+    if (result.raiderPack !== undefined) _cache.raiderPack = result.raiderPack;
+  }
+  return result.ok;
+}
+
+/** Move 1× of item from stash → raider pack. Returns Promise<bool>. */
+export async function stashToRaider(id) {
+  return _apply(await HubAPI.addToRaider(_playerId, id));
+}
+
+/** Move 1× of item from raider pack → stash. Returns Promise<bool>. */
+export async function raiderToStash(id) {
+  return _apply(await HubAPI.removeFromRaider(_playerId, id));
+}
+
+/** Move all raider pack items → stash. Returns Promise<bool>. */
+export async function dumpRaiderPackToStash() {
+  return _apply(await HubAPI.dumpToStash(_playerId));
+}
+
+/** Spend gold to add 1× item to stash. Returns Promise<bool>. */
+export async function buyItem(id, price) {
+  return _apply(await HubAPI.buy(_playerId, id, price));
+}
+
+/** Remove 1× item from stash and add price to gold. Returns Promise<bool>. */
+export async function sellItem(id, price) {
+  return _apply(await HubAPI.sell(_playerId, id, price));
+}
+
+/** Consume recipe inputs and add output to stash. Returns Promise<bool>. */
+export async function craftRecipe(recipe) {
+  return _apply(await HubAPI.craft(_playerId, recipe));
+}
+
+// ── DungeonScene compatibility stubs (replaced in Checkpoint 4) ───────────────
+// Server commits stash + gold on extract/death. Until then, these keep the
+// local cache updated so the hub displays correctly when the player returns.
+
 export function setRaiderPack(ids) {
   const map = {};
   for (const id of ids) map[id] = (map[id] ?? 0) + 1;
-  _save(RAIDER_PACK_KEY, Object.entries(map).map(([id, qty]) => ({ id, qty })));
+  _cache.raiderPack = Object.entries(map).map(([id, qty]) => ({ id, qty }));
 }
 
-// ── Hub gold ──────────────────────────────────────────────────────────────────
-// Persistent gp wallet at the hub. Run-scope gold is separate (server-side
-// player.gold); on successful extraction the client adds it to hub gold.
-// Death does nothing — run gold is simply not transferred.
-
-export function getHubGold() {
-  const raw = _load(HUB_GOLD_KEY, 0);
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
-}
-
-/** Increment hub gold by `n`. Called post-extract with player.gold. */
 export function addHubGold(n) {
-  const delta = Math.floor(Number(n) || 0);
-  if (delta === 0) return;
-  _save(HUB_GOLD_KEY, getHubGold() + delta);
+  _cache.gold += Math.floor(Number(n) || 0);
 }
 
-/** Overwrite hub gold. Rarely needed — exposed for resets / future server sync. */
 export function setHubGold(n) {
-  _save(HUB_GOLD_KEY, Math.max(0, Math.floor(Number(n) || 0)));
-}
-
-/**
- * Sell 1× of `id` from the stash for `price` gp into the hub vault.
- * Caller computes the price (typically via shared/data/values.js sellPrice()).
- * Returns false if the item isn't in the stash.
- */
-export function sellItem(id, price) {
-  const stash = getStash();
-  const entry = stash.find(e => e.id === id);
-  if (!entry || entry.qty < 1) return false;
-  entry.qty -= 1;
-  _save(STASH_KEY, stash.filter(e => e.qty > 0));
-  setHubGold(getHubGold() + Math.max(0, Math.floor(Number(price) || 0)));
-  return true;
-}
-
-/**
- * Spend `price` from hub gold to add 1× of `id` to the stash.
- * Returns false if the player can't afford it; true on success.
- */
-export function buyItem(id, price) {
-  const gold = getHubGold();
-  if (gold < price) return false;
-  setHubGold(gold - price);
-  const stash = getStash();
-  const entry = stash.find(e => e.id === id);
-  if (entry) entry.qty += 1;
-  else       stash.push({ id, qty: 1 });
-  _save(STASH_KEY, stash);
-  return true;
-}
-
-/**
- * Atomically consume a recipe's inputs and add its output to the stash.
- * `recipe` is { inputs: [{ id, qty }], output: { id, qty } } — the registry
- * shape from shared/data/crafting/recipes.js.
- * Returns false if any input is short; no partial deductions on failure.
- */
-export function craftRecipe(recipe) {
-  if (!recipe?.inputs || !recipe?.output) return false;
-  const stash = getStash();
-
-  // Validate every input first so we never partially consume on failure.
-  for (const { id, qty } of recipe.inputs) {
-    const entry = stash.find(e => e.id === id);
-    if (!entry || entry.qty < qty) return false;
-  }
-
-  for (const { id, qty } of recipe.inputs) {
-    const entry = stash.find(e => e.id === id);
-    entry.qty -= qty;
-  }
-  const out = stash.find(e => e.id === recipe.output.id);
-  if (out) out.qty += recipe.output.qty;
-  else     stash.push({ id: recipe.output.id, qty: recipe.output.qty });
-
-  _save(STASH_KEY, stash.filter(e => e.qty > 0));
-  return true;
+  _cache.gold = Math.max(0, Math.floor(Number(n) || 0));
 }
