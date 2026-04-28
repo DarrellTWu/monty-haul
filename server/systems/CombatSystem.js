@@ -289,9 +289,9 @@ function nearestLivingEnemy(state, player) {
 }
 
 function playerToAttacker(player) {
-  const classDef = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
   return {
-    abilityScores: classDef.baseAbilityScores,
+    abilityScores: { str: player.str, dex: player.dex, con: player.con,
+                     int: player.int, wis: player.wis, cha: player.cha },
     level: player.level,
     conditions: [...player.conditions],
   };

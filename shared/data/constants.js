@@ -56,3 +56,12 @@ export const TRAP_COOLDOWN_MS = 5000;  // Cooldown before trap can trigger again
 // META
 export const BANK_SLOTS_PER_RUN = 2;     // Max items a player can bank mid-run
 export const LONG_REST_ON_LEVEL_UP = true; // Full HP/resource restore on each floor clear
+
+// CHARACTER CREATION — POINT BUY
+// Players distribute POINT_BUY_BUDGET points across the six ability scores.
+// The standard array [15,14,13,12,10,8] costs exactly 27 pts and is the class default.
+// Cap of 16 at creation leaves room for future racial modifiers without rearchitecting.
+export const POINT_BUY_BUDGET = 27;
+export const SCORE_MIN = 8;
+export const SCORE_MAX = 16;
+export const POINT_COST = { 8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9, 16: 12 };

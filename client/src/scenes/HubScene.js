@@ -10,6 +10,8 @@ import { VENDOR_CATALOG } from '../../../shared/data/shop.js';
 import { sellPrice } from '../../../shared/data/values.js';
 import { BENCH_REGISTRY } from '../../../shared/data/crafting/benches.js';
 import { recipesForBench } from '../../../shared/data/crafting/recipes.js';
+import { CLASS_REGISTRY } from '../../../shared/data/classes/index.js';
+import { POINT_BUY_BUDGET, POINT_COST, SCORE_MIN, SCORE_MAX } from '../../../shared/data/constants.js';
 
 // Panel geometry
 const LP = { x: 30,  y: 70, w: 760, h: 600 }; // left panel
@@ -68,7 +70,18 @@ const STASH_SECTIONS = [
   { label: 'Materials',      ids: new Set(['skeleton_bone','wolf_pelt']) },
 ];
 
+// Stat labels for the point buy UI, in display order.
+const STAT_KEYS   = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+const STAT_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
+
+function scoreMod(score) { return Math.floor((score - 10) / 2); }
+function scoreModStr(score) { const m = scoreMod(score); return `(${m >= 0 ? '+' : ''}${m})`; }
+function pointsSpent(scores) {
+  return STAT_KEYS.reduce((sum, k) => sum + (POINT_COST[scores[k]] ?? 0), 0);
+}
+
 // Class display metadata for the hub UI.
+// defaultScores: the recommended standard-array allocation for each class (costs exactly 27 pts).
 const CLASS_DISPLAY = {
   fighter: {
     label: 'Fighter',
@@ -77,6 +90,7 @@ const CLASS_DISPLAY = {
       'Second Wind — 1d10+level HP (1/rest)',
       'Fighting Style: Dueling (+2 dmg)',
     ],
+    defaultScores: { str: 15, dex: 13, con: 14, int: 8, wis: 12, cha: 10 },
   },
   monk: {
     label: 'Monk',
@@ -85,6 +99,7 @@ const CLASS_DISPLAY = {
       'Martial Arts — DEX attacks, d4 unarmed',
       'Bonus unarmed strike after monk weapon attack',
     ],
+    defaultScores: { str: 12, dex: 15, con: 13, int: 8, wis: 14, cha: 10 },
   },
   barbarian: {
     label: 'Barbarian',
@@ -92,6 +107,7 @@ const CLASS_DISPLAY = {
       'Greatsword · Chain Mail',
       'Rage — +2 dmg, resist physical dmg (2 uses, 30s)',
     ],
+    defaultScores: { str: 15, dex: 13, con: 14, int: 8, wis: 10, cha: 12 },
   },
 };
 
@@ -105,12 +121,13 @@ export class HubScene extends Phaser.Scene {
   }
 
   create() {
-    this._selectedClass = null;
-    this._leftView      = this._initData.view === 'stash' ? 'stash' : 'class';
-    this._shopVendor    = 'potions';
-    this._craftBench    = 'forge';
-    this._leftObjs      = [];
-    this._rightObjs     = [];
+    this._selectedClass  = null;
+    this._abilityScores  = null; // set when a class is selected; passed to DungeonScene on enter
+    this._leftView       = this._initData.view === 'stash' ? 'stash' : 'class';
+    this._shopVendor     = 'potions';
+    this._craftBench     = 'forge';
+    this._leftObjs       = [];
+    this._rightObjs      = [];
 
     this.add.text(640, 38, "MONTY HAUL'S DUNGEON CRAWL", {
       fontSize: '26px', color: '#ffdd88', fontFamily: 'monospace',
@@ -229,11 +246,121 @@ export class HubScene extends Phaser.Scene {
           fontSize: '12px', color: '#8899bb', fontFamily: 'monospace',
         })); y += 17;
       }
+      y += 10;
+      this._showAbilityScores(x, y);
     } else {
       this._l(this.add.text(x + 8, y, 'Select a class to see details.', {
         fontSize: '12px', color: '#334455', fontFamily: 'monospace',
       }));
     }
+  }
+
+  _refreshClassScreen() {
+    for (const obj of this._leftObjs) obj.destroy();
+    this._leftObjs = [];
+    this._showClassScreen();
+  }
+
+  _showAbilityScores(x, startY) {
+    let y = startY;
+    const scores  = this._abilityScores;
+    const spent   = pointsSpent(scores);
+    const remaining = POINT_BUY_BUDGET - spent;
+
+    // Header row with live point counter.
+    this._l(this.add.text(x, y, 'ABILITY SCORES', {
+      fontSize: '11px', color: '#aaaacc', fontFamily: 'monospace',
+    }));
+    this._l(this.add.text(LP.x + LP.w - 20, y,
+      `Points: ${remaining} / ${POINT_BUY_BUDGET}`,
+      { fontSize: '11px', color: remaining === 0 ? '#88ccaa' : '#ffcc44', fontFamily: 'monospace' },
+    ).setOrigin(1, 0));
+    y += 16;
+
+    this._l(this.add.graphics()
+      .lineStyle(1, 0x223355)
+      .lineBetween(x, y, LP.x + LP.w - 20, y));
+    y += 10;
+
+    // One row per ability score.
+    for (const key of STAT_KEYS) {
+      const score   = scores[key];
+      const cost    = POINT_COST[score] ?? 0;
+      const nextCost = POINT_COST[score + 1] ?? 999;
+      const canDec  = score > SCORE_MIN;
+      const canInc  = score < SCORE_MAX && (nextCost - cost) <= remaining;
+
+      // [−] button
+      const decBtn = this._l(this.add.text(x + 8, y, '[ − ]', {
+        fontSize: '12px',
+        color: canDec ? '#88ccff' : '#334455',
+        fontFamily: 'monospace',
+      }));
+      if (canDec) {
+        decBtn.setInteractive();
+        decBtn.on('pointerover', () => decBtn.setColor('#ffffff'));
+        decBtn.on('pointerout',  () => decBtn.setColor('#88ccff'));
+        decBtn.on('pointerdown', () => {
+          this._abilityScores[key] = score - 1;
+          this._refreshClassScreen();
+        });
+      }
+
+      // Stat label, value, modifier — fixed-width columns for alignment.
+      this._l(this.add.text(x + 55, y,
+        `${STAT_LABELS[key]}  ${String(score).padStart(2)}  ${scoreModStr(score)}`,
+        { fontSize: '12px', color: '#cccccc', fontFamily: 'monospace' },
+      ));
+
+      // [+] button — label shows the point cost of the next increment.
+      const incCost  = nextCost - cost;
+      const incLabel = score < SCORE_MAX ? `[+](${incCost})` : '[ + ]';
+      const incBtn = this._l(this.add.text(x + 168, y, incLabel, {
+        fontSize: '12px',
+        color: canInc ? '#88ccff' : '#334455',
+        fontFamily: 'monospace',
+      }));
+      if (canInc) {
+        incBtn.setInteractive();
+        incBtn.on('pointerover', () => incBtn.setColor('#ffffff'));
+        incBtn.on('pointerout',  () => incBtn.setColor('#88ccff'));
+        incBtn.on('pointerdown', () => {
+          this._abilityScores[key] = score + 1;
+          this._refreshClassScreen();
+        });
+      }
+
+      y += 18;
+    }
+
+    // Divider before derived stats.
+    y += 4;
+    this._l(this.add.graphics()
+      .lineStyle(1, 0x223355)
+      .lineBetween(x, y, LP.x + LP.w - 20, y));
+    y += 10;
+
+    // Estimated starting HP from CON mod + class hit die.
+    const classDef = CLASS_REGISTRY[this._selectedClass];
+    if (classDef) {
+      const conMod = scoreMod(scores.con);
+      const hp     = Math.floor((classDef.hitDie + conMod) * 2);
+      this._l(this.add.text(x + 8, y, `Estimated starting HP: ${hp}`, {
+        fontSize: '11px', color: '#88ccaa', fontFamily: 'monospace',
+      }));
+      y += 18;
+    }
+
+    // Reset button.
+    const resetBtn = this._l(this.add.text(x + 8, y, '[ Reset to Class Defaults ]', {
+      fontSize: '11px', color: '#8888aa', fontFamily: 'monospace',
+    }).setInteractive());
+    resetBtn.on('pointerover', () => resetBtn.setColor('#aabbdd'));
+    resetBtn.on('pointerout',  () => resetBtn.setColor('#8888aa'));
+    resetBtn.on('pointerdown', () => {
+      this._abilityScores = { ...CLASS_DISPLAY[this._selectedClass].defaultScores };
+      this._refreshClassScreen();
+    });
   }
 
   _showStashScreen() {
@@ -509,6 +636,7 @@ export class HubScene extends Phaser.Scene {
 
   _selectClass(classId) {
     this._selectedClass = classId;
+    this._abilityScores = { ...CLASS_DISPLAY[classId].defaultScores };
     for (const obj of this._leftObjs) obj.destroy();
     this._leftObjs = [];
     this._showClassScreen();
@@ -608,7 +736,10 @@ export class HubScene extends Phaser.Scene {
     enterBtn.on('pointerover',  () => { if (active) enterBtn.setColor('#ffffff'); });
     enterBtn.on('pointerout',   () => { enterBtn.setColor(active ? '#ffcc44' : '#334455'); });
     enterBtn.on('pointerdown',  () => {
-      if (active) this.scene.start('DungeonScene', { class: this._selectedClass });
+      if (active) this.scene.start('DungeonScene', {
+        class: this._selectedClass,
+        abilityScores: this._abilityScores ?? { ...CLASS_DISPLAY[this._selectedClass].defaultScores },
+      });
     });
   }
 

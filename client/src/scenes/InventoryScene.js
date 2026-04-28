@@ -12,15 +12,14 @@
 //   Click equipped slot    → if item selected: equip there; else: unequip
 //
 // SRD constraints are enforced server-side; the UI grays blocked items.
-//
-// PROTOTYPE NOTES:
-//   Fighter ability scores are hardcoded (no schema field yet).
 
 import {
   getRoom, sendEquip, sendUnequip, sendAssignHotbar,
   sendOpenContainer, sendCloseContainer,
   sendTakeItem, sendTakeGold, sendDropItem,
 } from '../network/ColyseusClient.js';
+import { CLASS_REGISTRY } from '../../../shared/data/classes/index.js';
+import { getProficiencyBonus } from '../../../shared/logic/combat.js';
 
 // Panel geometry (expanded height to fit saving throws + class features + hotbar).
 const PANEL_X   = 190;
@@ -29,17 +28,17 @@ const PANEL_W   = 900;
 const PANEL_H   = 560;
 const DIVIDER_X = PANEL_X + 430;
 
-// Prototype fighter stats.
-const FIGHTER_SCORES   = { STR: 16, DEX: 14, CON: 16, INT: 10, WIS: 10, CHA: 10 };
-const SAVE_PROFS       = new Set(['str', 'con']); // fighter level 1
-const PROF_BONUS       = 2;
 function mod(score)    { return Math.floor((score - 10) / 2); }
 function modStr(score) { const m = mod(score); return (m >= 0 ? '+' : '') + m; }
-function saveBonus(stat) {
-  const m = mod(FIGHTER_SCORES[stat.toUpperCase()]);
-  const p = SAVE_PROFS.has(stat) ? PROF_BONUS : 0;
+
+// Build a save-throw display line from live player state.
+// saveProfs and profBonus come from the player's actual class and level.
+function saveBonus(stat, player, saveProfs, profBonus) {
+  const score = player[stat] ?? 10;
+  const m = mod(score);
+  const p = saveProfs.has(stat) ? profBonus : 0;
   const t = m + p;
-  return `${stat.toUpperCase().padEnd(4)} ${(t >= 0 ? '+' : '') + t}${SAVE_PROFS.has(stat) ? ' ●' : ''}`;
+  return `${stat.toUpperCase().padEnd(4)} ${(t >= 0 ? '+' : '') + t}${saveProfs.has(stat) ? ' ●' : ''}`;
 }
 
 // Item display metadata.
@@ -183,26 +182,35 @@ export class InventoryScene extends Phaser.Scene {
       this._hpText   = this.add.text(lx, ly, 'HP  —',   STYLE_BODY); ly += 16;
       this._acText   = this.add.text(lx, ly, 'AC  —',   STYLE_BODY); ly += 16;
 
-      // Ability scores.
+      // Read live player state once for ability scores, saves, and class features.
+      const _ir = getRoom();
+      const _ip = _ir?.state.players.get(_ir?.sessionId);
+      const playerClass = _ip?.class ?? 'fighter';
+      const _classDef   = CLASS_REGISTRY[playerClass] ?? CLASS_REGISTRY.fighter;
+      const _saveProfs  = new Set(_classDef.saveProficiencies ?? []);
+      const _profBonus  = getProficiencyBonus(_ip?.level ?? 1);
+
+      // Ability scores — read from live player state.
       this.add.text(lx, ly, 'ABILITY SCORES', STYLE_SUBHEAD); ly += 16;
-      for (const [stat, score] of Object.entries(FIGHTER_SCORES)) {
-        this.add.text(lx, ly, `${stat.padEnd(4)}  ${String(score).padStart(2)}   (${modStr(score)})`, STYLE_BODY);
+      for (const stat of ['str', 'dex', 'con', 'int', 'wis', 'cha']) {
+        const score = _ip?.[stat] ?? 10;
+        this.add.text(lx, ly,
+          `${stat.toUpperCase().padEnd(4)}  ${String(score).padStart(2)}   (${modStr(score)})`,
+          STYLE_BODY,
+        );
         ly += 15;
       }
       ly += 4;
 
-      // Saving throws.
+      // Saving throws — proficiency from class definition, bonus from level.
       this.add.text(lx, ly, 'SAVING THROWS  (● proficient)', STYLE_SUBHEAD); ly += 15;
       for (const stat of ['str', 'dex', 'con', 'int', 'wis', 'cha']) {
-        this.add.text(lx, ly, saveBonus(stat), STYLE_BODY);
+        this.add.text(lx, ly, saveBonus(stat, _ip ?? {}, _saveProfs, _profBonus), STYLE_BODY);
         ly += 14;
       }
       ly += 6;
 
-      // Class features — read player.class at scene open (set by server on join).
-      const _ir = getRoom();
-      const _ip = _ir?.state.players.get(_ir?.sessionId);
-      const playerClass = _ip?.class ?? 'fighter';
+      // Class features.
 
       this.add.text(lx, ly, 'CLASS FEATURES', STYLE_SUBHEAD); ly += 15;
 
@@ -304,29 +312,23 @@ export class InventoryScene extends Phaser.Scene {
     this._offhandZone = this.add.zone(rx + 130, ry + 13, 260, 26)
       .setRectangleDropZone(260, 26)
       .setData({ zoneType: 'equip', slot: 'offhand' });
-    this.input.setDraggable(this._offhandBtn);
+    this.input.setDraggable(this._offhandZone);
     { let p = false; let dragging = false;
-      this._offhandBtn.on('pointerdown', () => { p = true; dragging = false; });
-      this._offhandBtn.on('drag', (ptr, dragX, dragY) => {
+      this._offhandZone.on('pointerdown', () => { p = true; });
+      this._offhandZone.on('pointerup',   () => { if (p && !dragging) this._onEquipSlotClick('offhand'); p = false; dragging = false; });
+      this._offhandZone.on('drag', (ptr, dragX, dragY) => {
         dragging = true; p = false;
         this._offhandBtn.setPosition(dragX, dragY).setDepth(10);
       });
-      this._offhandBtn.on('dragend', () => {
-        this._offhandBtn.setPosition(
-          this._offhandBtn.getData('originX'),
-          this._offhandBtn.getData('originY'),
-        ).setDepth(0);
+      this._offhandZone.on('dragend', () => {
+        const btn = this._offhandBtn;
+        btn.setPosition(btn.getData('originX'), btn.getData('originY')).setDepth(0);
         if (dragging) {
           dragging = false;
           const room = getRoom();
           const player = room?.state.players.get(room?.sessionId);
           if (player?.offhandId) sendUnequip('offhand');
         }
-      });
-      this._offhandBtn.on('pointerup', () => {
-        if (p && !dragging) this._onEquipSlotClick('offhand');
-        p = false;
-        dragging = false;
       });
     }
     this._offhandZone.on('dragenter', () => {
@@ -497,12 +499,23 @@ export class InventoryScene extends Phaser.Scene {
     if (this._goldText) this._goldText.setText(`GOLD ${player.gold ?? 0} gp`);
 
     // Weapon slot.
+    // Attack ability: finesse weapons use higher of STR/DEX; monks use higher of STR/DEX
+    // on all monk weapons (Martial Arts). Authoritative list: CombatSystem.MONK_WEAPON_IDS
+    // and weapon properties in shared/data/weapons/melee.js.
+    const FINESSE_IDS    = new Set(['shortsword', 'dagger']);
+    const MONK_WPNS      = new Set(['shortsword', 'dagger', 'handaxe', 'mace', 'unarmed', '']);
     const weapon = player.equippedWeaponId;
     if (weapon) {
-      const wDef     = WEAPON_DISPLAY[weapon];
-      const strMod   = mod(FIGHTER_SCORES.STR);
-      const modLabel = (strMod >= 0 ? '+' : '') + strMod + ' STR';
-      const dieLabel = (weapon === 'longsword' && !player.offhandId) ? '1d10 slashing' : (wDef?.detail ?? weapon);
+      const wDef       = WEAPON_DISPLAY[weapon];
+      const strMod     = mod(player.str ?? 10);
+      const dexMod     = mod(player.dex ?? 10);
+      const isMonk     = player.class === 'monk';
+      const usesDex    = (FINESSE_IDS.has(weapon) || (isMonk && MONK_WPNS.has(weapon)))
+                         && dexMod > strMod;
+      const atkMod     = usesDex ? dexMod : strMod;
+      const atkStat    = usesDex ? 'DEX' : 'STR';
+      const modLabel   = (atkMod >= 0 ? '+' : '') + atkMod + ' ' + atkStat;
+      const dieLabel   = (weapon === 'longsword' && !player.offhandId) ? '1d10 slashing' : (wDef?.detail ?? weapon);
       this._equippedBtn.setText(`${(wDef?.label ?? weapon).padEnd(11)}  ${dieLabel}   ${modLabel}`)
         .setStyle({ ...STYLE_ITEM, backgroundColor: '#1a1a2e' });
       this._equippedNote.setText(wDef?.note ?? '');

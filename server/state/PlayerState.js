@@ -27,6 +27,15 @@ export class PlayerState extends Schema {
     this.rageRemainingMs          = 0; // synced for HUD ring display
     this.rageUsesRemaining        = 0; // remaining rage activations this run
     this.gold                     = 0; // run-scope wallet; transferred to hub on extract, lost on death
+    // Ability scores — set at join from player's point-buy choices, mutable during run
+    // (potions, ASIs, racial bonuses, conditions). _recomputeStats(player) must be called
+    // after any change so derived values (AC, etc.) stay in sync.
+    this.str = 10;
+    this.dex = 10;
+    this.con = 10;
+    this.int = 10;
+    this.wis = 10;
+    this.cha = 10;
     this.inventory  = new ArraySchema(); // unequipped item ids
     this.conditions = new ArraySchema(); // active condition ids (e.g. 'bless')
     this.hotbar     = new ArraySchema(); // 10 slots: ability/consumable id or ''
@@ -56,6 +65,12 @@ defineTypes(PlayerState, {
   rageRemainingMs:          'number',
   rageUsesRemaining:        'number',
   gold:                     'number',
+  str:                      'number',
+  dex:                      'number',
+  con:                      'number',
+  int:                      'number',
+  wis:                      'number',
+  cha:                      'number',
   inventory:  { array: 'string' },
   conditions: { array: 'string' },
   hotbar:     { array: 'string' },

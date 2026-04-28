@@ -27,6 +27,7 @@ import {
   SERVER_TICK_RATE_HZ, MELEE_HIT_RANGE_PX, CHEST_LOOT_RANGE_PX,
   TRAP_DAMAGE, TRAP_SAVE_DC, TRAP_RADIUS_PX, TRAP_COOLDOWN_MS,
   RAGE_DURATION_MS, RAGE_DAMAGE_BONUS,
+  POINT_BUY_BUDGET, POINT_COST, SCORE_MIN, SCORE_MAX,
 } from '../../shared/data/constants.js';
 
 import * as MovementSystem from '../systems/MovementSystem.js';
@@ -97,7 +98,7 @@ export class DungeonRoom extends Room {
         if (player.equippedArmorId) player.inventory.push(player.equippedArmorId);
         player.inventory.splice(player.inventory.indexOf(id), 1);
         player.equippedArmorId = id;
-        this._recomputeAC(player);
+        this._recomputeStats(player);
 
       } else if (targetSlot === 'offhand') {
         // Offhand accepts one-handed weapons OR shields. Blocks two-handed.
@@ -110,7 +111,7 @@ export class DungeonRoom extends Room {
         if (player.offhandId) player.inventory.push(player.offhandId);
         player.inventory.splice(player.inventory.indexOf(id), 1);
         player.offhandId = id;
-        this._recomputeAC(player);
+        this._recomputeStats(player);
 
       } else { // weapon slot
         if (isShield || isArmor) return;
@@ -124,7 +125,7 @@ export class DungeonRoom extends Room {
         if (player.equippedWeaponId) player.inventory.push(player.equippedWeaponId);
         player.inventory.splice(player.inventory.indexOf(id), 1);
         player.equippedWeaponId = id;
-        this._recomputeAC(player);
+        this._recomputeStats(player);
       }
     });
 
@@ -137,11 +138,11 @@ export class DungeonRoom extends Room {
       } else if (slot === 'offhand' && player.offhandId) {
         player.inventory.push(player.offhandId);
         player.offhandId = '';
-        this._recomputeAC(player);
+        this._recomputeStats(player);
       } else if (slot === 'armor' && player.equippedArmorId) {
         player.inventory.push(player.equippedArmorId);
         player.equippedArmorId = '';
-        this._recomputeAC(player); // unarmored: AC = 10 + DEX
+        this._recomputeStats(player); // unarmored: AC = 10 + DEX
       }
     });
 
@@ -252,10 +253,16 @@ export class DungeonRoom extends Room {
 
   onJoin(client, options = {}) {
     const classDef    = CLASS_REGISTRY[options.class] ?? DEFAULT_CLASS;
-    const conMod      = getModifier(classDef.baseAbilityScores.con);
-    const maxHp       = classDef.getStartingHp(conMod);
-    const dexMod      = getModifier(classDef.baseAbilityScores.dex);
     const raiderItems = options.items ?? [];
+
+    // Resolve ability scores: use client-provided point-buy if valid, else class defaults.
+    const scores = this._validateAbilityScores(options.abilityScores)
+      ? options.abilityScores
+      : classDef.baseAbilityScores;
+
+    const conMod = getModifier(scores.con);
+    const dexMod = getModifier(scores.dex);
+    const maxHp  = classDef.getStartingHp(conMod);
 
     // Empty pack → class defaults equipped (free starter loadout).
     // Non-empty pack → raider enters unequipped; all items go to bag.
@@ -264,7 +271,7 @@ export class DungeonRoom extends Room {
       startingWeapon = classDef.startingWeaponId;
       startingArmor  = classDef.startingArmorId;
       if (!startingArmor && classDef.unarmoredDefense) {
-        ac = 10 + dexMod + getModifier(classDef.baseAbilityScores[classDef.unarmoredDefense]);
+        ac = 10 + dexMod + getModifier(scores[classDef.unarmoredDefense]);
       } else {
         ac = computeAC(ARMOR_REGISTRY[startingArmor], dexMod, false);
       }
@@ -272,7 +279,7 @@ export class DungeonRoom extends Room {
       startingWeapon = '';
       startingArmor  = '';
       ac = classDef.unarmoredDefense
-        ? 10 + dexMod + getModifier(classDef.baseAbilityScores[classDef.unarmoredDefense])
+        ? 10 + dexMod + getModifier(scores[classDef.unarmoredDefense])
         : computeAC(null, dexMod, false);
     }
 
@@ -288,6 +295,14 @@ export class DungeonRoom extends Room {
     player.class            = classDef.id;
     player.equippedWeaponId = startingWeapon;
     player.equippedArmorId  = startingArmor;
+    // Store ability scores on the player so all systems (combat, saves, AC recompute)
+    // read from one place rather than re-looking up class defaults each time.
+    player.str = scores.str;
+    player.dex = scores.dex;
+    player.con = scores.con;
+    player.int = scores.int;
+    player.wis = scores.wis;
+    player.cha = scores.cha;
     for (const feature of classDef.classFeatures) player.hotbar.push(feature);
     for (let i = classDef.classFeatures.length; i < 10; i++) player.hotbar.push('');
     player.rageUsesRemaining = classDef.rageUses ?? 0;
@@ -310,7 +325,7 @@ export class DungeonRoom extends Room {
           }
         }
       }
-      this._recomputeAC(player);
+      this._recomputeStats(player);
     }
 
     // Auto-assign consumables to the first available hotbar slots.
@@ -330,7 +345,7 @@ export class DungeonRoom extends Room {
     }
 
     this.state.players.set(client.sessionId, player);
-    console.log(`[DungeonRoom] ${client.sessionId} joined as ${classDef.id} — HP ${maxHp} AC ${player.ac}`);
+    console.log(`[DungeonRoom] ${client.sessionId} joined as ${classDef.id} — HP ${maxHp} AC ${player.ac} STR ${player.str} DEX ${player.dex} CON ${player.con}`);
   }
 
   onLeave(client) {
@@ -516,7 +531,8 @@ export class DungeonRoom extends Room {
 
       const classDef = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
       const creature = {
-        abilityScores: classDef.baseAbilityScores,
+        abilityScores: { str: player.str, dex: player.dex, con: player.con,
+                         int: player.int, wis: player.wis, cha: player.cha },
         level:         player.level,
         saveProfs:     classDef.saveProficiencies,
       };
@@ -647,13 +663,33 @@ export class DungeonRoom extends Room {
     });
   }
 
-  /** Recompute player.ac from armor + offhand (shield gives +2, weapon does not). */
-  _recomputeAC(player) {
+  /**
+   * Validate a client-provided abilityScores object against the point buy rules.
+   * Returns true only if all six scores are present, in range, and within budget.
+   * A false result causes onJoin to fall back to classDef.baseAbilityScores silently.
+   */
+  _validateAbilityScores(scores) {
+    const keys = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+    if (!scores || typeof scores !== 'object') return false;
+    if (!keys.every(k => typeof scores[k] === 'number')) return false;
+    if (!keys.every(k => scores[k] >= SCORE_MIN && scores[k] <= SCORE_MAX)) return false;
+    const cost = keys.reduce((sum, k) => sum + (POINT_COST[scores[k]] ?? 999), 0);
+    return cost <= POINT_BUY_BUDGET;
+  }
+
+  /**
+   * Recompute all derived stats from the player's current ability scores and equipment.
+   * Call this whenever scores or equipment change (equip/unequip, Potion of Giant Strength,
+   * racial bonus, level-up ASI, etc.).
+   *
+   * Future additions: attack modifier, initiative, spell save DC.
+   */
+  _recomputeStats(player) {
     const classDef  = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
-    const dexMod    = getModifier(classDef.baseAbilityScores.dex);
+    const dexMod    = getModifier(player.dex);
     const hasShield = !!SHIELD_REGISTRY[player.offhandId];
     if (!player.equippedArmorId && !hasShield && classDef.unarmoredDefense) {
-      const udMod = getModifier(classDef.baseAbilityScores[classDef.unarmoredDefense]);
+      const udMod = getModifier(player[classDef.unarmoredDefense]);
       player.ac = 10 + dexMod + udMod;
     } else {
       player.ac = computeAC(ARMOR_REGISTRY[player.equippedArmorId] ?? null, dexMod, hasShield);
