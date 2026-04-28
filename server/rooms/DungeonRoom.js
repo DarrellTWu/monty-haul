@@ -626,9 +626,12 @@ export class DungeonRoom extends Room {
     }
 
     player.inventory.splice(idx, 1);
-    // Clear from hotbar after consumption so slot visually empties.
-    for (let i = 0; i < player.hotbar.length; i++) {
-      if (player.hotbar[i] === consumableId) { player.hotbar[i] = ''; break; }
+    // Only clear the hotbar binding when the last copy is consumed; if more
+    // copies remain the slot stays active so the player doesn't have to remap.
+    if (![...player.inventory].includes(consumableId)) {
+      for (let i = 0; i < player.hotbar.length; i++) {
+        if (player.hotbar[i] === consumableId) { player.hotbar[i] = ''; break; }
+      }
     }
   }
 

@@ -705,6 +705,24 @@ export class InventoryScene extends Phaser.Scene {
     this._lootRowsX = lx;
     this._lootRowsY = ly;
     this._lootEmptyText = this.add.text(lx, ly, '(empty)', { ...STYLE_NOTE, color: '#445566' }).setVisible(false);
+
+    // Scroll infrastructure — mirrors the bag viewport on the right column.
+    this._lootScrollOffset  = 0;
+    this._lootViewportBottom = PANEL_Y + PANEL_H - 10;
+    this._lootViewportH      = this._lootViewportBottom - ly;
+    const lootPanelW = DIVIDER_X - lx - 10;
+    this._lootMaskGfx = this.make.graphics();
+    this._lootMaskGfx.fillRect(lx, ly, lootPanelW, this._lootViewportH);
+    this._lootMask = this._lootMaskGfx.createGeometryMask();
+    this._lootOverflowText = this.add.text(
+      lx, this._lootViewportBottom + 2, '', { ...STYLE_HINT, color: '#445566' },
+    );
+    this.input.on('wheel', (pointer, _gameObjects, _dx, deltaY) => {
+      const inLoot = this._lootMode
+                  && pointer.x >= lx && pointer.x <= DIVIDER_X
+                  && pointer.y >= this._lootRowsY && pointer.y <= this._lootViewportBottom;
+      if (inLoot) this._scrollLootPanel(Math.sign(deltaY) * 22);
+    });
   }
 
   /**
@@ -722,31 +740,34 @@ export class InventoryScene extends Phaser.Scene {
     for (const obj of this._lootRowGfx) obj.destroy();
     this._lootRowGfx = [];
 
-    let ry = this._lootRowsY;
     const rowH = 22;
+    let logicalRow = 0;
 
     // Gold (corpses only, when > 0).
     if (this._lootSource.kind === 'corpse' && gold > 0) {
+      const ry = this._lootRowsY + logicalRow * rowH - this._lootScrollOffset;
       const goldLabel = this.add.text(this._lootRowsX, ry, `💰  ${gold} gp`, {
         ...STYLE_ITEM, color: '#ffdd44',
-      });
+      }).setMask(this._lootMask);
       const takeBtn = this.add.text(this._lootRowsX + 220, ry, '[ Take ]', {
         ...STYLE_HINT, color: '#88ddff', backgroundColor: '#0d0d14',
         padding: { x: 6, y: 3 },
-      }).setInteractive({ useHandCursor: true });
+      }).setInteractive({ useHandCursor: true }).setMask(this._lootMask);
       takeBtn.on('pointerdown', () => sendTakeGold(this._lootSource.id));
       this._lootRowGfx.push(goldLabel, takeBtn);
-      ry += rowH;
+      logicalRow++;
     }
 
     // Per-item rows. Index in the source array is what take_item expects.
     for (let i = 0; i < itemsArr.length; i++) {
-      const itemId = itemsArr[i];
-      const itemLabel = this.add.text(this._lootRowsX, ry, this._itemLabel(itemId), STYLE_ITEM);
+      const ry = this._lootRowsY + logicalRow * rowH - this._lootScrollOffset;
+      const itemId    = itemsArr[i];
+      const itemLabel = this.add.text(this._lootRowsX, ry, this._itemLabel(itemId), STYLE_ITEM)
+        .setMask(this._lootMask);
       const takeBtn   = this.add.text(this._lootRowsX + 220, ry, '[ Take ]', {
         ...STYLE_HINT, color: '#88ddff', backgroundColor: '#0d0d14',
         padding: { x: 6, y: 3 },
-      }).setInteractive({ useHandCursor: true });
+      }).setInteractive({ useHandCursor: true }).setMask(this._lootMask);
       // Capture i — the index can shift as earlier items are removed, but we
       // bind to the index at click time by re-reading source state.
       const itemIndex = i;
@@ -754,11 +775,43 @@ export class InventoryScene extends Phaser.Scene {
         sendTakeItem(this._lootSource.kind, this._lootSource.id, itemIndex);
       });
       this._lootRowGfx.push(itemLabel, takeBtn);
-      ry += rowH;
+      logicalRow++;
     }
 
     const isEmpty = itemsArr.length === 0 && gold === 0;
     this._lootEmptyText.setVisible(isEmpty).setY(this._lootRowsY);
+
+    const totalRows = logicalRow;
+    const maxScroll = Math.max(0, totalRows * rowH - this._lootViewportH);
+    this._lootScrollOffset = Math.min(this._lootScrollOffset, maxScroll);
+    this._lootTotalRows = totalRows;
+    this._updateLootOverflow(totalRows);
+  }
+
+  _scrollLootPanel(delta) {
+    const rowH      = 22;
+    const maxScroll = Math.max(0, (this._lootTotalRows ?? 0) * rowH - this._lootViewportH);
+    this._lootScrollOffset = Math.max(0, Math.min(this._lootScrollOffset + delta, maxScroll));
+    // Reposition every gfx object; they were built in pairs (label, button) per row.
+    let logicalRow = 0;
+    for (let j = 0; j < this._lootRowGfx.length; j += 2) {
+      const y = this._lootRowsY + logicalRow * rowH - this._lootScrollOffset;
+      this._lootRowGfx[j].setY(y);
+      this._lootRowGfx[j + 1].setY(y);
+      logicalRow++;
+    }
+    this._updateLootOverflow(this._lootTotalRows ?? 0);
+  }
+
+  _updateLootOverflow(rowCount) {
+    const rowH       = 22;
+    const hiddenBelow = rowCount * rowH - this._lootViewportH - this._lootScrollOffset;
+    if (hiddenBelow > 0) {
+      const more = Math.ceil(hiddenBelow / rowH);
+      this._lootOverflowText.setText(`↓ ${more} more  (scroll)`).setVisible(true);
+    } else {
+      this._lootOverflowText.setVisible(false);
+    }
   }
 
   /**
