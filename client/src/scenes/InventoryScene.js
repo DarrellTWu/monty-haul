@@ -182,7 +182,6 @@ export class InventoryScene extends Phaser.Scene {
       this._classDescText = this.add.text(lx, ly, 'Level 1  Human Fighter', STYLE_BODY); ly += 18;
       this._hpText   = this.add.text(lx, ly, 'HP  —',   STYLE_BODY); ly += 16;
       this._acText   = this.add.text(lx, ly, 'AC  —',   STYLE_BODY); ly += 16;
-      this._goldText = this.add.text(lx, ly, 'GOLD —',  STYLE_BODY); ly += 20;
 
       // Ability scores.
       this.add.text(lx, ly, 'ABILITY SCORES', STYLE_SUBHEAD); ly += 16;
@@ -254,6 +253,10 @@ export class InventoryScene extends Phaser.Scene {
     // ── Right column ──────────────────────────────────────────────────────────
     const rx = DIVIDER_X + 20;
     let ry = PANEL_Y + 18;
+
+    this._goldText = this.add.text(PANEL_X + PANEL_W - 10, ry, 'GOLD —', {
+      ...STYLE_ITEM, color: '#ffdd44',
+    }).setOrigin(1, 0);
 
     this.add.text(rx, ry, 'EQUIPMENT', STYLE_SUBHEAD); ry += 16;
 
