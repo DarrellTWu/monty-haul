@@ -279,7 +279,7 @@ export class DungeonScene extends Phaser.Scene {
     if (this.scene.isActive('InventoryScene')) {
       this.scene.stop('InventoryScene');
     } else {
-      this.scene.launch('InventoryScene');
+      this.scene.launch('InventoryScene', {});
     }
     // _input.enabled is derived from scene state in update(), no need to set here.
   }
