@@ -14,7 +14,7 @@ import { joinDungeon, sendDescend, sendUseHotbar, leave as leaveRoom } from '../
 import { InputHandler } from '../input/InputHandler.js';
 import { CHEST_LOOT_RANGE_PX, TRAP_RADIUS_PX } from '../../../shared/data/constants.js';
 import { FLOOR_REGISTRY } from '../../../shared/data/floors/index.js';
-import { getRaiderPackFlat, setRaiderPack, addHubGold } from '../store/stash.js';
+import { getPlayerId } from '../store/stash.js';
 
 // Visual config — swap these out when sprites land.
 const PLAYER_RADIUS   = 16;
@@ -35,7 +35,8 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   init(data) {
-    this._joinOpts = { ...(data ?? {}), items: getRaiderPackFlat() };
+    // Server loads the raider pack from playerStore using playerId — no items passed.
+    this._joinOpts = { ...(data ?? {}), playerId: getPlayerId() };
   }
 
   async create() {
@@ -459,8 +460,6 @@ export class DungeonScene extends Phaser.Scene {
     const player = this._room.state.players.get(this._room.sessionId);
     const items  = player ? this._collectItems(player) : [];
     const gold   = player?.gold ?? 0;
-    setRaiderPack(items);
-    addHubGold(gold); // no-op if 0
 
     const packLines = [];
     if (gold > 0) packLines.push(`· ${gold} gp`);
@@ -478,7 +477,6 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   _onRunFailed() {
-    setRaiderPack([]);
     this._showRunSummary({
       title:      '── RUN FAILED ──',
       titleColor: '#ff6666',

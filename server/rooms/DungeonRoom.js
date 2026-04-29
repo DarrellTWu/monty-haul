@@ -33,6 +33,7 @@ import {
 import * as MovementSystem from '../systems/MovementSystem.js';
 import * as AISystem       from '../systems/AISystem.js';
 import { playerAttack, enemyAttack, applySecondWind } from '../systems/CombatSystem.js';
+import { getPlayer, commitExtract, commitDeath } from '../store/playerStore.js';
 
 const WEAPON_REGISTRY = {
   longsword: LONGSWORD, shortsword: SHORTSWORD,
@@ -50,6 +51,8 @@ export class DungeonRoom extends Room {
     this._enemyDefs       = new Map();
     this._conditionTimers = new Map(); // `${sessionId}_${condition}` → remainingMs
     this._lootRolled      = new Set(); // enemyIds whose loot has been rolled (one-shot on death)
+    this._playerIds       = new Map(); // sessionId → playerId (for store commits)
+    this._extracted       = new Set(); // sessionIds who successfully extracted (not deaths)
     this._bounds          = { minX: WALL, maxX: WALL, minY: WALL, maxY: WALL }; // overwritten by _loadFloor
 
     this._loadFloor(1);
@@ -252,8 +255,15 @@ export class DungeonRoom extends Room {
   }
 
   onJoin(client, options = {}) {
-    const classDef    = CLASS_REGISTRY[options.class] ?? DEFAULT_CLASS;
-    const raiderItems = options.items ?? [];
+    const classDef = CLASS_REGISTRY[options.class] ?? DEFAULT_CLASS;
+
+    // Load raider pack from the server-side player store.
+    // Falls back to empty (class defaults) if no playerId or player not found.
+    const storePlayer = options.playerId ? getPlayer(options.playerId) : null;
+    this._playerIds.set(client.sessionId, options.playerId ?? null);
+    const raiderItems = storePlayer
+      ? storePlayer.raiderPack.flatMap(({ id, qty }) => Array(qty).fill(id))
+      : [];
 
     // Resolve ability scores: use client-provided point-buy if valid, else class defaults.
     const scores = this._validateAbilityScores(options.abilityScores)
@@ -349,8 +359,14 @@ export class DungeonRoom extends Room {
   }
 
   onLeave(client) {
+    const playerId = this._playerIds.get(client.sessionId);
+    if (playerId && !this._extracted.has(client.sessionId)) {
+      commitDeath(playerId);
+    }
     releaseLocksHeldBy(this.state, client.sessionId);
     this.state.players.delete(client.sessionId);
+    this._playerIds.delete(client.sessionId);
+    this._extracted.delete(client.sessionId);
   }
 
   onDispose() {
@@ -648,6 +664,15 @@ export class DungeonRoom extends Room {
       for (let i = 0; i < player.hotbar.length; i++) {
         if (player.hotbar[i] === consumableId) { player.hotbar[i] = ''; break; }
       }
+    }
+
+    if (c.type === 'extract') {
+      this._extracted.add(sessionId);
+      const playerId = this._playerIds.get(sessionId);
+      if (playerId) commitExtract(playerId, {
+        survivingItems: Array.from(player.inventory),
+        goldEarned:     player.gold,
+      });
     }
   }
 
