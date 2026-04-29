@@ -1,6 +1,10 @@
 # Server-Side Persistence Plan
 *Internal Reference | Two-Phase Implementation*
 
+> **Status:** Phase 1 complete and fully tested (2026-04-28). All 5 checkpoints verified:
+> hub routes, hub UI, dungeon join from server state, extract commit, death/disconnect commit.
+> Phase 2 (Supabase) is next.
+
 ---
 
 ## Goal
