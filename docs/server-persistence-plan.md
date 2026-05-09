@@ -8,10 +8,13 @@
 >   write through to `gear_stash` + `meta_progression` via async `playerStore` cache.
 >   Storage model: current-state (one row per `(player_id, item_id)`), snapshot-replace
 >   on sync — see "Storage Model" block below.
-> - **Deferred from Phase 2:** `run_history` writes on extract/death (Checkpoints 8/9 are
->   currently partial — gear+meta land correctly, but no audit row is inserted). Nothing
->   in the game reads `run_history` yet, so this stays in Future Work alongside
->   `gear_events` until a feature needs it (run summary screen, leaderboards, analytics).
+> - **Phase 2 audit (2026-05-09):** post-implementation review surfaced a critical
+>   race condition (#1) and pre-existing anti-cheat hole (#2) plus several robustness
+>   and scalability gaps. See "Phase 2 — Post-Implementation Audit" section below.
+>   These are addressed in Phase 3.
+> - **Deferred from Phase 2:** `run_history` writes on extract/death (Checkpoints 8/9
+>   currently partial — gear+meta land correctly, no audit row is inserted). Folded
+>   into Phase 3 ordering.
 > - **Pending manual validation:** Checkpoint 10 (multi-client isolation across two
 >   browser sessions / two usernames).
 
@@ -282,6 +285,158 @@ Die in the dungeon. Check `run_history` row (extracted: false). Confirm `gear_st
 **Checkpoint 10 — Full loop across clients**
 Two different browser sessions, two usernames. Run independently. Confirm state is isolated
 per player and persists correctly for both.
+
+---
+
+## Phase 2 — Post-Implementation Audit (2026-05-09)
+
+After Phase 2 shipped (Checkpoints 6–7 verified), an architectural review surfaced
+bugs and scalability concerns that affect production-readiness. Tracked here;
+addressed in Phase 3 below.
+
+### Critical Issues
+
+#### 1. Race condition in `syncStashAndMeta` — duplicate rows on concurrent same-player mutations
+**Severity:** HIGH (correctness; reproducible at single-user scale)
+
+`syncStashAndMeta` does three sequential network ops: DELETE-all, INSERT-all,
+UPSERT meta. Concurrent mutations for the same player interleave at `await`
+boundaries, producing duplicate rows in `gear_stash`. Aggregation on read sums
+quantities → player ends up with multiplied stash.
+
+Reproduction: rapid double-click of Buy in the hub UI. Bad interleaving:
+
+| Time | Handler A (Buy)       | Handler B (Buy)       | DB state               |
+|------|-----------------------|-----------------------|------------------------|
+| t=0  | mutate cache, DELETE  |                       | —                      |
+| t=1  |                       | mutate cache, DELETE  | —                      |
+| t=10 | DELETE returns, INSERT|                       | [potion×2]             |
+| t=11 |                       | DELETE returns (no-op)| [potion×2] still       |
+| t=12 |                       | INSERT                | **[potion×2, potion×2]** |
+
+There is no `UNIQUE(player_id, item_id)` constraint to prevent duplicates.
+
+**Fix plan:** per-player mutation lock (`Map<playerId, Promise>`) in
+`playerStore.js`. Mutations chain via `prev.then(() => fn())`. Serializes one
+player's writes; doesn't slow other players. ~15 lines, no schema change. Add a
+test: fire N concurrent buys against one player, assert final qty == N.
+
+(Optional follow-up: add `UNIQUE(player_id, item_id)` + switch to UPSERT pattern
+as belt-and-suspenders.)
+
+#### 2. Server trusts client-supplied prices and recipes
+**Severity:** HIGH (anti-cheat; predates Phase 2)
+
+`hub.js` `/buy`, `/sell`, `/craft` routes accept `price` and full `recipe`
+objects from the client and pass them straight to `playerStore`. A malicious
+client can:
+- Send `price: 0` to buy items free
+- Send a huge `price` on sell to mint gold
+- Send a fake recipe with no inputs to materialize items
+
+Violates the `CLAUDE.md` rule "Server never trusts client. Clients send inputs
+only; server resolves outcomes."
+
+**Fix plan:** server reads canonical values from `shared/data/values.js`
+(`ITEM_GOLD_VALUE`, `sellPrice`) and `shared/data/crafting/recipes.js`
+(`RECIPE_REGISTRY`). Routes accept item ID / recipe ID only. Test: send
+`price: 0` on `/buy`, assert request rejected and stash unchanged.
+
+### Robustness Issues
+
+#### 3. Non-atomic DELETE + INSERT can wipe player on crash
+**Severity:** MEDIUM
+
+`syncStashAndMeta` deletes then inserts in two separate calls. Server crash
+between them = wiped `gear_stash`. Cache holds the right state, so a successful
+next mutation re-syncs — but a crash that takes the process down loses the
+player's stash entirely.
+
+**Fix plan:** wrap both ops in a Supabase RPC function (PL/pgSQL) that runs them
+in a SQL transaction. Or switch to UPSERT + DELETE-NOT-IN (idempotent, no
+transaction needed).
+
+#### 4. Fire-and-forget commits silently drop on Supabase failure
+**Severity:** MEDIUM
+
+`commitExtract` and `commitDeath` in `DungeonRoom.js` use `.catch(err => console.error(...))`.
+A transient Supabase outage at the moment of extraction means the player's
+surviving inventory and run gold are silently lost. Player sees "extract complete"
+UI; nothing lands in stash.
+
+**Fix plan:** retry with exponential backoff (3 attempts). If all fail, write to
+a local dead-letter file or in-memory queue for manual recovery. Optionally
+surface a "save failed" message to the client.
+
+#### 5. No retry/backoff anywhere
+**Severity:** MEDIUM
+
+A single transient network blip during any sync = lost mutation, surfaced as a
+500 to the client. Cache is then ahead of DB until next successful mutation.
+
+**Fix plan:** thin retry wrapper (3 attempts, 100ms exponential) around
+`supabase.from(...)` calls. Idempotent ops (UPSERT, DELETE) are safe to retry.
+INSERT-after-DELETE is not; addressed by #3 fix.
+
+### Scalability Issues
+
+#### 6. Single-process cache lock-in
+**Severity:** ARCHITECTURE (not blocking until horizontal scaling needed)
+
+`_players` is a per-process `Map`. Two Node processes serving the same players
+would diverge — process A mutates cache + DB; process B's cache is stale. Locks
+the deployment to a single Node box.
+
+**Fix paths (when needed), ranked by complexity:**
+- (a) Drop the cache, read Supabase on every request (slow, simple, correct)
+- (b) Redis as shared cache layer (fast, correct, adds infra dep)
+- (c) Shard players by `playerId` hash across N processes (fast, correct, complex routing)
+
+A single Node process comfortably handles thousands of concurrent users for a
+game like this. Real ceiling, not an immediate one.
+
+#### 7. Cache grows unbounded
+**Severity:** LOW
+
+`_players` Map never evicts. Every player who ever logged in stays in memory
+until process restart. Fine for hundreds of players; meaningful at tens of
+thousands.
+
+**Fix path (when needed):** LRU cache with size limit, or TTL-based eviction
+(drop entries idle for >1 hour).
+
+#### 8. Snapshot-replace is row-op-wasteful at scale
+**Severity:** LOW
+
+A player with 200 stash items costs ~400 row ops per mutation (DELETE-all +
+INSERT-all). Suboptimal but Supabase handles it fine at our scale.
+
+**Fix path (when needed):** UPSERT individual changed rows; targeted DELETE for
+removed items. Requires `UNIQUE(player_id, item_id)`.
+
+### Pre-existing Items (out of scope for hardening)
+
+- Username login is trust-on-first-use (anyone with a username can become that
+  player). Auth is in Migration Notes as future work.
+- RLS enabled but no policies exist. Service role bypasses RLS entirely. No bug
+  today; matters when client-side anon access is added.
+
+---
+
+## Phase 3 — Hardening Plan (proposed)
+
+Recommended order based on impact and prerequisites. Items 1–3 should land
+before any real user testing. Items 4–6 should land before public launch.
+Scalability items (#6–#8) are tracked but not on the critical path.
+
+| Order | Item                                                       | Severity | Effort   |
+|-------|------------------------------------------------------------|----------|----------|
+| 1     | Per-player mutation lock (#1)                              | HIGH     | half day |
+| 2     | Server-authoritative prices and recipes (#2)               | HIGH     | half day |
+| 3     | `run_history` writes — formally close Checkpoints 8/9      | LOW      | half day |
+| 4     | Retry/backoff around Supabase calls (#5)                   | MEDIUM   | half day |
+| 5     | Atomic transaction for sync (#3)                           | MEDIUM   | 1 day    |
+| 6     | Resilient commit hooks for extract/death (#4)              | MEDIUM   | half day |
 
 ---
 
