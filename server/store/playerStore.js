@@ -54,6 +54,32 @@ function _cache(p) {
   return p;
 }
 
+// ── Per-player mutation lock ──────────────────────────────────────────────────
+// Serializes concurrent mutations for the same playerId. Without this, two
+// mutations interleave at `await` boundaries and `syncStashAndMeta` can
+// produce duplicate rows in `gear_stash` (see persistence-plan audit issue #1).
+// Other players' mutations run in parallel — the lock is per-player, not global.
+//
+// Cleanup: the entry for a player is removed from `_locks` when its tail
+// settles AND no newer tail has replaced it, so the Map doesn't grow forever
+// for inactive players.
+//
+// Do NOT nest `_withLock` calls for the same playerId — they would deadlock.
+// `savePlayer` is intentionally NOT locked here; the mutation that calls it
+// already holds the lock.
+const _locks = new Map(); // playerId → tail Promise
+
+function _withLock(playerId, fn) {
+  const prev = _locks.get(playerId) ?? Promise.resolve();
+  const next = prev.catch(() => null).then(() => fn());
+  const tail = next.catch(() => null);
+  _locks.set(playerId, tail);
+  tail.then(() => {
+    if (_locks.get(playerId) === tail) _locks.delete(playerId);
+  });
+  return next;
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function getOrCreate(username) {
@@ -81,67 +107,79 @@ export async function savePlayer(state) {
 // ── Hub mutations ─────────────────────────────────────────────────────────────
 
 export async function stashToRaider(playerId, itemId) {
-  const p = await getPlayer(playerId);
-  if (!p) return { ok: false, error: 'Player not found' };
-  if (!_remove(p.stash, itemId)) return { ok: false, error: 'Item not in stash' };
-  p.stash = _clean(p.stash);
-  _add(p.raiderPack, itemId);
-  await savePlayer(p);
-  return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
+  return _withLock(playerId, async () => {
+    const p = await getPlayer(playerId);
+    if (!p) return { ok: false, error: 'Player not found' };
+    if (!_remove(p.stash, itemId)) return { ok: false, error: 'Item not in stash' };
+    p.stash = _clean(p.stash);
+    _add(p.raiderPack, itemId);
+    await savePlayer(p);
+    return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
+  });
 }
 
 export async function raiderToStash(playerId, itemId) {
-  const p = await getPlayer(playerId);
-  if (!p) return { ok: false, error: 'Player not found' };
-  if (!_remove(p.raiderPack, itemId)) return { ok: false, error: 'Item not in raider pack' };
-  p.raiderPack = _clean(p.raiderPack);
-  _add(p.stash, itemId);
-  await savePlayer(p);
-  return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
+  return _withLock(playerId, async () => {
+    const p = await getPlayer(playerId);
+    if (!p) return { ok: false, error: 'Player not found' };
+    if (!_remove(p.raiderPack, itemId)) return { ok: false, error: 'Item not in raider pack' };
+    p.raiderPack = _clean(p.raiderPack);
+    _add(p.stash, itemId);
+    await savePlayer(p);
+    return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
+  });
 }
 
 export async function dumpToStash(playerId) {
-  const p = await getPlayer(playerId);
-  if (!p) return { ok: false, error: 'Player not found' };
-  for (const { id, qty } of p.raiderPack) _add(p.stash, id, qty);
-  p.raiderPack = [];
-  await savePlayer(p);
-  return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
+  return _withLock(playerId, async () => {
+    const p = await getPlayer(playerId);
+    if (!p) return { ok: false, error: 'Player not found' };
+    for (const { id, qty } of p.raiderPack) _add(p.stash, id, qty);
+    p.raiderPack = [];
+    await savePlayer(p);
+    return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
+  });
 }
 
 export async function buyItem(playerId, itemId, price) {
-  const p = await getPlayer(playerId);
-  if (!p) return { ok: false, error: 'Player not found' };
-  if (p.gold < price) return { ok: false, error: 'Insufficient gold' };
-  p.gold -= price;
-  _add(p.stash, itemId);
-  await savePlayer(p);
-  return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
+  return _withLock(playerId, async () => {
+    const p = await getPlayer(playerId);
+    if (!p) return { ok: false, error: 'Player not found' };
+    if (p.gold < price) return { ok: false, error: 'Insufficient gold' };
+    p.gold -= price;
+    _add(p.stash, itemId);
+    await savePlayer(p);
+    return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
+  });
 }
 
 export async function sellItem(playerId, itemId, price) {
-  const p = await getPlayer(playerId);
-  if (!p) return { ok: false, error: 'Player not found' };
-  if (!_remove(p.stash, itemId)) return { ok: false, error: 'Item not in stash' };
-  p.stash = _clean(p.stash);
-  p.gold += Math.max(0, Math.floor(Number(price) || 0));
-  await savePlayer(p);
-  return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
+  return _withLock(playerId, async () => {
+    const p = await getPlayer(playerId);
+    if (!p) return { ok: false, error: 'Player not found' };
+    if (!_remove(p.stash, itemId)) return { ok: false, error: 'Item not in stash' };
+    p.stash = _clean(p.stash);
+    p.gold += Math.max(0, Math.floor(Number(price) || 0));
+    await savePlayer(p);
+    return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
+  });
 }
 
 export async function craftRecipe(playerId, recipe) {
-  const p = await getPlayer(playerId);
-  if (!p) return { ok: false, error: 'Player not found' };
-  if (!recipe?.inputs || !recipe?.output) return { ok: false, error: 'Invalid recipe' };
-  for (const { id, qty } of recipe.inputs) {
-    const entry = p.stash.find(e => e.id === id);
-    if (!entry || entry.qty < qty) return { ok: false, error: `Missing input: ${id}` };
-  }
-  for (const { id, qty } of recipe.inputs) _remove(p.stash, id, qty);
-  p.stash = _clean(p.stash);
-  _add(p.stash, recipe.output.id, recipe.output.qty);
-  await savePlayer(p);
-  return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
+  return _withLock(playerId, async () => {
+    const p = await getPlayer(playerId);
+    if (!p) return { ok: false, error: 'Player not found' };
+    if (!recipe?.inputs || !recipe?.output) return { ok: false, error: 'Invalid recipe' };
+    for (const { id, qty } of recipe.inputs) {
+      const entry = p.stash.find(e => e.id === id);
+      if (!entry || entry.qty < qty) return { ok: false, error: `Missing input: ${id}` };
+    }
+    for (const { id, qty } of recipe.inputs) _remove(p.stash, id, qty);
+    p.stash = _clean(p.stash);
+    _add(p.stash, recipe.output.id, recipe.output.qty);
+    await savePlayer(p);
+    return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
+  });
 }
 
 // ── Dungeon commit hooks ───────────────────────────────────────────────────────
@@ -149,21 +187,25 @@ export async function craftRecipe(playerId, recipe) {
 // Called by DungeonRoom on successful extraction.
 // survivingItems: flat string[] of item IDs from player.inventory (server ArraySchema).
 export async function commitExtract(playerId, { survivingItems = [], goldEarned = 0 }) {
-  const p = await getPlayer(playerId);
-  if (!p) return null;
-  for (const id of survivingItems) _add(p.stash, id);
-  p.gold += Math.floor(Number(goldEarned) || 0);
-  p.raiderPack = [];
-  await savePlayer(p);
-  return p;
+  return _withLock(playerId, async () => {
+    const p = await getPlayer(playerId);
+    if (!p) return null;
+    for (const id of survivingItems) _add(p.stash, id);
+    p.gold += Math.floor(Number(goldEarned) || 0);
+    p.raiderPack = [];
+    await savePlayer(p);
+    return p;
+  });
 }
 
 // Called by DungeonRoom on player death or mid-run disconnect.
 // Items brought in are lost; stash and hub gold are untouched.
 export async function commitDeath(playerId) {
-  const p = await getPlayer(playerId);
-  if (!p) return null;
-  p.raiderPack = [];
-  await savePlayer(p);
-  return p;
+  return _withLock(playerId, async () => {
+    const p = await getPlayer(playerId);
+    if (!p) return null;
+    p.raiderPack = [];
+    await savePlayer(p);
+    return p;
+  });
 }
