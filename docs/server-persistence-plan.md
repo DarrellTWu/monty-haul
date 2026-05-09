@@ -456,20 +456,153 @@ removed items. Requires `UNIQUE(player_id, item_id)`.
 
 ---
 
-## Phase 3 — Hardening Plan (proposed)
+## Phase 3 — Hardening Plan
 
-Recommended order based on impact and prerequisites. Items 1–3 should land
-before any real user testing. Items 4–6 should land before public launch.
-Scalability items (#6–#8) are tracked but not on the critical path.
+Items 1–2 done; #3–#6 pending. Severity is the original ordering signal;
+the analysis below re-prioritizes by *what each item unlocks downstream*
+(see "Suggested re-ordering" at the end of this section).
 
 | Order | Item                                                       | Severity | Effort   | Status            |
 |-------|------------------------------------------------------------|----------|----------|-------------------|
 | 1     | Per-player mutation lock (#1)                              | HIGH     | half day | DONE `7888654`    |
-| 2     | Server-authoritative prices and recipes (#2)               | HIGH     | half day | DONE              |
+| 2     | Server-authoritative prices and recipes (#2)               | HIGH     | half day | DONE `ee1dd52`    |
 | 3     | `run_history` writes — formally close Checkpoints 8/9      | LOW      | half day | pending           |
 | 4     | Retry/backoff around Supabase calls (#5)                   | MEDIUM   | half day | pending           |
 | 5     | Atomic transaction for sync (#3)                           | MEDIUM   | 1 day    | pending           |
 | 6     | Resilient commit hooks for extract/death (#4)              | MEDIUM   | half day | pending           |
+
+### Item-by-item analysis (#3–#6)
+
+#### #3 — `run_history` writes
+**What it does.** On every extract / death, insert one row into the existing
+`run_history` table with `class`, `floors_reached`, `extracted` (bool),
+`gold_extracted`, `items_extracted` (JSONB), `kills`, `run_duration_s`. Schema
+already exists; just no writer. Need a per-player `kills` counter in
+`DungeonRoom` and to populate `items_extracted` from `player.inventory` at
+extract.
+
+**Unlocks:**
+- **Design (high value).** Only item in the list that creates a data feedback
+  loop. Without it, balance discussions are anecdotal. With it: "Floor 2 has a
+  78% death rate at avg 3:40 vs Floor 1's 12%." Every itemization / monster /
+  map decision benefits.
+- Future leaderboards, player-profile UI, activity feeds.
+- Forensics for "I lost my longsword" complaints.
+
+**Multi-crawler relevance:** independent. One row per player per run regardless
+of party size.
+
+#### #4 — Retry/backoff around Supabase calls
+**What it does.** Wrap `supabase.from(...)` calls in a small `withRetry` HOF —
+3 attempts, exponential backoff (100ms / 200ms / 400ms). Idempotent ops
+(UPSERT, DELETE) safe; non-idempotent INSERT-after-DELETE handled by #5.
+
+**Unlocks:**
+- Removes "single transient blip = lost mutation, 500 to client" failure mode.
+- The retry primitive is reused by #6.
+
+**Multi-crawler relevance:** growing. More concurrent users → more parallel
+Supabase calls → higher base rate of any one blipping. Cheap insurance before
+scale.
+
+**Design relevance:** keeps playtest sessions running smoothly through flakes.
+
+#### #5 — Atomic transaction for sync
+**What it does.** `syncStashAndMeta` does DELETE-all then INSERT-all in two
+separate calls. Server crash between them wipes `gear_stash`. Two fix paths:
+- (a) Postgres RPC that runs both inside a SQL transaction.
+- (b) Add `UNIQUE(player_id, item_id)` and switch to UPSERT changed rows +
+  DELETE-NOT-IN. **Recommended** — also fixes audit issue #8 (snapshot-replace
+  row-op waste at scale) and unlocks safe multi-process operation.
+
+**Unlocks:**
+- **Crash-safety.** Required before any production deployment that isn't a dev
+  box.
+- **Multi-process server.** This is the gating item for horizontal scaling
+  (audit issue #6). Within a single process, the #1 mutation lock protects
+  ordering; across processes, atomic sync is the only thing that protects
+  against concurrent UPSERT pairs corrupting rows. Without #5, multi-process
+  is unsafe.
+
+**Multi-crawler relevance:** **prerequisite** for any multi-process scaling.
+The single highest-leverage infra item in Phase 3.
+
+**Design relevance:** indirect — designers don't lose work to crashes.
+
+#### #6 — Resilient commit hooks for extract/death
+**What it does.** Replaces the `.catch(err => console.error(...))`
+fire-and-forget on `commitExtract` / `commitDeath` with: retry via #4's helper;
+if all retries fail, write to a local dead-letter file (or in-memory queue) for
+manual recovery; optionally surface "save failed" to the client.
+
+**Unlocks:**
+- **Highest player-perceived stakes of any audit item.** Extraction is the
+  payoff moment of a long run; silently losing surviving inventory there is the
+  worst-feeling failure mode the game can produce.
+
+**Multi-crawler relevance:** matters more with concurrent extracts hitting a
+momentarily-slow Supabase.
+
+**Design relevance:** required for trusted playtests. The first time Supabase
+hiccups during a playtester's first extract, you lose them.
+
+### Dependency mapping — what gates the bigger arcs
+
+The Phase 3 items aren't equally important to the two arcs the project cares
+about most. Sorting them by what each one unlocks:
+
+#### Infrastructure arc → multi-crawler-per-dungeon
+
+The architecture is already "single Colyseus room, N players in it" — schema
+and `_playerIds` map don't care about player count. The actual blockers to
+shipping shared-room multiplayer:
+
+| Blocker                                          | Phase 3 item    | State                  |
+|--------------------------------------------------|-----------------|------------------------|
+| Per-player atomic write under load               | #1 + #5         | #1 done; **#5 missing**|
+| Retry/backoff for transient blips                | #4              | pending                |
+| Resilient extract/death                          | #6              | pending                |
+| Matchmaking / lobby / party formation            | not Phase 3     | not started            |
+| Loot fairness in shared rooms                    | not Phase 3     | partial — `lockedBy`   |
+| Disconnect / reconnect handling                  | not Phase 3     | partial — `commitDeath`|
+| Multi-process server (audit #6)                  | gated on **#5** | not started            |
+
+**Hard prereq from Phase 3:** #5. Everything else is "needed eventually for a
+healthy production" rather than "needed before the multi-process architecture
+can be designed."
+
+#### Design arc → itemization, monsters, graphics, maps
+
+Designer workflow is already pleasant: registries in `shared/data/` are pure
+data, no logic to write. Phase 3 #2 reinforced this — the server reads the
+same registries the client renders from.
+
+| Need                                             | Phase 3 item   | State                  |
+|--------------------------------------------------|----------------|------------------------|
+| Telemetry to see what's happening in playtests   | **#3**         | pending                |
+| Playtests that don't lose work to flakes         | #4 + #6        | pending                |
+| Asset pipeline for graphics (Cloudflare R2)      | not Phase 3    | not started            |
+| Subclass / conditions / AI systems               | not Phase 3    | not started            |
+| Floor-builder DSL or editor                      | not roadmapped | hand-authored works    |
+| Recipe-acquisition system (gdd_crafting.md)      | not Phase 3    | conceptual only        |
+
+**Hard prereq from Phase 3:** #3. The others are quality-of-life.
+
+### Suggested re-ordering
+
+Inverse of the current severity-based table, ordered to maximize what each
+commit unlocks:
+
+| New order | Item | Why this slot                                              |
+|-----------|------|------------------------------------------------------------|
+| 3rd       | #3   | Smallest, isolates cleanly, immediately enables data-driven design |
+| 4th       | #4   | Small, reusable retry primitive that #6 sits on top of     |
+| 5th       | #6   | Builds on #4, closes the most player-visible failure mode  |
+| 6th       | #5   | Biggest item, only one with a schema migration; gates multi-process |
+
+Both orderings get to the same end state. The re-ordering just front-loads the
+items whose downstream value is largest (data for design; crash-safety for
+infra).
 
 ---
 
