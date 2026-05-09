@@ -1,6 +1,15 @@
-import { randomUUID } from 'crypto';
+// Server-side player state cache + Supabase write-through.
+//
+// Reads: cache hit fast-path; on miss, load from Supabase via playerLoad.
+// Writes: every mutation modifies the cache, then awaits syncStashAndMeta to
+// persist. The cache is authoritative in-process; Supabase wins on cache miss
+// (e.g. server restart).
+//
+// All exports are async. Callers must await.
+import { loadPlayer, loadPlayerByUsername } from '../persistence/playerLoad.js';
+import { createProfile, syncStashAndMeta }  from '../persistence/playerSync.js';
 
-// Mirrors the seeded stash in client/src/store/stash.js — given to brand-new players.
+// Mirrors the seeded stash given to brand-new players on first login.
 const INITIAL_STASH = [
   { id: 'longsword',          qty: 1 },
   { id: 'shortsword',         qty: 1 },
@@ -22,16 +31,6 @@ const INITIAL_STASH = [
 const _players    = new Map(); // playerId  → state
 const _byUsername = new Map(); // username  → playerId
 
-function _make(username) {
-  return {
-    playerId:   randomUUID(),
-    username,
-    stash:      INITIAL_STASH.map(e => ({ ...e })),
-    gold:       0,
-    raiderPack: [],
-  };
-}
-
 function _add(arr, id, qty = 1) {
   const entry = arr.find(e => e.id === id);
   if (entry) entry.qty += qty;
@@ -49,77 +48,89 @@ function _clean(arr) {
   return arr.filter(e => e.qty > 0);
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
-
-export function getOrCreate(username) {
-  const existing = _byUsername.get(username);
-  if (existing) return _players.get(existing);
-  const p = _make(username);
+function _cache(p) {
   _players.set(p.playerId, p);
-  _byUsername.set(username, p.playerId);
+  if (p.username) _byUsername.set(p.username, p.playerId);
   return p;
 }
 
-export function getPlayer(playerId) {
-  return _players.get(playerId) ?? null;
+// ── Public API ────────────────────────────────────────────────────────────────
+
+export async function getOrCreate(username) {
+  const cachedId = _byUsername.get(username);
+  if (cachedId) return _players.get(cachedId);
+
+  const loaded = await loadPlayerByUsername(username);
+  if (loaded) return _cache(loaded);
+
+  const created = await createProfile(username, INITIAL_STASH);
+  return _cache(created);
 }
 
-// No-op in Phase 1. Phase 2 swaps this for a Supabase write.
-export function savePlayer(_state) {}
+export async function getPlayer(playerId) {
+  if (_players.has(playerId)) return _players.get(playerId);
+  const loaded = await loadPlayer(playerId);
+  if (!loaded) return null;
+  return _cache(loaded);
+}
+
+export async function savePlayer(state) {
+  return syncStashAndMeta(state);
+}
 
 // ── Hub mutations ─────────────────────────────────────────────────────────────
 
-export function stashToRaider(playerId, itemId) {
-  const p = getPlayer(playerId);
+export async function stashToRaider(playerId, itemId) {
+  const p = await getPlayer(playerId);
   if (!p) return { ok: false, error: 'Player not found' };
   if (!_remove(p.stash, itemId)) return { ok: false, error: 'Item not in stash' };
   p.stash = _clean(p.stash);
   _add(p.raiderPack, itemId);
-  savePlayer(p);
+  await savePlayer(p);
   return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
 }
 
-export function raiderToStash(playerId, itemId) {
-  const p = getPlayer(playerId);
+export async function raiderToStash(playerId, itemId) {
+  const p = await getPlayer(playerId);
   if (!p) return { ok: false, error: 'Player not found' };
   if (!_remove(p.raiderPack, itemId)) return { ok: false, error: 'Item not in raider pack' };
   p.raiderPack = _clean(p.raiderPack);
   _add(p.stash, itemId);
-  savePlayer(p);
+  await savePlayer(p);
   return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
 }
 
-export function dumpToStash(playerId) {
-  const p = getPlayer(playerId);
+export async function dumpToStash(playerId) {
+  const p = await getPlayer(playerId);
   if (!p) return { ok: false, error: 'Player not found' };
   for (const { id, qty } of p.raiderPack) _add(p.stash, id, qty);
   p.raiderPack = [];
-  savePlayer(p);
+  await savePlayer(p);
   return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
 }
 
-export function buyItem(playerId, itemId, price) {
-  const p = getPlayer(playerId);
+export async function buyItem(playerId, itemId, price) {
+  const p = await getPlayer(playerId);
   if (!p) return { ok: false, error: 'Player not found' };
   if (p.gold < price) return { ok: false, error: 'Insufficient gold' };
   p.gold -= price;
   _add(p.stash, itemId);
-  savePlayer(p);
+  await savePlayer(p);
   return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
 }
 
-export function sellItem(playerId, itemId, price) {
-  const p = getPlayer(playerId);
+export async function sellItem(playerId, itemId, price) {
+  const p = await getPlayer(playerId);
   if (!p) return { ok: false, error: 'Player not found' };
   if (!_remove(p.stash, itemId)) return { ok: false, error: 'Item not in stash' };
   p.stash = _clean(p.stash);
   p.gold += Math.max(0, Math.floor(Number(price) || 0));
-  savePlayer(p);
+  await savePlayer(p);
   return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
 }
 
-export function craftRecipe(playerId, recipe) {
-  const p = getPlayer(playerId);
+export async function craftRecipe(playerId, recipe) {
+  const p = await getPlayer(playerId);
   if (!p) return { ok: false, error: 'Player not found' };
   if (!recipe?.inputs || !recipe?.output) return { ok: false, error: 'Invalid recipe' };
   for (const { id, qty } of recipe.inputs) {
@@ -129,7 +140,7 @@ export function craftRecipe(playerId, recipe) {
   for (const { id, qty } of recipe.inputs) _remove(p.stash, id, qty);
   p.stash = _clean(p.stash);
   _add(p.stash, recipe.output.id, recipe.output.qty);
-  savePlayer(p);
+  await savePlayer(p);
   return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
 }
 
@@ -137,22 +148,22 @@ export function craftRecipe(playerId, recipe) {
 
 // Called by DungeonRoom on successful extraction.
 // survivingItems: flat string[] of item IDs from player.inventory (server ArraySchema).
-export function commitExtract(playerId, { survivingItems = [], goldEarned = 0 }) {
-  const p = getPlayer(playerId);
+export async function commitExtract(playerId, { survivingItems = [], goldEarned = 0 }) {
+  const p = await getPlayer(playerId);
   if (!p) return null;
   for (const id of survivingItems) _add(p.stash, id);
   p.gold += Math.floor(Number(goldEarned) || 0);
   p.raiderPack = [];
-  savePlayer(p);
+  await savePlayer(p);
   return p;
 }
 
 // Called by DungeonRoom on player death or mid-run disconnect.
 // Items brought in are lost; stash and hub gold are untouched.
-export function commitDeath(playerId) {
-  const p = getPlayer(playerId);
+export async function commitDeath(playerId) {
+  const p = await getPlayer(playerId);
   if (!p) return null;
   p.raiderPack = [];
-  savePlayer(p);
+  await savePlayer(p);
   return p;
 }

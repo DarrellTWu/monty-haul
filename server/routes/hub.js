@@ -14,59 +14,71 @@ router.use((req, res, next) => {
   next();
 });
 
+// Wraps an async handler, catches throws (e.g. supabase outage), returns 500.
+function asyncRoute(handler) {
+  return (req, res) => {
+    handler(req, res).catch(err => {
+      console.error(`[hub] ${req.method} ${req.originalUrl} failed:`, err);
+      if (!res.headersSent) {
+        res.status(500).json({ ok: false, error: 'Internal server error' });
+      }
+    });
+  };
+}
+
 // POST /hub/login  { username }
 // Upsert player by username. Returns full hub state.
-router.post('/login', (req, res) => {
+router.post('/login', asyncRoute(async (req, res) => {
   const username = req.body?.username?.trim();
   if (!username) return res.status(400).json({ ok: false, error: 'username required' });
-  const p = store.getOrCreate(username);
+  const p = await store.getOrCreate(username);
   res.json({ ok: true, playerId: p.playerId, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack });
-});
+}));
 
 // GET /hub/:playerId
 // Load current hub state for an existing player.
-router.get('/:playerId', (req, res) => {
-  const p = store.getPlayer(req.params.playerId);
+router.get('/:playerId', asyncRoute(async (req, res) => {
+  const p = await store.getPlayer(req.params.playerId);
   if (!p) return res.status(404).json({ ok: false, error: 'Player not found' });
   res.json({ ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack });
-});
+}));
 
 // POST /hub/:playerId/raider/add  { itemId }
-router.post('/:playerId/raider/add', (req, res) => {
-  const result = store.stashToRaider(req.params.playerId, req.body?.itemId);
+router.post('/:playerId/raider/add', asyncRoute(async (req, res) => {
+  const result = await store.stashToRaider(req.params.playerId, req.body?.itemId);
   res.status(result.ok ? 200 : 400).json(result);
-});
+}));
 
 // POST /hub/:playerId/raider/remove  { itemId }
-router.post('/:playerId/raider/remove', (req, res) => {
-  const result = store.raiderToStash(req.params.playerId, req.body?.itemId);
+router.post('/:playerId/raider/remove', asyncRoute(async (req, res) => {
+  const result = await store.raiderToStash(req.params.playerId, req.body?.itemId);
   res.status(result.ok ? 200 : 400).json(result);
-});
+}));
 
 // POST /hub/:playerId/raider/dump
-router.post('/:playerId/raider/dump', (req, res) => {
-  const result = store.dumpToStash(req.params.playerId);
+router.post('/:playerId/raider/dump', asyncRoute(async (req, res) => {
+  const result = await store.dumpToStash(req.params.playerId);
   res.status(result.ok ? 200 : 400).json(result);
-});
+}));
 
 // POST /hub/:playerId/buy  { itemId, price }
-router.post('/:playerId/buy', (req, res) => {
+router.post('/:playerId/buy', asyncRoute(async (req, res) => {
   const { itemId, price } = req.body ?? {};
-  const result = store.buyItem(req.params.playerId, itemId, Number(price));
+  const result = await store.buyItem(req.params.playerId, itemId, Number(price));
   res.status(result.ok ? 200 : 400).json(result);
-});
+}));
 
 // POST /hub/:playerId/sell  { itemId, price }
-router.post('/:playerId/sell', (req, res) => {
+router.post('/:playerId/sell', asyncRoute(async (req, res) => {
   const { itemId, price } = req.body ?? {};
-  const result = store.sellItem(req.params.playerId, itemId, Number(price));
+  const result = await store.sellItem(req.params.playerId, itemId, Number(price));
   res.status(result.ok ? 200 : 400).json(result);
-});
+}));
 
 // POST /hub/:playerId/craft  { recipe }
-router.post('/:playerId/craft', (req, res) => {
-  const result = store.craftRecipe(req.params.playerId, req.body?.recipe);
+router.post('/:playerId/craft', asyncRoute(async (req, res) => {
+  const result = await store.craftRecipe(req.params.playerId, req.body?.recipe);
   res.status(result.ok ? 200 : 400).json(result);
-});
+}));
 
 export { router as hubRouter };

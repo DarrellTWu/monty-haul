@@ -254,12 +254,12 @@ export class DungeonRoom extends Room {
     );
   }
 
-  onJoin(client, options = {}) {
+  async onJoin(client, options = {}) {
     const classDef = CLASS_REGISTRY[options.class] ?? DEFAULT_CLASS;
 
     // Load raider pack from the server-side player store.
     // Falls back to empty (class defaults) if no playerId or player not found.
-    const storePlayer = options.playerId ? getPlayer(options.playerId) : null;
+    const storePlayer = options.playerId ? await getPlayer(options.playerId) : null;
     this._playerIds.set(client.sessionId, options.playerId ?? null);
     const raiderItems = storePlayer
       ? storePlayer.raiderPack.flatMap(({ id, qty }) => Array(qty).fill(id))
@@ -361,7 +361,8 @@ export class DungeonRoom extends Room {
   onLeave(client) {
     const playerId = this._playerIds.get(client.sessionId);
     if (playerId && !this._extracted.has(client.sessionId)) {
-      commitDeath(playerId);
+      commitDeath(playerId).catch(err =>
+        console.error('[DungeonRoom.onLeave] commitDeath failed:', err));
     }
     releaseLocksHeldBy(this.state, client.sessionId);
     this.state.players.delete(client.sessionId);
@@ -669,10 +670,12 @@ export class DungeonRoom extends Room {
     if (c.type === 'extract') {
       this._extracted.add(sessionId);
       const playerId = this._playerIds.get(sessionId);
-      if (playerId) commitExtract(playerId, {
-        survivingItems: Array.from(player.inventory),
-        goldEarned:     player.gold,
-      });
+      if (playerId) {
+        commitExtract(playerId, {
+          survivingItems: Array.from(player.inventory),
+          goldEarned:     player.gold,
+        }).catch(err => console.error('[DungeonRoom] commitExtract failed:', err));
+      }
     }
   }
 

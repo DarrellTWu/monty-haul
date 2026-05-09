@@ -71,11 +71,12 @@ D&D 5e SRD mechanics adapted for real-time play.
 - One module per agent session. Never touch unrelated files.
 
 ## Key Commands
-- `npm start` — starts both server and client together (via concurrently)
+- `npm start` — starts both server and client together (via concurrently). Server is launched with `--env-file=server/.env` so `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` load automatically.
 - `npm run dev` — starts Vite dev server (client) only
-- `npm run server` — starts Colyseus server only
+- `npm run server` — starts Colyseus server only (also passes `--env-file=server/.env`)
 - `node shared/tests/combat.test.js` — run combat tests
 - `node shared/tests/loot.test.js` — run loot tests
+- `node server/tests/supabase-smoke.js` — round-trip a temp player through Supabase to validate the persistence layer (requires `server/.env`)
 
 ## Current File Structure (Actual)
 Many files in docs/tech_spec.md are planned, not yet built. What actually exists:
@@ -85,9 +86,13 @@ Many files in docs/tech_spec.md are planned, not yet built. What actually exists
 - `rooms/DungeonRoom.js` — message routing + equip/loot/hotbar/trap logic; rolls loot on enemy death; handles `open_container`, `close_container`, `take_item`, `take_gold`, `drop_item`, and `descend` (loot_corpse / loot removed in favour of container protocol). Floors are loaded from `FLOOR_REGISTRY` via `_loadFloor(n)` (clears entity maps + repopulates from floor data); player position + long rest applied on descend. Run completes only via Scroll of Extraction (`extract` consumable type) — no auto-complete on enemies-dead. `onJoin` loads raider pack from `playerStore` using `options.playerId`; tracks `_playerIds` (sessionId → playerId) and `_extracted` (Set of sessionIds that used a scroll). `commitExtract` fires after scroll consumption; `commitDeath` fires in `onLeave` for any player not in `_extracted`.
 - `systems/` — CombatSystem.js, MovementSystem.js, AISystem.js (called from tick loop)
 - `state/` — PlayerState, EnemyState (incl. `lockedBy`), GameState (incl. `floor`, `stairs` map), ChestState (incl. `lockedBy`), TrapState, StairState
-- `store/playerStore.js` — in-memory `Map<playerId, state>` player store (Phase 1; swapped for Supabase in Phase 2). Exports: `getOrCreate(username)`, `getPlayer(playerId)`, `savePlayer()` (no-op stub), hub mutations (`stashToRaider`, `raiderToStash`, `dumpToStash`, `buyItem`, `sellItem`, `craftRecipe`), and dungeon hooks (`commitExtract`, `commitDeath`). All mutations return `{ ok, stash, gold, raiderPack }`. New players receive `INITIAL_STASH` (mirrors the old client seed).
-- `routes/hub.js` — Express router mounted at `/hub`. CORS-enabled for Vite dev. 8 routes: `POST /login`, `GET /:playerId`, `POST /:playerId/raider/add|remove|dump`, `POST /:playerId/buy|sell|craft`. All delegate to `playerStore` and return updated state slices.
-- `persistence/`, `matchmaking/` — not yet built
+- `store/playerStore.js` — async write-through cache backed by Supabase (Phase 2). In-memory `Map<playerId, state>` is the fast path; on miss, `loadPlayer`/`loadPlayerByUsername` populate from `gear_stash` + `meta_progression`. Every mutation modifies the cached state then `await`s `syncStashAndMeta` to persist. ALL exports are async: `getOrCreate(username)`, `getPlayer(playerId)`, `savePlayer(state)`, hub mutations (`stashToRaider`, `raiderToStash`, `dumpToStash`, `buyItem`, `sellItem`, `craftRecipe`), and dungeon hooks (`commitExtract`, `commitDeath`). All mutations return `{ ok, stash, gold, raiderPack }`. New players (no DB row) get `INITIAL_STASH` seeded via `createProfile` on first `getOrCreate`.
+- `routes/hub.js` — Express router mounted at `/hub`. CORS-enabled for Vite dev. 8 routes: `POST /login`, `GET /:playerId`, `POST /:playerId/raider/add|remove|dump`, `POST /:playerId/buy|sell|craft`. Each route is wrapped in an `asyncRoute` helper that catches throws (e.g. Supabase outage) and returns 500. All delegate to `playerStore` and return updated state slices.
+- `persistence/` — Supabase plumbing for Phase 2 server persistence:
+  - `supabase.js` — singleton client init from `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (throws if either missing). Uses the secret API key — bypasses RLS, server-only.
+  - `playerLoad.js` — read-side: `loadPlayer(playerId)`, `loadPlayerByUsername(username)`. Aggregates `gear_stash` rows by `item_id`. Returns null for unknown ids.
+  - `playerSync.js` — write-side: `createProfile(username, initialStash)` (inserts profile + seeds gear_stash + creates meta_progression row); `syncStashAndMeta(player)` (snapshot-replaces gear_stash, upserts meta_progression by PK).
+- `matchmaking/` — not yet built
 
 **Client** (no `rendering/` or `ui/` subdirectories)
 - `scenes/HubScene.js` — entry point (auto-starts); checks localStorage for `mh_player_id` — shows username login screen if absent, otherwise loads state from server via `HubAPI.getState`. Two-panel layout: left cycles sub-screens (Class, Stash, Shop, Craft), right is persistent Raider Config + Enter Dungeon; screen-level VAULT display (top-right) shows hub gold; passes `{ class, abilityScores }` to DungeonScene (no items — server loads raider pack on join); auto-opens Stash tab when `init({ view: 'stash' })`. Sub-state: `_shopVendor` (`'potions' | 'armor'`), `_craftBench` (one of the six BENCH_REGISTRY ids), `_abilityScores` (point-buy allocation, initialized from class defaults on class select). Class sub-screen includes ability score customization panel (27-pt point buy, scores 8–16, non-linear cost via `POINT_COST`). Stash rows expose `[ Sell N gp ]`; raider panel shows `[ Dump All to Stash ]` when pack non-empty. All mutation call sites use `.then(ok => { if (ok) handler(); })` pattern.
@@ -110,6 +115,7 @@ Many files in docs/tech_spec.md are planned, not yet built. What actually exists
 **Server tests** (in `server/tests/`, run with `node server/tests/<file>`)
 - `server/tests/container-lock.test.js` — 21 tests for `tryOpenContainer`, `tryCloseContainer`, `releaseLocksHeldBy`, `tickContainerLocks`
 - `server/tests/loot-flow.test.js` — 35 tests for `tryTakeItem`, `tryTakeGold`, `tryDropItem`, hotbar-cleanup, and lock gate enforcement
+- `server/tests/supabase-smoke.js` — 25 tests against the real dev Supabase project: createProfile, syncStashAndMeta (add/modify/remove/empty), loaders, negative cases. Inserts a temp row keyed by username; cleans up afterward. Loads env via `process.loadEnvFile('server/.env')` so it can be invoked directly without npm scripts.
 - `data/subclasses/`, `logic/conditions.js`, `logic/ai.js` — not yet built
 
 ## Agent Task Context

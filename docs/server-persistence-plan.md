@@ -1,9 +1,19 @@
 # Server-Side Persistence Plan
 *Internal Reference | Two-Phase Implementation*
 
-> **Status:** Phase 1 complete and fully tested (2026-04-28). All 5 checkpoints verified:
-> hub routes, hub UI, dungeon join from server state, extract commit, death/disconnect commit.
-> Phase 2 (Supabase) is next.
+> **Status:**
+> - **Phase 1** complete and fully tested (2026-04-28). All 5 checkpoints verified.
+> - **Phase 2** core implemented and verified (2026-05-09). Checkpoints 6 (schema) and 7
+>   (state persists across server restart) green. Hub mutations + dungeon extract/death
+>   write through to `gear_stash` + `meta_progression` via async `playerStore` cache.
+>   Storage model: current-state (one row per `(player_id, item_id)`), snapshot-replace
+>   on sync — see "Storage Model" block below.
+> - **Deferred from Phase 2:** `run_history` writes on extract/death (Checkpoints 8/9 are
+>   currently partial — gear+meta land correctly, but no audit row is inserted). Nothing
+>   in the game reads `run_history` yet, so this stays in Future Work alongside
+>   `gear_events` until a feature needs it (run summary screen, leaderboards, analytics).
+> - **Pending manual validation:** Checkpoint 10 (multi-client isolation across two
+>   browser sessions / two usernames).
 
 ---
 
@@ -167,6 +177,19 @@ Die in the dungeon (or disconnect mid-run). Return to hub. Verify:
 Swap `playerStore`'s in-memory `Map` for Supabase reads/writes. No client-side changes.
 The HTTP routes and `HubAPI.js` are untouched — only the storage backend changes.
 
+### Storage Model: Current-State (decided 2026-05-09)
+
+`gear_stash` is treated as **current state**, not an event log: one logical row per
+`(player_id, item_id)`. Every hub mutation snapshot-replaces the player's stash rows
+(simple, robust at dev scale; optimize to upsert+targeted-delete later if row counts grow).
+The `acquired_via` / `acquired_at` columns become "last sync" metadata in this mode and
+are not relied on for provenance.
+
+This was a deliberate pick over an audit-trail interpretation of `gear_stash` because
+it mirrors the in-memory `playerStore` shape 1:1 — Phase 2 stays a pure storage swap
+with zero behavior change. See "Future Work — gear_events" below for the planned
+provenance/analytics path.
+
 ### Supabase Setup
 
 Create a free-tier Supabase project (dev). Create a second project for production when ready.
@@ -261,6 +284,40 @@ Two different browser sessions, two usernames. Run independently. Confirm state 
 per player and persists correctly for both.
 
 ---
+
+## Future Work — `gear_events` table
+
+When provenance / analytics features become real requirements, add a separate
+append-only `gear_events` table alongside the current-state `gear_stash`. Sketch:
+
+```sql
+CREATE TABLE gear_events (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  player_id   UUID NOT NULL REFERENCES player_profiles,
+  item_id     TEXT NOT NULL,
+  delta       INT  NOT NULL,             -- positive for acquisition, negative for removal
+  reason      TEXT NOT NULL,             -- 'extract' | 'buy' | 'sell' | 'craft_in' | 'craft_out' | 'raider_add' | 'raider_remove' | 'death' | 'admin'
+  run_id      UUID REFERENCES run_history,  -- nullable, set when the event came from a run
+  occurred_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX gear_events_player_time ON gear_events (player_id, occurred_at DESC);
+```
+
+Wiring: every hub mutation and dungeon commit appends one or more rows here in addition
+to updating `gear_stash`. The current-state table stays the source of truth for "what
+does the player own right now"; `gear_events` answers "where did it come from" and
+"what's the economy doing."
+
+Features this unlocks:
+- Item provenance tooltips ("first acquired 2026-04-12 from goblin loot")
+- Dispute resolution ("show me every change to this player's longsword count")
+- Economy analytics (% of healing potions bought vs looted vs crafted)
+- Bug-recovery reconstruction if `gear_stash` is ever corrupted
+- Seasonal / event-tagged item leaderboards
+
+Don't build this until a concrete feature needs it. The schema above is a sketch; refine
+when the requirements are clearer.
 
 ## Migration Notes
 
