@@ -26,10 +26,12 @@ export const HubAPI = {
   /** Load current hub state for an existing player. Returns { ok, stash, gold, raiderPack }. */
   getState:         (playerId)              => _get(`/${playerId}`),
 
-  addToRaider:      (playerId, itemId)      => _post(`/${playerId}/raider/add`,    { itemId }),
-  removeFromRaider: (playerId, itemId)      => _post(`/${playerId}/raider/remove`, { itemId }),
-  dumpToStash:      (playerId)              => _post(`/${playerId}/raider/dump`),
-  buy:              (playerId, itemId, price) => _post(`/${playerId}/buy`,  { itemId, price }),
-  sell:             (playerId, itemId, price) => _post(`/${playerId}/sell`, { itemId, price }),
-  craft:            (playerId, recipe)      => _post(`/${playerId}/craft`,  { recipe }),
+  addToRaider:      (playerId, itemId)   => _post(`/${playerId}/raider/add`,    { itemId }),
+  removeFromRaider: (playerId, itemId)   => _post(`/${playerId}/raider/remove`, { itemId }),
+  dumpToStash:      (playerId)           => _post(`/${playerId}/raider/dump`),
+
+  // Prices and recipe internals are resolved server-side. Client sends ids only.
+  buy:              (playerId, itemId)   => _post(`/${playerId}/buy`,   { itemId }),
+  sell:             (playerId, itemId)   => _post(`/${playerId}/sell`,  { itemId }),
+  craft:            (playerId, recipeId) => _post(`/${playerId}/craft`, { recipeId }),
 };

@@ -535,7 +535,7 @@ export class HubScene extends Phaser.Scene {
           sellBtn.on('pointerover', () => sellBtn.setColor('#ffffff'));
           sellBtn.on('pointerout',  () => sellBtn.setColor('#88ccff'));
           sellBtn.on('pointerdown', () => {
-            sellItem(id, price).then(ok => { if (ok) this._onSold(); });
+            sellItem(id).then(ok => { if (ok) this._onSold(); });
           });
         }
 
@@ -613,7 +613,7 @@ export class HubScene extends Phaser.Scene {
         buyBtn.on('pointerover', () => buyBtn.setColor('#ffffff'));
         buyBtn.on('pointerout',  () => buyBtn.setColor('#88ccff'));
         buyBtn.on('pointerdown', () => {
-          buyItem(id, price).then(ok => { if (ok) this._onPurchase(); });
+          buyItem(id).then(ok => { if (ok) this._onPurchase(); });
         });
       }
 
@@ -735,7 +735,7 @@ export class HubScene extends Phaser.Scene {
         craftBtn.on('pointerover', () => craftBtn.setColor('#ffffff'));
         craftBtn.on('pointerout',  () => craftBtn.setColor('#88ccff'));
         craftBtn.on('pointerdown', () => {
-          craftRecipe(recipe).then(ok => { if (ok) this._onCraft(); });
+          craftRecipe(recipe.id).then(ok => { if (ok) this._onCraft(); });
         });
       }
       y += 20;

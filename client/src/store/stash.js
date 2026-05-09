@@ -65,19 +65,19 @@ export async function dumpRaiderPackToStash() {
   return _apply(await HubAPI.dumpToStash(_playerId));
 }
 
-/** Spend gold to add 1× item to stash. Returns Promise<bool>. */
-export async function buyItem(id, price) {
-  return _apply(await HubAPI.buy(_playerId, id, price));
+/** Spend gold to add 1× item to stash. Server resolves price. Returns Promise<bool>. */
+export async function buyItem(id) {
+  return _apply(await HubAPI.buy(_playerId, id));
 }
 
-/** Remove 1× item from stash and add price to gold. Returns Promise<bool>. */
-export async function sellItem(id, price) {
-  return _apply(await HubAPI.sell(_playerId, id, price));
+/** Remove 1× item from stash, gain canonical sell value in gold. Returns Promise<bool>. */
+export async function sellItem(id) {
+  return _apply(await HubAPI.sell(_playerId, id));
 }
 
-/** Consume recipe inputs and add output to stash. Returns Promise<bool>. */
-export async function craftRecipe(recipe) {
-  return _apply(await HubAPI.craft(_playerId, recipe));
+/** Consume recipe inputs and add output to stash. Server resolves recipe by id. Returns Promise<bool>. */
+export async function craftRecipe(recipeId) {
+  return _apply(await HubAPI.craft(_playerId, recipeId));
 }
 
 // ── DungeonScene compatibility stubs (replaced in Checkpoint 4) ───────────────

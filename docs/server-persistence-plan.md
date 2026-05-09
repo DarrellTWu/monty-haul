@@ -12,6 +12,14 @@
 >   race condition (#1) and pre-existing anti-cheat hole (#2) plus several robustness
 >   and scalability gaps. See "Phase 2 — Post-Implementation Audit" section below.
 >   These are addressed in Phase 3.
+> - **Phase 3 #1 done (2026-05-09, commit `7888654`):** per-player mutation lock
+>   added to `playerStore.js`. 20 concurrent buys now produce 1 `gear_stash` row
+>   with correct qty (verified by `server/tests/concurrency-smoke.js`).
+> - **Phase 3 #2 done (2026-05-09):** server-authoritative prices and recipes.
+>   `/buy` `/sell` accept `{ itemId }` only; `/craft` accepts `{ recipeId }` only.
+>   Server resolves canonical values from `BUYABLE_PRICES`, `sellPrice()`, and
+>   `RECIPE_REGISTRY`. Verified by `server/tests/anti-cheat-smoke.js` (25 tests)
+>   and manual hub UI validation (buy / sell / craft / refresh).
 > - **Deferred from Phase 2:** `run_history` writes on extract/death (Checkpoints 8/9
 >   currently partial — gear+meta land correctly, no audit row is inserted). Folded
 >   into Phase 3 ordering.
@@ -337,10 +345,35 @@ client can:
 Violates the `CLAUDE.md` rule "Server never trusts client. Clients send inputs
 only; server resolves outcomes."
 
-**Fix plan:** server reads canonical values from `shared/data/values.js`
-(`ITEM_GOLD_VALUE`, `sellPrice`) and `shared/data/crafting/recipes.js`
-(`RECIPE_REGISTRY`). Routes accept item ID / recipe ID only. Test: send
-`price: 0` on `/buy`, assert request rejected and stash unchanged.
+**Fix plan (2026-05-09):**
+
+*Architecture:* lookups live in `playerStore`, not the route. Routes are
+thin pass-throughs; the store owns the rules. One file changes if pricing
+rules ever evolve (per-vendor pricing, dynamic pricing, sales).
+
+*Three gates, three registries:*
+- **Buy gate** = `VENDOR_CATALOG`, not `ITEM_GOLD_VALUE`. The latter
+  includes materials like `wolf_pelt` that are sellable but not buyable.
+  Add `BUYABLE_PRICES = { itemId → price }` to `shared/data/shop.js`,
+  derived once from `VENDOR_CATALOG` at module load.
+- **Sell gate** = `sellPrice(itemId)`. Returns 0 for unknown ids → reject.
+- **Craft gate** = `RECIPE_REGISTRY[recipeId]`. Reject if absent.
+
+*API surface change:* routes accept `{ itemId }` (buy/sell) or
+`{ recipeId }` (craft). The `price` and `recipe` payload fields are
+removed entirely — leaving them as accepted-but-ignored would just
+confuse the next reader. `playerStore` mutations drop their `price` /
+`recipe-object` parameters in lockstep.
+
+*Designer workflow stays the same:* adding a new buyable item still
+means editing `ITEM_GOLD_VALUE` + `VENDOR_CATALOG` (or `RECIPE_REGISTRY`
+for recipes). Server picks up new entries automatically — no separate
+allowlist to maintain.
+
+*Test plan:* `server/tests/anti-cheat-smoke.js` covers exploit attempts
+(unknown item id, material id buy, unknown recipe id) and asserts gold +
+stash are unchanged after rejection. Existing `concurrency-smoke.js`
+updated for the new signature.
 
 ### Robustness Issues
 
@@ -429,14 +462,14 @@ Recommended order based on impact and prerequisites. Items 1–3 should land
 before any real user testing. Items 4–6 should land before public launch.
 Scalability items (#6–#8) are tracked but not on the critical path.
 
-| Order | Item                                                       | Severity | Effort   |
-|-------|------------------------------------------------------------|----------|----------|
-| 1     | Per-player mutation lock (#1)                              | HIGH     | half day |
-| 2     | Server-authoritative prices and recipes (#2)               | HIGH     | half day |
-| 3     | `run_history` writes — formally close Checkpoints 8/9      | LOW      | half day |
-| 4     | Retry/backoff around Supabase calls (#5)                   | MEDIUM   | half day |
-| 5     | Atomic transaction for sync (#3)                           | MEDIUM   | 1 day    |
-| 6     | Resilient commit hooks for extract/death (#4)              | MEDIUM   | half day |
+| Order | Item                                                       | Severity | Effort   | Status            |
+|-------|------------------------------------------------------------|----------|----------|-------------------|
+| 1     | Per-player mutation lock (#1)                              | HIGH     | half day | DONE `7888654`    |
+| 2     | Server-authoritative prices and recipes (#2)               | HIGH     | half day | DONE              |
+| 3     | `run_history` writes — formally close Checkpoints 8/9      | LOW      | half day | pending           |
+| 4     | Retry/backoff around Supabase calls (#5)                   | MEDIUM   | half day | pending           |
+| 5     | Atomic transaction for sync (#3)                           | MEDIUM   | 1 day    | pending           |
+| 6     | Resilient commit hooks for extract/death (#4)              | MEDIUM   | half day | pending           |
 
 ---
 

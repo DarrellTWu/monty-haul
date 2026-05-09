@@ -33,3 +33,13 @@ export const VENDOR_CATALOG = {
   potions: withPrice(POTION_IDS),
   armor:   withPrice(ARMOR_IDS),
 };
+
+// Flat lookup the server uses to gate /buy. Membership = "buyable from a
+// vendor"; the value is the canonical price. Built once at module load by
+// flattening every vendor's entries. New buyable items become available
+// automatically once they're added to a vendor's id list above.
+export const BUYABLE_PRICES = Object.freeze(
+  Object.values(VENDOR_CATALOG)
+    .flat()
+    .reduce((acc, { id, price }) => { acc[id] = price; return acc; }, {}),
+);

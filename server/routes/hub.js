@@ -61,23 +61,24 @@ router.post('/:playerId/raider/dump', asyncRoute(async (req, res) => {
   res.status(result.ok ? 200 : 400).json(result);
 }));
 
-// POST /hub/:playerId/buy  { itemId, price }
+// POST /hub/:playerId/buy  { itemId }
+// Server-authoritative: price comes from BUYABLE_PRICES, never the client.
 router.post('/:playerId/buy', asyncRoute(async (req, res) => {
-  const { itemId, price } = req.body ?? {};
-  const result = await store.buyItem(req.params.playerId, itemId, Number(price));
+  const result = await store.buyItem(req.params.playerId, req.body?.itemId);
   res.status(result.ok ? 200 : 400).json(result);
 }));
 
-// POST /hub/:playerId/sell  { itemId, price }
+// POST /hub/:playerId/sell  { itemId }
+// Server-authoritative: gold credit comes from sellPrice(), never the client.
 router.post('/:playerId/sell', asyncRoute(async (req, res) => {
-  const { itemId, price } = req.body ?? {};
-  const result = await store.sellItem(req.params.playerId, itemId, Number(price));
+  const result = await store.sellItem(req.params.playerId, req.body?.itemId);
   res.status(result.ok ? 200 : 400).json(result);
 }));
 
-// POST /hub/:playerId/craft  { recipe }
+// POST /hub/:playerId/craft  { recipeId }
+// Server-authoritative: recipe inputs/output come from RECIPE_REGISTRY.
 router.post('/:playerId/craft', asyncRoute(async (req, res) => {
-  const result = await store.craftRecipe(req.params.playerId, req.body?.recipe);
+  const result = await store.craftRecipe(req.params.playerId, req.body?.recipeId);
   res.status(result.ok ? 200 : 400).json(result);
 }));
 

@@ -8,6 +8,9 @@
 // All exports are async. Callers must await.
 import { loadPlayer, loadPlayerByUsername } from '../persistence/playerLoad.js';
 import { createProfile, syncStashAndMeta }  from '../persistence/playerSync.js';
+import { BUYABLE_PRICES }                   from '../../shared/data/shop.js';
+import { sellPrice }                        from '../../shared/data/values.js';
+import { RECIPE_REGISTRY }                  from '../../shared/data/crafting/recipes.js';
 
 // Mirrors the seeded stash given to brand-new players on first login.
 const INITIAL_STASH = [
@@ -141,11 +144,15 @@ export async function dumpToStash(playerId) {
   });
 }
 
-export async function buyItem(playerId, itemId, price) {
+// Buy: itemId must be in BUYABLE_PRICES (i.e. listed in a vendor catalog).
+// Price is read from the registry — the client never supplies it.
+export async function buyItem(playerId, itemId) {
   return _withLock(playerId, async () => {
     const p = await getPlayer(playerId);
     if (!p) return { ok: false, error: 'Player not found' };
-    if (p.gold < price) return { ok: false, error: 'Insufficient gold' };
+    const price = BUYABLE_PRICES[itemId];
+    if (price === undefined) return { ok: false, error: 'Item not for sale' };
+    if (p.gold < price)      return { ok: false, error: 'Insufficient gold' };
     p.gold -= price;
     _add(p.stash, itemId);
     await savePlayer(p);
@@ -153,23 +160,30 @@ export async function buyItem(playerId, itemId, price) {
   });
 }
 
-export async function sellItem(playerId, itemId, price) {
+// Sell: any item with a non-zero sellPrice. The client cannot influence the
+// gold credited — sellPrice() is the only source.
+export async function sellItem(playerId, itemId) {
   return _withLock(playerId, async () => {
     const p = await getPlayer(playerId);
     if (!p) return { ok: false, error: 'Player not found' };
+    const credit = sellPrice(itemId);
+    if (credit <= 0) return { ok: false, error: 'Item has no sell value' };
     if (!_remove(p.stash, itemId)) return { ok: false, error: 'Item not in stash' };
     p.stash = _clean(p.stash);
-    p.gold += Math.max(0, Math.floor(Number(price) || 0));
+    p.gold += credit;
     await savePlayer(p);
     return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
   });
 }
 
-export async function craftRecipe(playerId, recipe) {
+// Craft: client sends a recipe id; server resolves inputs/output from the
+// registry. Recipes never come off the wire.
+export async function craftRecipe(playerId, recipeId) {
   return _withLock(playerId, async () => {
     const p = await getPlayer(playerId);
     if (!p) return { ok: false, error: 'Player not found' };
-    if (!recipe?.inputs || !recipe?.output) return { ok: false, error: 'Invalid recipe' };
+    const recipe = RECIPE_REGISTRY[recipeId];
+    if (!recipe) return { ok: false, error: 'Unknown recipe' };
     for (const { id, qty } of recipe.inputs) {
       const entry = p.stash.find(e => e.id === id);
       if (!entry || entry.qty < qty) return { ok: false, error: `Missing input: ${id}` };

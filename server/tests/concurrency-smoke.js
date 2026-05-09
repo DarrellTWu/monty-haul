@@ -32,7 +32,7 @@ function check(label, cond) {
 const TEST_USERNAME = `racetest_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
 const N             = 20;       // concurrent buyItem calls
 const ITEM          = 'healing_potion';
-const PRICE         = 10;
+const PRICE         = 50;       // canonical price from VENDOR_CATALOG; server resolves
 const STARTING_GOLD = 10000;
 let testPlayerId    = null;
 
@@ -74,7 +74,7 @@ async function run() {
   // ── Fire N concurrent buyItems ───────────────────────────────────────────────
   console.log(`\nFiring ${N} concurrent buyItem calls...`);
   const results = await Promise.all(
-    Array.from({ length: N }, () => playerStore.buyItem(testPlayerId, ITEM, PRICE)),
+    Array.from({ length: N }, () => playerStore.buyItem(testPlayerId, ITEM)),
   );
 
   const oks = results.filter(r => r.ok).length;
