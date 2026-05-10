@@ -8,6 +8,7 @@
 // All exports are async. Callers must await.
 import { loadPlayer, loadPlayerByUsername } from '../persistence/playerLoad.js';
 import { createProfile, syncStashAndMeta }  from '../persistence/playerSync.js';
+import { insertRunHistory }                 from '../persistence/runCommit.js';
 import { BUYABLE_PRICES }                   from '../../shared/data/shop.js';
 import { sellPrice }                        from '../../shared/data/values.js';
 import { RECIPE_REGISTRY }                  from '../../shared/data/crafting/recipes.js';
@@ -49,6 +50,13 @@ function _remove(arr, id, qty = 1) {
 
 function _clean(arr) {
   return arr.filter(e => e.qty > 0);
+}
+
+// Flat string[] → [{id, qty}], used for run_history.items_extracted.
+function _aggregateItems(ids) {
+  const acc = [];
+  for (const id of ids) _add(acc, id);
+  return acc;
 }
 
 function _cache(p) {
@@ -200,26 +208,78 @@ export async function craftRecipe(playerId, recipeId) {
 
 // Called by DungeonRoom on successful extraction.
 // survivingItems: flat string[] of item IDs from player.inventory (server ArraySchema).
-export async function commitExtract(playerId, { survivingItems = [], goldEarned = 0 }) {
+// classId / floorsReached / kills / runDurationS feed run_history; if classId is
+// absent (callers from non-dungeon paths, e.g. tests) the row insert is skipped.
+// A run_history insert failure is logged but never invalidates the stash mutation.
+export async function commitExtract(playerId, {
+  survivingItems = [],
+  goldEarned     = 0,
+  classId,
+  floorsReached,
+  kills          = 0,
+  runDurationS,
+} = {}) {
   return _withLock(playerId, async () => {
     const p = await getPlayer(playerId);
     if (!p) return null;
+    const goldDelta = Math.floor(Number(goldEarned) || 0);
     for (const id of survivingItems) _add(p.stash, id);
-    p.gold += Math.floor(Number(goldEarned) || 0);
+    p.gold += goldDelta;
     p.raiderPack = [];
     await savePlayer(p);
+
+    if (classId) {
+      try {
+        await insertRunHistory({
+          playerId,
+          classId,
+          floorsReached,
+          extracted:       true,
+          goldExtracted:   goldDelta,
+          itemsExtracted:  _aggregateItems(survivingItems),
+          kills,
+          runDurationS,
+        });
+      } catch (err) {
+        console.error('[playerStore.commitExtract] run_history insert failed:', err);
+      }
+    }
     return p;
   });
 }
 
 // Called by DungeonRoom on player death or mid-run disconnect.
 // Items brought in are lost; stash and hub gold are untouched.
-export async function commitDeath(playerId) {
+// classId / floorsReached / kills / runDurationS feed run_history; if classId is
+// absent the row insert is skipped (keeps tests that don't supply metadata working).
+export async function commitDeath(playerId, {
+  classId,
+  floorsReached,
+  kills        = 0,
+  runDurationS,
+} = {}) {
   return _withLock(playerId, async () => {
     const p = await getPlayer(playerId);
     if (!p) return null;
     p.raiderPack = [];
     await savePlayer(p);
+
+    if (classId) {
+      try {
+        await insertRunHistory({
+          playerId,
+          classId,
+          floorsReached,
+          extracted:       false,
+          goldExtracted:   0,
+          itemsExtracted:  [],
+          kills,
+          runDurationS,
+        });
+      } catch (err) {
+        console.error('[playerStore.commitDeath] run_history insert failed:', err);
+      }
+    }
     return p;
   });
 }

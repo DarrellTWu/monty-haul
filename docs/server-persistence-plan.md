@@ -20,9 +20,13 @@
 >   Server resolves canonical values from `BUYABLE_PRICES`, `sellPrice()`, and
 >   `RECIPE_REGISTRY`. Verified by `server/tests/anti-cheat-smoke.js` (25 tests)
 >   and manual hub UI validation (buy / sell / craft / refresh).
-> - **Deferred from Phase 2:** `run_history` writes on extract/death (Checkpoints 8/9
->   currently partial — gear+meta land correctly, no audit row is inserted). Folded
->   into Phase 3 ordering.
+> - **Phase 3 #3 done (2026-05-10):** `run_history` writes on extract/death.
+>   Closes Checkpoints 8 and 9. New `server/persistence/runCommit.js`;
+>   `playerStore.commitExtract` / `commitDeath` accept `{ classId, floorsReached,
+>   kills, runDurationS }` and insert one row per run. `DungeonRoom` tracks
+>   `_runStartedAt` and `_maxFloor` per session. `kills` deferred (always 0
+>   for now). Verified by `server/tests/run-history-smoke.js` (19 tests).
+>   Run-history insert failure is logged but never invalidates the stash mutation.
 > - **Pending manual validation:** Checkpoint 10 (multi-client isolation across two
 >   browser sessions / two usernames).
 
@@ -466,7 +470,7 @@ the analysis below re-prioritizes by *what each item unlocks downstream*
 |-------|------------------------------------------------------------|----------|----------|-------------------|
 | 1     | Per-player mutation lock (#1)                              | HIGH     | half day | DONE `7888654`    |
 | 2     | Server-authoritative prices and recipes (#2)               | HIGH     | half day | DONE `ee1dd52`    |
-| 3     | `run_history` writes — formally close Checkpoints 8/9      | LOW      | half day | pending           |
+| 3     | `run_history` writes — formally close Checkpoints 8/9      | LOW      | half day | DONE 2026-05-10   |
 | 4     | Retry/backoff around Supabase calls (#5)                   | MEDIUM   | half day | pending           |
 | 5     | Atomic transaction for sync (#3)                           | MEDIUM   | 1 day    | pending           |
 | 6     | Resilient commit hooks for extract/death (#4)              | MEDIUM   | half day | pending           |

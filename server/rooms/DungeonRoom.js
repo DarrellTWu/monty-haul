@@ -53,6 +53,8 @@ export class DungeonRoom extends Room {
     this._lootRolled      = new Set(); // enemyIds whose loot has been rolled (one-shot on death)
     this._playerIds       = new Map(); // sessionId → playerId (for store commits)
     this._extracted       = new Set(); // sessionIds who successfully extracted (not deaths)
+    this._runStartedAt    = new Map(); // sessionId → ms timestamp at onJoin (for run_history.run_duration_s)
+    this._maxFloor        = new Map(); // sessionId → highest floor seen (for run_history.floors_reached)
     this._bounds          = { minX: WALL, maxX: WALL, minY: WALL, maxY: WALL }; // overwritten by _loadFloor
 
     this._loadFloor(1);
@@ -207,6 +209,8 @@ export class DungeonRoom extends Room {
         p.y  = floor.playerSpawn.y;
         p.vx = 0; p.vy = 0;
         this._longRest(p, sid);
+        const prev = this._maxFloor.get(sid) ?? 1;
+        if (toFloor > prev) this._maxFloor.set(sid, toFloor);
       }
       this.broadcast('combat_log', {
         message: `── Descending to Floor ${toFloor} — long rest taken (HP, rage, Second Wind restored) ──`,
@@ -355,19 +359,25 @@ export class DungeonRoom extends Room {
     }
 
     this.state.players.set(client.sessionId, player);
+    this._runStartedAt.set(client.sessionId, Date.now());
+    this._maxFloor.set(client.sessionId, this.state.floor);
     console.log(`[DungeonRoom] ${client.sessionId} joined as ${classDef.id} — HP ${maxHp} AC ${player.ac} STR ${player.str} DEX ${player.dex} CON ${player.con}`);
   }
 
   onLeave(client) {
     const playerId = this._playerIds.get(client.sessionId);
     if (playerId && !this._extracted.has(client.sessionId)) {
-      commitDeath(playerId).catch(err =>
+      const player = this.state.players.get(client.sessionId);
+      const meta   = this._buildRunMeta(client.sessionId, player);
+      commitDeath(playerId, meta).catch(err =>
         console.error('[DungeonRoom.onLeave] commitDeath failed:', err));
     }
     releaseLocksHeldBy(this.state, client.sessionId);
     this.state.players.delete(client.sessionId);
     this._playerIds.delete(client.sessionId);
     this._extracted.delete(client.sessionId);
+    this._runStartedAt.delete(client.sessionId);
+    this._maxFloor.delete(client.sessionId);
   }
 
   onDispose() {
@@ -674,9 +684,27 @@ export class DungeonRoom extends Room {
         commitExtract(playerId, {
           survivingItems: Array.from(player.inventory),
           goldEarned:     player.gold,
+          ...this._buildRunMeta(sessionId, player),
         }).catch(err => console.error('[DungeonRoom] commitExtract failed:', err));
       }
     }
+  }
+
+  /**
+   * Build the run_history metadata block for a player at the moment of run-end.
+   * `player` may be undefined if onLeave fires after state.players has been
+   * cleared by some other path — in that case classId falls back to 'unknown'
+   * so the row still inserts (the dungeon attempted a run; no class is the
+   * data we have).
+   */
+  _buildRunMeta(sessionId, player) {
+    const startedAt = this._runStartedAt.get(sessionId) ?? Date.now();
+    return {
+      classId:       player?.class || 'unknown',
+      floorsReached: this._maxFloor.get(sessionId) ?? 1,
+      kills:         0, // deferred; see Phase 3 #3 plan
+      runDurationS:  Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
+    };
   }
 
   _activateRage(player, sessionId) {
