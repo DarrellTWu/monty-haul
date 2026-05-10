@@ -9,6 +9,7 @@
 import { loadPlayer, loadPlayerByUsername } from '../persistence/playerLoad.js';
 import { createProfile, syncStashAndMeta }  from '../persistence/playerSync.js';
 import { insertRunHistory }                 from '../persistence/runCommit.js';
+import { appendDeadLetter }                 from '../persistence/deadLetter.js';
 import { BUYABLE_PRICES }                   from '../../shared/data/shop.js';
 import { sellPrice }                        from '../../shared/data/values.js';
 import { RECIPE_REGISTRY }                  from '../../shared/data/crafting/recipes.js';
@@ -211,6 +212,11 @@ export async function craftRecipe(playerId, recipeId) {
 // classId / floorsReached / kills / runDurationS feed run_history; if classId is
 // absent (callers from non-dungeon paths, e.g. tests) the row insert is skipped.
 // A run_history insert failure is logged but never invalidates the stash mutation.
+//
+// Resilience (Phase 3 #6): if `savePlayer` throws after withRetry exhausts
+// (i.e. sustained Supabase outage), the payload is appended to the dead-letter
+// log before the error propagates so a server crash before the next mutation
+// doesn't silently lose the run.
 export async function commitExtract(playerId, {
   survivingItems = [],
   goldEarned     = 0,
@@ -226,7 +232,17 @@ export async function commitExtract(playerId, {
     for (const id of survivingItems) _add(p.stash, id);
     p.gold += goldDelta;
     p.raiderPack = [];
-    await savePlayer(p);
+    try {
+      await savePlayer(p);
+    } catch (err) {
+      await _safeAppendDeadLetter({
+        kind:    'extract',
+        playerId,
+        payload: { survivingItems, goldEarned: goldDelta, classId, floorsReached, kills, runDurationS },
+        error:   err?.message ?? String(err),
+      });
+      throw err;
+    }
 
     if (classId) {
       try {
@@ -252,6 +268,8 @@ export async function commitExtract(playerId, {
 // Items brought in are lost; stash and hub gold are untouched.
 // classId / floorsReached / kills / runDurationS feed run_history; if classId is
 // absent the row insert is skipped (keeps tests that don't supply metadata working).
+//
+// Resilience (Phase 3 #6): same dead-letter pattern as commitExtract.
 export async function commitDeath(playerId, {
   classId,
   floorsReached,
@@ -262,7 +280,17 @@ export async function commitDeath(playerId, {
     const p = await getPlayer(playerId);
     if (!p) return null;
     p.raiderPack = [];
-    await savePlayer(p);
+    try {
+      await savePlayer(p);
+    } catch (err) {
+      await _safeAppendDeadLetter({
+        kind:    'death',
+        playerId,
+        payload: { classId, floorsReached, kills, runDurationS },
+        error:   err?.message ?? String(err),
+      });
+      throw err;
+    }
 
     if (classId) {
       try {
@@ -282,4 +310,16 @@ export async function commitDeath(playerId, {
     }
     return p;
   });
+}
+
+// If the dead-letter file itself can't be written (disk full, permissions),
+// don't throw a second error on top of the first — log loudly and continue so
+// the original Supabase error is what surfaces to the caller.
+async function _safeAppendDeadLetter(record) {
+  try {
+    await appendDeadLetter(record);
+  } catch (dlErr) {
+    console.error('[playerStore] CRITICAL: dead-letter write failed:', dlErr,
+                  '\n  original record:', JSON.stringify(record));
+  }
 }

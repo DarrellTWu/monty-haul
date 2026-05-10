@@ -36,6 +36,16 @@
 >   (closed by #5). Default predicate skips errors carrying a 5-digit Postgres
 >   SQLSTATE (semantic errors won't benefit from retry). Verified by
 >   `server/tests/with-retry.test.js` (17 unit tests, no Supabase needed).
+> - **Phase 3 #6 done (2026-05-10):** resilient extract/death commit hooks.
+>   New `server/persistence/deadLetter.js` (append-only JSONL log at
+>   `server/.deadletter.jsonl`, gitignored). `playerStore.commitExtract` and
+>   `commitDeath` wrap `await savePlayer(p)` in try/catch — on persistence
+>   failure after withRetry exhausts, the payload is appended to the dead-letter
+>   log before the error propagates. `DungeonRoom` extract path broadcasts a
+>   "save failed — your run was logged for recovery" combat-log line; death
+>   path logs to console (player already disconnected). Server `index.js` warns
+>   on startup if the dead-letter file is non-empty. Verified by
+>   `server/tests/dead-letter.test.js` (18 unit tests, no Supabase needed).
 > - **Pending manual validation:** Checkpoint 10 (multi-client isolation across two
 >   browser sessions / two usernames).
 
@@ -482,7 +492,7 @@ the analysis below re-prioritizes by *what each item unlocks downstream*
 | 3     | `run_history` writes — formally close Checkpoints 8/9      | LOW      | half day | DONE 2026-05-10   |
 | 4     | Retry/backoff around Supabase calls (#5)                   | MEDIUM   | half day | DONE 2026-05-10   |
 | 5     | Atomic transaction for sync (#3)                           | MEDIUM   | 1 day    | pending           |
-| 6     | Resilient commit hooks for extract/death (#4)              | MEDIUM   | half day | pending           |
+| 6     | Resilient commit hooks for extract/death (#4)              | MEDIUM   | half day | DONE 2026-05-10   |
 
 ### Item-by-item analysis (#3–#6)
 

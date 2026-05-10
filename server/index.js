@@ -4,8 +4,9 @@ const { WebSocketTransport } = createRequire(import.meta.url)('@colyseus/ws-tran
 const express                = createRequire(import.meta.url)('express');
 import { createServer } from 'http';
 
-import { DungeonRoom } from './rooms/DungeonRoom.js';
-import { hubRouter }   from './routes/hub.js';
+import { DungeonRoom }                          from './rooms/DungeonRoom.js';
+import { hubRouter }                            from './routes/hub.js';
+import { deadLetterCount, DEAD_LETTER_PATH }    from './persistence/deadLetter.js';
 
 const PORT = 2567;
 
@@ -19,6 +20,14 @@ const gameServer = new Server({
 });
 gameServer.define('dungeon', DungeonRoom);
 
-gameServer.listen(PORT).then(() => {
+gameServer.listen(PORT).then(async () => {
   console.log(`Colyseus server listening on ws://localhost:${PORT}`);
+  try {
+    const n = await deadLetterCount();
+    if (n > 0) {
+      console.warn(`[startup] ⚠ Dead letter queue has ${n} pending entries — see ${DEAD_LETTER_PATH}`);
+    }
+  } catch (err) {
+    console.error('[startup] dead-letter count check failed:', err);
+  }
 });

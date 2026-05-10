@@ -370,7 +370,9 @@ export class DungeonRoom extends Room {
       const player = this.state.players.get(client.sessionId);
       const meta   = this._buildRunMeta(client.sessionId, player);
       commitDeath(playerId, meta).catch(err =>
-        console.error('[DungeonRoom.onLeave] commitDeath failed:', err));
+        // Failure here is logged to dead-letter queue by playerStore. Player
+        // already disconnected; nobody to message — operator-driven recovery.
+        console.error('[DungeonRoom.onLeave] commitDeath failed (logged to dead-letter):', err));
     }
     releaseLocksHeldBy(this.state, client.sessionId);
     this.state.players.delete(client.sessionId);
@@ -685,7 +687,16 @@ export class DungeonRoom extends Room {
           survivingItems: Array.from(player.inventory),
           goldEarned:     player.gold,
           ...this._buildRunMeta(sessionId, player),
-        }).catch(err => console.error('[DungeonRoom] commitExtract failed:', err));
+        }).catch(err => {
+          // Failure here means Supabase couldn't be reached after withRetry
+          // exhausted. The payload was logged to the dead-letter queue inside
+          // playerStore — surface a warning to the player so they know their
+          // stash may not reflect this run until ops replays the queue.
+          console.error('[DungeonRoom] commitExtract failed:', err);
+          this.broadcast('combat_log', {
+            message: '⚠ Save to server failed — your run was logged for recovery. Tell an admin.',
+          });
+        });
       }
     }
   }
