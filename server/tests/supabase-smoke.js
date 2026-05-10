@@ -125,8 +125,52 @@ async function run() {
   check('  stash is empty array',                         Array.isArray(r4.stash) && r4.stash.length === 0);
   check('  gold = 0',                                     r4.gold === 0);
 
-  // ── Phase 6: negative cases ──────────────────────────────────────────────────
-  console.log('\nPhase 6: loaders return null for unknown ids');
+  // ── Phase 6: convergence — UPSERT + DELETE-NOT-IN replaces full stash ───────
+  // Phase 3 #5 changed sync from DELETE-all + INSERT-all to UPSERT-changed +
+  // DELETE-NOT-IN. Verify a fully-different set of items lands cleanly:
+  // existing items are removed, new items are added, no duplicate rows.
+  console.log('\nPhase 6: convergence on full stash replacement');
+  await syncStashAndMeta({
+    playerId:   testPlayerId,
+    stash:      [{ id: 'greatsword', qty: 1 }, { id: 'shield', qty: 1 }],
+    gold:       50,
+    raiderPack: [],
+  });
+  const r5 = await loadPlayer(testPlayerId);
+  const m5 = stashMap(r5);
+  check('  stash now has 2 items',                        Object.keys(m5).length === 2);
+  check('  greatsword qty 1',                             m5.greatsword === 1);
+  check('  shield qty 1',                                 m5.shield === 1);
+  check('  no leftover from prior stash',                 !m5.healing_potion && !m5.longsword);
+
+  // Now mutate again: keep one, modify one, add one, drop one.
+  await syncStashAndMeta({
+    playerId:   testPlayerId,
+    stash:      [
+      { id: 'greatsword',     qty: 2 },         // qty change
+      { id: 'healing_potion', qty: 4 },         // re-added
+      // shield dropped
+    ],
+    gold:       60,
+    raiderPack: [],
+  });
+  const r6 = await loadPlayer(testPlayerId);
+  const m6 = stashMap(r6);
+  check('  stash now has 2 items (post-mutation)',        Object.keys(m6).length === 2);
+  check('  greatsword qty bumped to 2',                   m6.greatsword === 2);
+  check('  healing_potion re-added at qty 4',             m6.healing_potion === 4);
+  check('  shield removed',                               !m6.shield);
+
+  // Direct DB check: confirm gear_stash has exactly 2 rows for this player
+  // (no duplicates from the convergence path).
+  const { data: rawRows, error: rawErr } = await supabase
+    .from('gear_stash')
+    .select('item_id')
+    .eq('player_id', testPlayerId);
+  check('  raw query: 2 rows in gear_stash',              !rawErr && rawRows?.length === 2);
+
+  // ── Phase 7: negative cases ──────────────────────────────────────────────────
+  console.log('\nPhase 7: loaders return null for unknown ids');
   const missingById   = await loadPlayer('00000000-0000-0000-0000-000000000000');
   const missingByName = await loadPlayerByUsername('__no_such_user_42__');
   check('loadPlayer(unknown UUID) returns null',          missingById === null);

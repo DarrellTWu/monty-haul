@@ -4,21 +4,20 @@
 //   - gear_stash: one row per (player_id, item_id). Snapshot-replaced on every sync.
 //   - meta_progression: one row per player_id (PK). Upserted on every sync.
 //
-// Snapshot-replace is wasteful at scale but trivial to reason about and zero-risk
-// for the row counts we expect (~10–30 stash items per player). Optimize later if
-// needed.
+// Sync model (Phase 3 #5):
+//   gear_stash has UNIQUE (player_id, item_id). syncStashAndMeta UPSERTs every
+//   row in the player's current stash, then DELETEs rows for this player whose
+//   item_id is no longer present. UPSERT-first ordering is deliberate — a
+//   crash between UPSERT and DELETE leaves the DB with extra leftover rows
+//   (visible to the player) but never with missing items. The reverse ordering
+//   could lose items on crash.
 //
-// Retry policy (Phase 3 #4):
-//   - DELETE-by-player_id and UPSERT-by-PK are idempotent and wrapped in
-//     `withRetry`.
-//   - The INSERT-after-DELETE step in `syncStashAndMeta` is INTENTIONALLY left
-//     un-retried. Without `UNIQUE(player_id, item_id)` a post-commit network
-//     blip plus retry would produce duplicate rows. Phase 3 #5 closes that gap
-//     by adding the UNIQUE and switching to UPSERT-changed + DELETE-NOT-IN; at
-//     that point the wrapper can be applied here too.
-//   - `createProfile`'s three INSERTs are similarly un-retried (one-shot user
-//     creation; UNIQUE on username self-protects but mid-sequence retry is
-//     gnarly). User retries login on failure.
+// Retry policy:
+//   - All three ops in syncStashAndMeta (UPSERT stash, DELETE-NOT-IN, UPSERT
+//     meta) are idempotent and wrapped in withRetry.
+//   - createProfile's three INSERTs are un-retried (one-shot user creation;
+//     UNIQUE on username self-protects but mid-sequence retry is gnarly).
+//     User retries login on failure.
 import { supabase }   from './supabase.js';
 import { withRetry }  from './withRetry.js';
 
@@ -70,38 +69,64 @@ export async function createProfile(username, initialStash = []) {
 }
 
 // Persist the player's current stash + gold + raiderPack to Supabase.
-// Snapshot-replaces gear_stash rows (delete-all + insert-positive-qty),
-// upserts meta_progression by PK.
+// gear_stash: UPSERT current items by (player_id, item_id), then DELETE rows
+//   for this player whose item_id is no longer in the stash. UPSERT-first so
+//   a crash between ops never deletes items the player still owns.
+// meta_progression: UPSERT by PK.
 export async function syncStashAndMeta(player) {
   const { playerId } = player;
   if (!playerId) throw new Error('syncStashAndMeta: missing playerId');
 
-  // ── gear_stash: delete then insert ─────────────────────────────────────────
-  // DELETE is idempotent → wrap. INSERT is NOT (no UNIQUE constraint yet) →
-  // run bare. See Phase 3 #5 for the planned UPSERT-by-(player_id, item_id) fix.
-  await withRetry(async () => {
-    const { error } = await supabase
-      .from('gear_stash')
-      .delete()
-      .eq('player_id', playerId);
-    if (error) throw error;
-  });
+  const positiveStash = (player.stash ?? []).filter(e => e.qty > 0);
 
-  const stashRows = (player.stash ?? [])
-    .filter(e => e.qty > 0)
-    .map(({ id, qty }) => ({
+  // ── gear_stash: UPSERT current items ───────────────────────────────────────
+  if (positiveStash.length > 0) {
+    const upsertRows = positiveStash.map(({ id, qty }) => ({
       player_id:    playerId,
       item_id:      id,
       quantity:     qty,
       acquired_via: 'sync',
     }));
-  if (stashRows.length > 0) {
-    const { error: insErr } = await supabase.from('gear_stash').insert(stashRows);
-    if (insErr) throw insErr;
+    await withRetry(async () => {
+      // ON CONFLICT (player_id, item_id) DO UPDATE SET quantity = EXCLUDED.quantity.
+      // acquired_via and acquired_at on existing rows stay as their previous
+      // values — they preserve a useful "first acquired" history that this
+      // sync isn't trying to track.
+      const { error } = await supabase
+        .from('gear_stash')
+        .upsert(upsertRows, { onConflict: 'player_id,item_id' });
+      if (error) throw error;
+    });
   }
 
-  // ── meta_progression: upsert by PK ─────────────────────────────────────────
-  // UPSERT-by-PK is idempotent → wrap.
+  // ── gear_stash: DELETE rows whose item_id is not in the new stash ─────────
+  // Empty-stash branch: blanket DELETE for this player. Otherwise: DELETE
+  // where item_id NOT IN (kept ids). Both are idempotent.
+  if (positiveStash.length === 0) {
+    await withRetry(async () => {
+      const { error } = await supabase
+        .from('gear_stash')
+        .delete()
+        .eq('player_id', playerId);
+      if (error) throw error;
+    });
+  } else {
+    // PostgREST IN list expects (a,b,c) for unquoted simple values or
+    // ("a","b","c") for strings. Item ids are clean snake_case ASCII —
+    // double-quoted form is bulletproof.
+    const keptIds = positiveStash.map(e => e.id);
+    const inList  = '(' + keptIds.map(id => `"${id}"`).join(',') + ')';
+    await withRetry(async () => {
+      const { error } = await supabase
+        .from('gear_stash')
+        .delete()
+        .eq('player_id', playerId)
+        .not('item_id', 'in', inList);
+      if (error) throw error;
+    });
+  }
+
+  // ── meta_progression: UPSERT by PK ─────────────────────────────────────────
   await withRetry(async () => {
     const { error } = await supabase
       .from('meta_progression')

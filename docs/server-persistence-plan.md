@@ -46,6 +46,20 @@
 >   path logs to console (player already disconnected). Server `index.js` warns
 >   on startup if the dead-letter file is non-empty. Verified by
 >   `server/tests/dead-letter.test.js` (18 unit tests, no Supabase needed).
+> - **Phase 3 #5 done (2026-05-10):** atomic-safe sync via UPSERT + DELETE-NOT-IN.
+>   New migration `supabase/migrations/002_unique_stash.sql` adds
+>   `UNIQUE (player_id, item_id)` to `gear_stash`. `syncStashAndMeta` rewritten
+>   to UPSERT current items, then DELETE rows whose `item_id` is no longer
+>   present, then UPSERT meta. UPSERT-first ordering: a crash mid-sync leaves
+>   leftover ghost rows (visible to the player) but never wipes items the
+>   player still owns. All three ops idempotent and wrapped in `withRetry` —
+>   the gap left open by #4 (the bare INSERT) is closed. Also addresses audit
+>   issue #8 (snapshot-replace row-op waste). Verified by 9 new convergence
+>   assertions in `supabase-smoke.js` (34 tests total) plus the existing
+>   concurrency-smoke and run-history smokes. Foundation for future
+>   multi-process operation (audit issue #6); per-player lock from #1 still
+>   provides in-process serialization.
+> - **Phase 3 fully complete.** All 6 hardening items shipped.
 > - **Pending manual validation:** Checkpoint 10 (multi-client isolation across two
 >   browser sessions / two usernames).
 
@@ -491,7 +505,7 @@ the analysis below re-prioritizes by *what each item unlocks downstream*
 | 2     | Server-authoritative prices and recipes (#2)               | HIGH     | half day | DONE `ee1dd52`    |
 | 3     | `run_history` writes — formally close Checkpoints 8/9      | LOW      | half day | DONE 2026-05-10   |
 | 4     | Retry/backoff around Supabase calls (#5)                   | MEDIUM   | half day | DONE 2026-05-10   |
-| 5     | Atomic transaction for sync (#3)                           | MEDIUM   | 1 day    | pending           |
+| 5     | Atomic transaction for sync (#3)                           | MEDIUM   | 1 day    | DONE 2026-05-10   |
 | 6     | Resilient commit hooks for extract/death (#4)              | MEDIUM   | half day | DONE 2026-05-10   |
 
 ### Item-by-item analysis (#3–#6)
