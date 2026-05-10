@@ -4,7 +4,11 @@
 //
 // gear_stash holds one row per acquisition (item_id + quantity + acquired_via).
 // We aggregate by item_id on read so the in-memory shape stays flat.
-import { supabase } from './supabase.js';
+//
+// All three SELECTs below are wrapped in `withRetry` (idempotent — safe). A
+// single transient blip no longer surfaces as a 500 to the client.
+import { supabase }   from './supabase.js';
+import { withRetry }  from './withRetry.js';
 
 function _aggregateStash(rows) {
   const acc = new Map();
@@ -17,56 +21,61 @@ function _aggregateStash(rows) {
 }
 
 async function _loadStateForProfile(profile) {
-  const [stashRes, metaRes] = await Promise.all([
-    supabase
-      .from('gear_stash')
-      .select('item_id, quantity')
-      .eq('player_id', profile.id),
-    supabase
-      .from('meta_progression')
-      .select('gold, raider_pack')
-      .eq('player_id', profile.id)
-      .maybeSingle(),
+  const [stashRows, metaRow] = await Promise.all([
+    withRetry(async () => {
+      const { data, error } = await supabase
+        .from('gear_stash')
+        .select('item_id, quantity')
+        .eq('player_id', profile.id);
+      if (error) throw error;
+      return data ?? [];
+    }),
+    withRetry(async () => {
+      const { data, error } = await supabase
+        .from('meta_progression')
+        .select('gold, raider_pack')
+        .eq('player_id', profile.id)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    }),
   ]);
-
-  if (stashRes.error) throw stashRes.error;
-  if (metaRes.error)  throw metaRes.error;
-
-  const stash      = _aggregateStash(stashRes.data ?? []);
-  const gold       = metaRes.data?.gold ?? 0;
-  const raiderPack = metaRes.data?.raider_pack ?? [];
 
   return {
     playerId:   profile.id,
     username:   profile.username,
-    stash,
-    gold,
-    raiderPack,
+    stash:      _aggregateStash(stashRows),
+    gold:       metaRow?.gold ?? 0,
+    raiderPack: metaRow?.raider_pack ?? [],
   };
 }
 
 // Lookup by playerId. Returns null if no profile row.
 export async function loadPlayer(playerId) {
-  const { data: profile, error } = await supabase
-    .from('player_profiles')
-    .select('id, username')
-    .eq('id', playerId)
-    .maybeSingle();
-
-  if (error)   throw error;
+  const profile = await withRetry(async () => {
+    const { data, error } = await supabase
+      .from('player_profiles')
+      .select('id, username')
+      .eq('id', playerId)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  });
   if (!profile) return null;
   return _loadStateForProfile(profile);
 }
 
 // Lookup by username. Returns null if no profile row (caller decides whether to create one).
 export async function loadPlayerByUsername(username) {
-  const { data: profile, error } = await supabase
-    .from('player_profiles')
-    .select('id, username')
-    .eq('username', username)
-    .maybeSingle();
-
-  if (error)   throw error;
+  const profile = await withRetry(async () => {
+    const { data, error } = await supabase
+      .from('player_profiles')
+      .select('id, username')
+      .eq('username', username)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  });
   if (!profile) return null;
   return _loadStateForProfile(profile);
 }

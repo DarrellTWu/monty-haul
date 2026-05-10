@@ -27,6 +27,15 @@
 >   `_runStartedAt` and `_maxFloor` per session. `kills` deferred (always 0
 >   for now). Verified by `server/tests/run-history-smoke.js` (19 tests).
 >   Run-history insert failure is logged but never invalidates the stash mutation.
+> - **Phase 3 #4 done (2026-05-10):** retry/backoff around Supabase calls.
+>   New generic `server/persistence/withRetry.js` (3 attempts, 100/200/400ms
+>   exponential backoff). Wraps idempotent ops only: all SELECTs in
+>   `playerLoad`, plus the DELETE and the meta UPSERT in `syncStashAndMeta`.
+>   The bare INSERT in `syncStashAndMeta` and `runCommit.insertRunHistory` are
+>   intentionally left un-wrapped — non-idempotent without a UNIQUE constraint
+>   (closed by #5). Default predicate skips errors carrying a 5-digit Postgres
+>   SQLSTATE (semantic errors won't benefit from retry). Verified by
+>   `server/tests/with-retry.test.js` (17 unit tests, no Supabase needed).
 > - **Pending manual validation:** Checkpoint 10 (multi-client isolation across two
 >   browser sessions / two usernames).
 
@@ -471,7 +480,7 @@ the analysis below re-prioritizes by *what each item unlocks downstream*
 | 1     | Per-player mutation lock (#1)                              | HIGH     | half day | DONE `7888654`    |
 | 2     | Server-authoritative prices and recipes (#2)               | HIGH     | half day | DONE `ee1dd52`    |
 | 3     | `run_history` writes — formally close Checkpoints 8/9      | LOW      | half day | DONE 2026-05-10   |
-| 4     | Retry/backoff around Supabase calls (#5)                   | MEDIUM   | half day | pending           |
+| 4     | Retry/backoff around Supabase calls (#5)                   | MEDIUM   | half day | DONE 2026-05-10   |
 | 5     | Atomic transaction for sync (#3)                           | MEDIUM   | 1 day    | pending           |
 | 6     | Resilient commit hooks for extract/death (#4)              | MEDIUM   | half day | pending           |
 
