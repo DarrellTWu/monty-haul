@@ -60,6 +60,21 @@
 >   multi-process operation (audit issue #6); per-player lock from #1 still
 >   provides in-process serialization.
 > - **Phase 3 fully complete.** All 6 hardening items shipped.
+>
+> ### Known limitation — late-join depth recording
+> The single-room model lets a second crawler join while a first is already
+> mid-run; the joiner spawns on whatever floor the room is currently on, and
+> their `run_history.floors_reached` is recorded as that floor (not 1). The
+> persistence layer is correct — `_maxFloor` is set at `onJoin` to
+> `state.floor` and bumped on descend, so the value honestly reflects "deepest
+> floor this session touched." But if you later read `run_history` as "depth
+> descended through this run," late-joiners' rows will look like they got
+> further than they did.
+>
+> No action now. The condition disappears once matchmaking lands and rooms are
+> fresh-per-party (every join starts on floor 1). Until then, treat this as a
+> known data-quality nuance for analytics, not a bug. Revisit when designing
+> the matchmaking layer in `server/matchmaking/`.
 > - **Pending manual validation:** Checkpoint 10 (multi-client isolation across two
 >   browser sessions / two usernames).
 
