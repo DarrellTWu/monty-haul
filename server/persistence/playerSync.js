@@ -139,3 +139,27 @@ export async function syncStashAndMeta(player) {
     if (error) throw error;
   });
 }
+
+// UPDATE player_profiles.username for a given playerId.
+// Race-safe via the existing UNIQUE constraint: a concurrent rename to the
+// same name surfaces as Postgres 23505, which we map to a structured failure
+// here so the caller doesn't need to know the DB error code.
+//
+// Wrapped in withRetry — the UPDATE is idempotent. withRetry's default
+// predicate skips errors carrying a 5-digit code, so 23505 isn't retried;
+// transport-level blips are.
+export async function renameUsername(playerId, newUsername) {
+  try {
+    await withRetry(async () => {
+      const { error } = await supabase
+        .from('player_profiles')
+        .update({ username: newUsername })
+        .eq('id', playerId);
+      if (error) throw error;
+    });
+    return { ok: true };
+  } catch (err) {
+    if (err?.code === '23505') return { ok: false, error: 'username_taken' };
+    throw err;
+  }
+}

@@ -32,7 +32,7 @@ router.post('/login', asyncRoute(async (req, res) => {
   const username = req.body?.username?.trim();
   if (!username) return res.status(400).json({ ok: false, error: 'username required' });
   const p = await store.getOrCreate(username);
-  res.json({ ok: true, playerId: p.playerId, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack });
+  res.json({ ok: true, playerId: p.playerId, username: p.username, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack });
 }));
 
 // GET /hub/:playerId
@@ -40,7 +40,7 @@ router.post('/login', asyncRoute(async (req, res) => {
 router.get('/:playerId', asyncRoute(async (req, res) => {
   const p = await store.getPlayer(req.params.playerId);
   if (!p) return res.status(404).json({ ok: false, error: 'Player not found' });
-  res.json({ ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack });
+  res.json({ ok: true, username: p.username, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack });
 }));
 
 // POST /hub/:playerId/raider/add  { itemId }
@@ -79,6 +79,13 @@ router.post('/:playerId/sell', asyncRoute(async (req, res) => {
 // Server-authoritative: recipe inputs/output come from RECIPE_REGISTRY.
 router.post('/:playerId/craft', asyncRoute(async (req, res) => {
   const result = await store.craftRecipe(req.params.playerId, req.body?.recipeId);
+  res.status(result.ok ? 200 : 400).json(result);
+}));
+
+// POST /hub/:playerId/rename  { username }
+// Server validates length + uniqueness. Returns { ok, username? , error? }.
+router.post('/:playerId/rename', asyncRoute(async (req, res) => {
+  const result = await store.renamePlayer(req.params.playerId, req.body?.username);
   res.status(result.ok ? 200 : 400).json(result);
 }));
 

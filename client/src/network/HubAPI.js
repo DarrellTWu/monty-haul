@@ -34,4 +34,8 @@ export const HubAPI = {
   buy:              (playerId, itemId)   => _post(`/${playerId}/buy`,   { itemId }),
   sell:             (playerId, itemId)   => _post(`/${playerId}/sell`,  { itemId }),
   craft:            (playerId, recipeId) => _post(`/${playerId}/craft`, { recipeId }),
+
+  // Returns { ok, username } on success or { ok:false, error } on failure.
+  // Errors: 'username_taken' | 'invalid_username' | 'Player not found'.
+  rename:           (playerId, username) => _post(`/${playerId}/rename`, { username }),
 };

@@ -7,7 +7,7 @@
 //
 // All exports are async. Callers must await.
 import { loadPlayer, loadPlayerByUsername } from '../persistence/playerLoad.js';
-import { createProfile, syncStashAndMeta }  from '../persistence/playerSync.js';
+import { createProfile, syncStashAndMeta, renameUsername }  from '../persistence/playerSync.js';
 import { insertRunHistory }                 from '../persistence/runCommit.js';
 import { appendDeadLetter }                 from '../persistence/deadLetter.js';
 import { BUYABLE_PRICES }                   from '../../shared/data/shop.js';
@@ -202,6 +202,33 @@ export async function craftRecipe(playerId, recipeId) {
     _add(p.stash, recipe.output.id, recipe.output.qty);
     await savePlayer(p);
     return { ok: true, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack };
+  });
+}
+
+// Rename: validates length+non-empty server-side (never trust client), then
+// updates Supabase via renameUsername. On success, evicts the old _byUsername
+// entry and registers the new one so subsequent loadPlayerByUsername lookups
+// route correctly. The UNIQUE constraint on player_profiles.username is the
+// race-safe gate — concurrent renames to the same name surface as
+// { ok: false, error: 'username_taken' }.
+export async function renamePlayer(playerId, newUsername) {
+  const cleaned = String(newUsername ?? '').trim();
+  if (!cleaned)              return { ok: false, error: 'invalid_username' };
+  if (cleaned.length > 20)   return { ok: false, error: 'invalid_username' };
+
+  return _withLock(playerId, async () => {
+    const p = await getPlayer(playerId);
+    if (!p) return { ok: false, error: 'Player not found' };
+    if (p.username === cleaned) return { ok: true, username: cleaned };
+
+    const result = await renameUsername(playerId, cleaned);
+    if (!result.ok) return result;
+
+    if (p.username) _byUsername.delete(p.username);
+    p.username = cleaned;
+    _byUsername.set(cleaned, p.playerId);
+
+    return { ok: true, username: cleaned };
   });
 }
 

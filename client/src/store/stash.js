@@ -8,6 +8,7 @@ import { HubAPI } from '../network/HubAPI.js';
 const PLAYER_ID_KEY = 'mh_player_id';
 
 let _playerId = localStorage.getItem(PLAYER_ID_KEY) ?? null;
+let _username = null;
 let _cache    = { stash: [], gold: 0, raiderPack: [] };
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -16,13 +17,27 @@ let _cache    = { stash: [], gold: 0, raiderPack: [] };
  * Called by HubScene after login or state load.
  * Populates the cache and persists the playerId for the next session.
  */
-export function initFromServer(playerId, { stash, gold, raiderPack }) {
+export function initFromServer(playerId, { username, stash, gold, raiderPack }) {
   _playerId = playerId;
+  _username = username ?? null;
   localStorage.setItem(PLAYER_ID_KEY, playerId);
   _cache = { stash: stash ?? [], gold: gold ?? 0, raiderPack: raiderPack ?? [] };
 }
 
 export function getPlayerId() { return _playerId; }
+export function getUsername() { return _username; }
+
+/**
+ * Clear the client session. The server has no per-session state to tear down —
+ * the playerId in localStorage is the only token. After this returns, HubScene
+ * can route to the login screen via getPlayerId() === null.
+ */
+export function logout() {
+  _playerId = null;
+  _username = null;
+  _cache    = { stash: [], gold: 0, raiderPack: [] };
+  localStorage.removeItem(PLAYER_ID_KEY);
+}
 
 // ── Sync reads (from cache) ───────────────────────────────────────────────────
 
@@ -78,6 +93,17 @@ export async function sellItem(id) {
 /** Consume recipe inputs and add output to stash. Server resolves recipe by id. Returns Promise<bool>. */
 export async function craftRecipe(recipeId) {
   return _apply(await HubAPI.craft(_playerId, recipeId));
+}
+
+/**
+ * Rename the player. Returns the full server result so the UI can distinguish
+ * `username_taken` from `invalid_username` from a network failure (the bool
+ * pattern used elsewhere wouldn't carry that information).
+ */
+export async function renameUser(newUsername) {
+  const result = await HubAPI.rename(_playerId, newUsername);
+  if (result.ok && result.username) _username = result.username;
+  return result;
 }
 
 // ── DungeonScene compatibility stubs (replaced in Checkpoint 4) ───────────────

@@ -5,7 +5,7 @@
 import {
   getStash, getRaiderPack, stashToRaider, raiderToStash, getHubGold,
   buyItem, sellItem, craftRecipe, dumpRaiderPackToStash,
-  initFromServer, getPlayerId,
+  initFromServer, getPlayerId, getUsername, logout, renameUser,
 } from '../store/stash.js';
 import { HubAPI } from '../network/HubAPI.js';
 import { VENDOR_CATALOG } from '../../../shared/data/shop.js';
@@ -130,7 +130,12 @@ export class HubScene extends Phaser.Scene {
     this._craftBench     = 'forge';
     this._leftObjs       = [];
     this._rightObjs      = [];
+    this._topObjs        = [];
     this._loginObjs      = [];
+    this._settingsObjs     = [];
+    this._settingsBodyObjs = [];
+    this._settingsOpen     = false;
+    this._settingsKeyHandler = null;
     this._keyHandler     = null;
 
     const playerId = getPlayerId();
@@ -277,10 +282,322 @@ export class HubScene extends Phaser.Scene {
       fontSize: '15px', color: '#ffcc44', fontFamily: 'monospace',
     }).setOrigin(1, 0);
 
+    this._buildTopBar();
     this._drawShells();
     this._buildSubNav();
     this._showLeftContent();
     this._buildRaiderPanel();
+  }
+
+  // ── Top bar: username + settings icon (persistent across tab switches) ────────
+
+  _buildTopBar() {
+    for (const obj of this._topObjs) obj.destroy();
+    this._topObjs = [];
+
+    const username = getUsername() ?? '';
+    const nameText = this.add.text(30, 38, `▸ ${username}`, {
+      fontSize: '14px', color: '#88ccff', fontFamily: 'monospace',
+    }).setOrigin(0, 0.5).setInteractive();
+    nameText.on('pointerover', () => nameText.setColor('#ffffff'));
+    nameText.on('pointerout',  () => nameText.setColor('#88ccff'));
+    nameText.on('pointerdown', () => this._openSettings());
+    this._topObjs.push(nameText);
+
+    const gearIcon = this.add.text(30 + nameText.width + 10, 38, '⚙', {
+      fontSize: '18px', color: '#88ccff', fontFamily: 'monospace',
+    }).setOrigin(0, 0.5).setInteractive();
+    gearIcon.on('pointerover', () => gearIcon.setColor('#ffffff'));
+    gearIcon.on('pointerout',  () => gearIcon.setColor('#88ccff'));
+    gearIcon.on('pointerdown', () => this._openSettings());
+    this._topObjs.push(gearIcon);
+  }
+
+  // ── Settings panel (modal overlay) ────────────────────────────────────────────
+  //
+  // Two modes: 'menu' (Rename + Log Out as equal options) and 'rename' (input
+  // field + Save/Cancel). The chrome (backdrop, frame, title, "Logged in as",
+  // Close) persists across mode swaps; only the body is re-rendered.
+  _openSettings() {
+    if (this._settingsOpen) return;
+    this._settingsOpen     = true;
+    this._settingsMode     = 'menu';
+    this._renameInput      = '';
+    this._renameSubmitting = false;
+
+    // Full-screen backdrop swallows clicks under the panel and closes on click.
+    const backdrop = this.add.rectangle(0, 0, 1280, 720, 0x000000, 0.45)
+      .setOrigin(0)
+      .setInteractive();
+    backdrop.on('pointerdown', () => this._closeSettings());
+    this._settingsObjs.push(backdrop);
+
+    // Centered panel: 360 × 240 at (640, 360).
+    const PW = 360, PH = 240;
+    const px = 640 - PW / 2, py = 360 - PH / 2;
+    this._settingsGeom = { px, py, PW, PH };
+
+    const panel = this.add.graphics();
+    panel.fillStyle(0x12121e, 0.98);
+    panel.fillRect(px, py, PW, PH);
+    panel.lineStyle(1, 0x334466);
+    panel.strokeRect(px, py, PW, PH);
+    this._settingsObjs.push(panel);
+
+    // Clicks on the panel body should NOT propagate to the backdrop.
+    const panelHit = this.add.rectangle(px, py, PW, PH, 0x000000, 0).setOrigin(0).setInteractive();
+    this._settingsObjs.push(panelHit);
+
+    this._settingsTitleText = this.add.text(px + PW / 2, py + 22, 'SETTINGS', {
+      fontSize: '14px', color: '#aaaacc', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+    this._settingsObjs.push(this._settingsTitleText);
+
+    this._settingsObjs.push(this.add.graphics()
+      .lineStyle(1, 0x223355)
+      .lineBetween(px + 20, py + 42, px + PW - 20, py + 42));
+
+    // "Logged in as" lives in chrome but its text object is tracked so it can
+    // be refreshed when the rename succeeds and we swap back to menu mode.
+    this._loggedInAsText = this.add.text(px + 20, py + 60,
+      `Logged in as: ${getUsername() ?? '(unknown)'}`, {
+      fontSize: '12px', color: '#8899bb', fontFamily: 'monospace',
+    });
+    this._settingsObjs.push(this._loggedInAsText);
+
+    const closeBtn = this.add.text(px + PW - 20, py + PH - 24, '[ × Close ]', {
+      fontSize: '12px', color: '#8888aa', fontFamily: 'monospace',
+    }).setOrigin(1, 0.5).setInteractive();
+    closeBtn.on('pointerover', () => closeBtn.setColor('#ffffff'));
+    closeBtn.on('pointerout',  () => closeBtn.setColor('#8888aa'));
+    closeBtn.on('pointerdown', () => this._closeSettings());
+    this._settingsObjs.push(closeBtn);
+
+    this._renderSettingsBody();
+
+    // Single keydown handler — Escape is mode-aware (rename→menu, menu→close);
+    // edit/submit keys only apply in rename mode.
+    this._settingsKeyHandler = (e) => {
+      if (e.key === 'Escape') {
+        if (this._settingsMode === 'rename') this._switchToMenuMode();
+        else                                  this._closeSettings();
+        return;
+      }
+      if (this._settingsMode !== 'rename' || this._renameSubmitting) return;
+      if (e.key === 'Enter')     { this._submitRename(); return; }
+      if (e.key === 'Backspace') {
+        this._renameInput = this._renameInput.slice(0, -1);
+        this._setRenameStatus('', '#778899');
+        this._refreshRenameInputDisplay();
+        return;
+      }
+      if (e.key.length === 1 && this._renameInput.length < 20) {
+        this._renameInput += e.key;
+        this._setRenameStatus('', '#778899');
+        this._refreshRenameInputDisplay();
+      }
+    };
+    window.addEventListener('keydown', this._settingsKeyHandler);
+  }
+
+  // ── Body renderers (mode-specific) ────────────────────────────────────────────
+
+  _renderSettingsBody() {
+    for (const obj of this._settingsBodyObjs) obj.destroy();
+    this._settingsBodyObjs = [];
+    this._renameInputText  = null;
+    this._renameStatusText = null;
+    this._renameBtn        = null;
+    this._renameCancelBtn  = null;
+
+    if (this._settingsMode === 'rename') this._renderRenameBody();
+    else                                  this._renderMenuBody();
+  }
+
+  _renderMenuBody() {
+    const { px, py } = this._settingsGeom;
+
+    // Debug Mode toggle. Locked to ON for now — the only dungeon we ship today
+    // is the debug/testing build with full loot and all classes unlocked.
+    // When OFF becomes live, entering the dungeon should route through the
+    // intended end-user gameplay path (matchmaking, fresh-party rooms, etc.).
+    this._settingsBodyObjs.push(this.add.text(px + 20, py + 82, 'DEBUG MODE', {
+      fontSize: '12px', color: '#8899bb', fontFamily: 'monospace',
+    }));
+
+    this._settingsBodyObjs.push(this.add.text(px + 130, py + 80, '[ ON ]', {
+      fontSize: '14px', color: '#ffcc44', fontFamily: 'monospace',
+    }));
+
+    this._settingsBodyObjs.push(this.add.text(px + 190, py + 80, '[ OFF ]', {
+      fontSize: '14px', color: '#445566', fontFamily: 'monospace',
+    }));
+
+    this._settingsBodyObjs.push(this.add.text(px + 20, py + 102,
+      'locked — dungeon is tuned for testing', {
+      fontSize: '10px', color: '#556677', fontFamily: 'monospace',
+    }));
+
+    const renameBtn = this.add.text(px + 20, py + 128, '[ Rename ]', {
+      fontSize: '14px', color: '#ffcc44', fontFamily: 'monospace',
+    }).setInteractive();
+    renameBtn.on('pointerover', () => renameBtn.setColor('#ffffff'));
+    renameBtn.on('pointerout',  () => renameBtn.setColor('#ffcc44'));
+    renameBtn.on('pointerdown', () => this._switchToRenameMode());
+    this._settingsBodyObjs.push(renameBtn);
+
+    const logoutBtn = this.add.text(px + 20, py + 158, '[ Log Out ]', {
+      fontSize: '14px', color: '#ffcc44', fontFamily: 'monospace',
+    }).setInteractive();
+    logoutBtn.on('pointerover', () => logoutBtn.setColor('#ffffff'));
+    logoutBtn.on('pointerout',  () => logoutBtn.setColor('#ffcc44'));
+    logoutBtn.on('pointerdown', () => this._doLogout());
+    this._settingsBodyObjs.push(logoutBtn);
+  }
+
+  _renderRenameBody() {
+    const { px, py, PW } = this._settingsGeom;
+
+    this._settingsBodyObjs.push(this.add.text(px + 20, py + 92, 'NEW NAME', {
+      fontSize: '11px', color: '#556677', fontFamily: 'monospace',
+    }));
+
+    // Outlined input box so the field reads as "type here."
+    const inputBox = this.add.graphics();
+    inputBox.lineStyle(1, 0x334466);
+    inputBox.strokeRect(px + 20, py + 106, PW - 40, 24);
+    this._settingsBodyObjs.push(inputBox);
+
+    this._renameInputText = this.add.text(px + 26, py + 110, '', {
+      fontSize: '13px', color: '#ffcc44', fontFamily: 'monospace',
+    });
+    this._settingsBodyObjs.push(this._renameInputText);
+    this._refreshRenameInputDisplay();
+
+    this._renameBtn = this.add.text(px + 20, py + 142, '[ Save ]', {
+      fontSize: '13px', color: '#88ccff', fontFamily: 'monospace',
+    }).setInteractive();
+    this._renameBtn.on('pointerover', () => { if (!this._renameSubmitting) this._renameBtn.setColor('#ffffff'); });
+    this._renameBtn.on('pointerout',  () => { if (!this._renameSubmitting) this._renameBtn.setColor('#88ccff'); });
+    this._renameBtn.on('pointerdown', () => this._submitRename());
+    this._settingsBodyObjs.push(this._renameBtn);
+
+    this._renameCancelBtn = this.add.text(px + 90, py + 142, '[ Cancel ]', {
+      fontSize: '13px', color: '#8888aa', fontFamily: 'monospace',
+    }).setInteractive();
+    this._renameCancelBtn.on('pointerover', () => this._renameCancelBtn.setColor('#ffffff'));
+    this._renameCancelBtn.on('pointerout',  () => this._renameCancelBtn.setColor('#8888aa'));
+    this._renameCancelBtn.on('pointerdown', () => this._switchToMenuMode());
+    this._settingsBodyObjs.push(this._renameCancelBtn);
+
+    this._renameStatusText = this.add.text(px + 180, py + 144, '', {
+      fontSize: '11px', color: '#778899', fontFamily: 'monospace',
+    });
+    this._settingsBodyObjs.push(this._renameStatusText);
+  }
+
+  // ── Mode transitions ──────────────────────────────────────────────────────────
+
+  _switchToRenameMode() {
+    this._settingsMode     = 'rename';
+    this._renameInput      = getUsername() ?? '';
+    this._renameSubmitting = false;
+    this._settingsTitleText?.setText('SETTINGS  ›  RENAME');
+    this._settingsTitleText?.setColor('#ffcc44');
+    this._renderSettingsBody();
+  }
+
+  _switchToMenuMode() {
+    this._settingsMode     = 'menu';
+    this._renameInput      = '';
+    this._renameSubmitting = false;
+    this._settingsTitleText?.setText('SETTINGS');
+    this._settingsTitleText?.setColor('#aaaacc');
+    // Refresh "Logged in as" so a just-completed rename is reflected.
+    this._loggedInAsText?.setText(`Logged in as: ${getUsername() ?? '(unknown)'}`);
+    this._renderSettingsBody();
+  }
+
+  _refreshRenameInputDisplay() {
+    if (!this._renameInputText) return;
+    this._renameInputText.setText(`${this._renameInput}█`);
+  }
+
+  _setRenameStatus(text, color) {
+    if (!this._renameStatusText) return;
+    this._renameStatusText.setText(text);
+    this._renameStatusText.setColor(color);
+  }
+
+  async _submitRename() {
+    if (this._renameSubmitting) return;
+    const trimmed = this._renameInput.trim();
+    if (!trimmed) {
+      this._setRenameStatus('Name cannot be empty', '#cc7766');
+      return;
+    }
+    if (trimmed === getUsername()) {
+      this._setRenameStatus('Already named that', '#aaaa88');
+      return;
+    }
+
+    this._renameSubmitting = true;
+    this._renameBtn?.setColor('#556677');
+    this._setRenameStatus('Renaming…', '#aaaaaa');
+
+    let result;
+    try {
+      result = await renameUser(trimmed);
+    } catch {
+      this._renameSubmitting = false;
+      this._renameBtn?.setColor('#88ccff');
+      this._setRenameStatus('Could not connect', '#cc7766');
+      return;
+    }
+
+    if (result.ok) {
+      this._setRenameStatus('Saved ✓', '#88cc88');
+      this._buildTopBar();
+      // Disable buttons so a stray click during the close delay can't fire.
+      this._renameBtn?.disableInteractive();
+      this._renameCancelBtn?.disableInteractive();
+      this.time.delayedCall(600, () => this._closeSettings());
+      return;
+    }
+
+    this._renameSubmitting = false;
+    this._renameBtn?.setColor('#88ccff');
+    if (result.error === 'username_taken')        this._setRenameStatus('Name already taken', '#cc7766');
+    else if (result.error === 'invalid_username') this._setRenameStatus('Invalid name', '#cc7766');
+    else                                          this._setRenameStatus(result.error ?? 'Failed', '#cc7766');
+  }
+
+  _closeSettings() {
+    if (!this._settingsOpen) return;
+    if (this._settingsKeyHandler) {
+      window.removeEventListener('keydown', this._settingsKeyHandler);
+      this._settingsKeyHandler = null;
+    }
+    for (const obj of this._settingsBodyObjs) obj.destroy();
+    for (const obj of this._settingsObjs)     obj.destroy();
+    this._settingsBodyObjs   = [];
+    this._settingsObjs       = [];
+    this._settingsOpen       = false;
+    this._settingsTitleText  = null;
+    this._loggedInAsText     = null;
+    this._renameInputText    = null;
+    this._renameStatusText = null;
+    this._renameBtn        = null;
+    this._renameCancelBtn  = null;
+    this._renameSubmitting = false;
+  }
+
+  _doLogout() {
+    this._closeSettings();
+    logout();
+    // Pass {} explicitly so any prior init({ view: 'stash' }) from DungeonScene
+    // doesn't leak through scene.restart.
+    this.scene.restart({});
   }
 
   // ── Permanent shell ───────────────────────────────────────────────────────────
