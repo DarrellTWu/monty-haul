@@ -21,6 +21,7 @@ export class EnemyState extends Schema {
     this.lootItems = new ArraySchema();  // item ids available to loot from corpse
     this.looted    = false;              // flips true after a player loots the corpse
     this.lockedBy  = '';                 // sessionId of the player currently looting; '' = free
+    this.elevation = 0;                  // 0 = ground, 1 = elevated; see PlayerState
   }
 }
 
@@ -41,4 +42,5 @@ defineTypes(EnemyState, {
   lootItems: { array: 'string' },
   looted:    'boolean',
   lockedBy:  'string',
+  elevation: 'number',
 });

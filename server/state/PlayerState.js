@@ -39,6 +39,9 @@ export class PlayerState extends Schema {
     this.inventory  = new ArraySchema(); // unequipped item ids
     this.conditions = new ArraySchema(); // active condition ids (e.g. 'bless')
     this.hotbar     = new ArraySchema(); // 10 slots: ability/consumable id or ''
+    // Geometry elevation: 0 = ground, 1 = elevated (on a platform). Schema is
+    // a number to allow future multi-level stacking; only 0/1 used this sprint.
+    this.elevation  = 0;
   }
 }
 
@@ -74,4 +77,5 @@ defineTypes(PlayerState, {
   inventory:  { array: 'string' },
   conditions: { array: 'string' },
   hotbar:     { array: 'string' },
+  elevation:  'number',
 });

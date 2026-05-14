@@ -29,6 +29,33 @@ const HP_BAR_OFFSET_Y = 22;
 
 const WALL = 40; // wall thickness; dimensions come from FLOOR_REGISTRY[state.floor]
 
+// Geometry rendering — placeholder colors until tile art lands.
+// Walls and platforms are visually distinct: walls are dark *obstacles*,
+// platforms are differently-coloured *ground* indicating elevation 1.
+const COLOR_BASE_GROUND     = 0x2a2a3a; // base floor (elevation 0); matches existing room fill
+const COLOR_PLATFORM_GROUND = 0x3a3a4f; // platform top (elevation 1); lighter shade of base
+const COLOR_STEP_INNER      = 0x36364a; // step strip, platform side  — slightly dimmer than platform
+const COLOR_STEP_OUTER      = 0x30303d; // step strip, base side      — slightly lighter than base
+const COLOR_WALL_FILL       = 0x111118; // wall body; matches existing room-border fill
+const COLOR_WALL_BORDER     = 0x4a4a5a; // wall edge highlight
+const COLOR_DOOR_UNLOCKED   = 0x4a4a5a; // open door — a passable gap visible as a band
+const COLOR_DOOR_LOCKED     = 0x111118; // locked door renders identical to a wall
+
+// Render depths (Phaser default = 0).
+//   room background (existing _roomGfx fill): 0
+//   platforms / step zones (drawn into _roomGfx):  0 — same draw call, painted over base
+//   walls (drawn into _roomGfx):                   0 — painted last so they sit on top of platform tint
+//   chests / traps / stairs (existing):            1
+//   ground-level entities (elevation 0):           2
+//   elevated entities (elevation 1):               4
+//   HP bars:                                       entity depth + 1
+const DEPTH_GROUND_ENTITY = 2;
+const DEPTH_ELEVATED_ENTITY = 4;
+
+// Step transition strip — visual size at each step location.
+const STEP_STRIP_WIDTH = 48; // length parallel to the platform edge
+const STEP_STRIP_DEPTH = 24; // perpendicular to the edge (split half/half)
+
 export class DungeonScene extends Phaser.Scene {
   constructor() {
     super({ key: 'DungeonScene' });
@@ -46,6 +73,7 @@ export class DungeonScene extends Phaser.Scene {
     this._chestGfx    = new Map();  // chestId   → { gfx, hint, chestState }
     this._trapGfx     = new Map();  // trapId    → { gfx, warnText, trapState }
     this._stairGfx    = new Map();  // stairId   → { gfx, label, hint, stairState }
+    this._doorGfx     = new Map();  // doorId    → { gfx, doorState }
     this._roomGfx     = null;       // background room rectangle (recreated on floor change)
     this._currentFloor = 0;         // last-rendered floor; drives floor-change detection
     this._input       = null;
@@ -111,6 +139,13 @@ export class DungeonScene extends Phaser.Scene {
       this._destroyStairGfx(id);
     });
 
+    this._room.state.doors.onAdd((door, id) => {
+      this._createDoorGfx(id, door);
+    });
+    this._room.state.doors.onRemove((door, id) => {
+      this._destroyDoorGfx(id);
+    });
+
     // Relay combat log messages to HUDScene; track last entity to hit the player.
     const playerLabel = this._joinOpts.class
       ? this._joinOpts.class[0].toUpperCase() + this._joinOpts.class.slice(1)
@@ -166,6 +201,11 @@ export class DungeonScene extends Phaser.Scene {
       gfx.circle.setPosition(player.x, player.y);
       if (!player.alive) gfx.circle.setFillStyle(DEAD_COLOR);
       this._updateHpBar(gfx.hpBar, player.x, player.y, player.hp, player.maxHp);
+      // Layer above platform tint when elevated, so the player visually sits
+      // "on top of" the platform rather than being absorbed into its colour.
+      const depth = player.elevation === 1 ? DEPTH_ELEVATED_ENTITY : DEPTH_GROUND_ENTITY;
+      gfx.circle.setDepth(depth);
+      gfx.hpBar.setDepth(depth + 1);
       if (sessionId === this._room.sessionId) {
         this.cameras.main.centerOn(player.x, player.y);
       }
@@ -228,6 +268,16 @@ export class DungeonScene extends Phaser.Scene {
         this._updateHpBar(gfx.hpBar, enemy.x, enemy.y, enemy.hp, enemy.maxHp);
         gfx.lootHint.setVisible(false);
       }
+      const depth = enemy.elevation === 1 ? DEPTH_ELEVATED_ENTITY : DEPTH_GROUND_ENTITY;
+      gfx.circle.setDepth(depth);
+      gfx.hpBar.setDepth(depth + 1);
+    }
+
+    // Door visuals — redraw on locked-state change. Currently no runtime
+    // mutation source exists; the per-tick repaint is the wiring for when
+    // lever/key mechanics land. Cheap (4 doors max on floor 2).
+    for (const [, { gfx, doorState }] of this._doorGfx) {
+      this._drawDoorBand(gfx, doorState);
     }
   }
 
@@ -300,23 +350,112 @@ export class DungeonScene extends Phaser.Scene {
       return;
     }
     if (this._roomGfx) this._roomGfx.destroy();
-    this._roomGfx      = this._drawRoom(floor.width, floor.height);
+    this._roomGfx      = this._drawRoom(floor);
     this._currentFloor = floorNumber;
     this.cameras.main.setBounds(0, 0, floor.width, floor.height);
   }
 
-  _drawRoom(width, height) {
+  _drawRoom(floor) {
+    const { width, height } = floor;
     const gfx = this.add.graphics();
-    gfx.fillStyle(0x2a2a3a);
+    // Outer wall band (frames the playable area).
+    gfx.fillStyle(COLOR_BASE_GROUND);
     gfx.fillRect(WALL, WALL, width - WALL * 2, height - WALL * 2);
-    gfx.fillStyle(0x111118);
+    gfx.fillStyle(COLOR_WALL_FILL);
     gfx.fillRect(0, 0, width, WALL);
     gfx.fillRect(0, height - WALL, width, WALL);
     gfx.fillRect(0, 0, WALL, height);
     gfx.fillRect(width - WALL, 0, WALL, height);
     gfx.lineStyle(2, 0x5555aa);
     gfx.strokeRect(WALL, WALL, width - WALL * 2, height - WALL * 2);
+
+    // Platform ground tint (paints OVER the base ground).
+    for (const platform of floor.platforms ?? []) {
+      gfx.fillStyle(COLOR_PLATFORM_GROUND);
+      gfx.fillRect(platform.x, platform.y, platform.w, platform.h);
+      // Step transition strips — colour fades from platform → base across the edge.
+      for (const step of platform.steps ?? []) {
+        this._drawStepStrip(gfx, platform, step);
+      }
+    }
+
+    // Walls — drawn after platforms so they sit on top of any overlapping tint.
+    for (const wall of floor.walls ?? []) {
+      gfx.fillStyle(COLOR_WALL_FILL);
+      gfx.fillRect(wall.x, wall.y, wall.w, wall.h);
+      gfx.lineStyle(1, COLOR_WALL_BORDER);
+      gfx.strokeRect(wall.x, wall.y, wall.w, wall.h);
+    }
+
     return gfx;
+  }
+
+  /**
+   * Paint a step transition strip centered on the step location. Half the
+   * strip sits inside the platform (brighter tint), half outside (dimmer).
+   * Orientation is derived from which platform edge the step is on.
+   */
+  _drawStepStrip(gfx, platform, step) {
+    const onN = step.y === platform.y;
+    const onS = step.y === platform.y + platform.h;
+    const onE = step.x === platform.x + platform.w;
+    const onW = step.x === platform.x;
+
+    const halfStripDepth = STEP_STRIP_DEPTH / 2;
+    const halfStripWidth = STEP_STRIP_WIDTH / 2;
+
+    if (onN) {
+      // Inside platform (below the edge): brighter
+      gfx.fillStyle(COLOR_STEP_INNER);
+      gfx.fillRect(step.x - halfStripWidth, step.y, STEP_STRIP_WIDTH, halfStripDepth);
+      // Outside platform (above the edge): dimmer
+      gfx.fillStyle(COLOR_STEP_OUTER);
+      gfx.fillRect(step.x - halfStripWidth, step.y - halfStripDepth, STEP_STRIP_WIDTH, halfStripDepth);
+    } else if (onS) {
+      // Inside (above edge)
+      gfx.fillStyle(COLOR_STEP_INNER);
+      gfx.fillRect(step.x - halfStripWidth, step.y - halfStripDepth, STEP_STRIP_WIDTH, halfStripDepth);
+      // Outside (below edge)
+      gfx.fillStyle(COLOR_STEP_OUTER);
+      gfx.fillRect(step.x - halfStripWidth, step.y, STEP_STRIP_WIDTH, halfStripDepth);
+    } else if (onE) {
+      // Inside (left of edge)
+      gfx.fillStyle(COLOR_STEP_INNER);
+      gfx.fillRect(step.x - halfStripDepth, step.y - halfStripWidth, halfStripDepth, STEP_STRIP_WIDTH);
+      // Outside (right of edge)
+      gfx.fillStyle(COLOR_STEP_OUTER);
+      gfx.fillRect(step.x, step.y - halfStripWidth, halfStripDepth, STEP_STRIP_WIDTH);
+    } else if (onW) {
+      // Inside (right of edge)
+      gfx.fillStyle(COLOR_STEP_INNER);
+      gfx.fillRect(step.x, step.y - halfStripWidth, halfStripDepth, STEP_STRIP_WIDTH);
+      // Outside (left of edge)
+      gfx.fillStyle(COLOR_STEP_OUTER);
+      gfx.fillRect(step.x - halfStripDepth, step.y - halfStripWidth, halfStripDepth, STEP_STRIP_WIDTH);
+    }
+  }
+
+  _createDoorGfx(id, doorState) {
+    const gfx = this.add.graphics().setDepth(0.5); // above platforms, below entities
+    this._drawDoorBand(gfx, doorState);
+    this._doorGfx.set(id, { gfx, doorState });
+  }
+
+  _drawDoorBand(gfx, doorState) {
+    gfx.clear();
+    const fill = doorState.locked ? COLOR_DOOR_LOCKED : COLOR_DOOR_UNLOCKED;
+    gfx.fillStyle(fill);
+    gfx.fillRect(doorState.x, doorState.y, doorState.w, doorState.h);
+    // Thin border so the door is visible as a distinct band even when unlocked.
+    gfx.lineStyle(1, COLOR_WALL_BORDER);
+    gfx.strokeRect(doorState.x, doorState.y, doorState.w, doorState.h);
+  }
+
+  _destroyDoorGfx(id) {
+    const e = this._doorGfx.get(id);
+    if (!e) return;
+    e.gfx.destroy();
+    this._doorGfx.delete(id);
   }
 
   _createChestGfx(id, chestState) {

@@ -1,6 +1,10 @@
 // shared/data/floors/floor1.js
 // Floor 1 — the original prototype room, now declared as data.
-// Stair to floor 2 sits east of the chest near spawn; locked until
+// Spawn, chest, and stairs sit on a central elevated platform. Players
+// begin elevated; to engage ground-level enemies they must descend via
+// one of four steps (or walk off any edge — see geometry-sprint-plan).
+//
+// Stair to floor 2 sits on the platform, west of spawn; locked until
 // every enemy is dead.
 
 export const FLOOR_1 = {
@@ -25,8 +29,22 @@ export const FLOOR_1 = {
   traps: [{ id: 'trap_floor1_ne', x: 1380, y: 160 }],
   stairs: [{
     id: 'stair_floor1_down',
-    x: 980, y: 600,
+    x: 760, y: 600,           // on the platform, west of spawn; clear of step_w
     toFloor: 2,
     lockedUntilAllEnemiesDead: true,
+  }],
+  walls: [],                  // no walls this floor — the platform edge IS the choke point
+  doors: [],
+  rooms: [],                  // no walled rooms this floor
+  platforms: [{
+    id: 'platform_center',
+    x: 680, y: 480, w: 300, h: 240,     // 300 × 240 px, centered on (800, 600)
+    elevation: 1,
+    steps: [
+      { id: 'step_n', x: 800, y: 480 }, // north edge midpoint
+      { id: 'step_s', x: 800, y: 720 }, // south edge midpoint
+      { id: 'step_e', x: 980, y: 600 }, // east  edge midpoint
+      { id: 'step_w', x: 680, y: 600 }, // west  edge midpoint
+    ],
   }],
 };

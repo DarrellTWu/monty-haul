@@ -85,4 +85,7 @@ export default {
   speed: 100,
 
   detectionRadius: null,
+
+  // Geometry: skeletons can't climb platform perimeters — they must route to a step.
+  canClimb: false,
 };

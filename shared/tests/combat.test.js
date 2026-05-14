@@ -265,6 +265,112 @@ test('Bless on attacker.conditions (not explicit param) is respected', () => {
   assert.equal(result.roll, 15);
 });
 
+// ─── Advantage (high-ground combat rule) ─────────────────────────────────────
+
+test('advantage rolls 2d20 and keeps the higher', () => {
+  // rng yields 5 then 17 → kept die = 17. Hit threshold easy to satisfy.
+  const rng = seq(die(5, 20), die(17, 20), die(4, 8));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 10 }),
+    weapon: longsword,
+    advantage: true,
+    rng,
+  });
+  assert.deepEqual(result.advantageRolls, [5, 17]);
+  assert.equal(result.rawD20, 17, 'kept die should be the higher of [5, 17]');
+  assert.equal(result.hit, true);
+});
+
+test('advantage with both dice equal — keeps that value', () => {
+  const rng = seq(die(12, 20), die(12, 20), die(4, 8));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 10 }),
+    weapon: longsword,
+    advantage: true,
+    rng,
+  });
+  assert.equal(result.rawD20, 12);
+  assert.deepEqual(result.advantageRolls, [12, 12]);
+});
+
+test('advantage + bless: bless 1d4 added on top of kept d20', () => {
+  // Two d20s (4, 14) → kept 14. Plus bless d4 = 3. Plus str(+3) + prof(+2) = 22.
+  const rng = seq(die(4, 20), die(14, 20), die(3, 4), die(4, 8));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 15 }),
+    weapon: longsword,
+    conditions: ['bless'],
+    advantage: true,
+    rng,
+  });
+  assert.deepEqual(result.advantageRolls, [4, 14]);
+  assert.equal(result.rawD20, 14);
+  assert.equal(result.conditionBonus, 3, 'bless added to the kept d20, not consumed by it');
+  assert.equal(result.roll, 22, 'total = d20(14) + str(3) + prof(2) + bless(3)');
+});
+
+test('advantage natural-1: BOTH dice must roll 1', () => {
+  // Both d20s are 1 → kept = 1 → natural-1 auto-miss.
+  const rng = seq(die(1, 20), die(1, 20));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 1 }), // would hit anything > nat 1
+    weapon: longsword,
+    advantage: true,
+    rng,
+  });
+  assert.equal(result.hit, false);
+  assert.equal(result.crit, false);
+  assert.equal(result.rawD20, 1);
+  assert.deepEqual(result.advantageRolls, [1, 1]);
+});
+
+test('advantage natural-1 is escaped if the other die is higher', () => {
+  // d20s = [1, 15]. Kept = 15. Not a natural 1 — the kept die governs.
+  const rng = seq(die(1, 20), die(15, 20), die(4, 8));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 10 }),
+    weapon: longsword,
+    advantage: true,
+    rng,
+  });
+  assert.equal(result.rawD20, 15);
+  assert.equal(result.hit, true);
+});
+
+test('advantage natural-20 fires on the kept die', () => {
+  // d20s = [3, 20] → kept 20 → crit hit.
+  const rng = seq(die(3, 20), die(20, 20), die(4, 8));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 30 }), // unhittable without nat 20
+    weapon: longsword,
+    advantage: true,
+    rng,
+  });
+  assert.equal(result.hit, true);
+  assert.equal(result.crit, true);
+  assert.equal(result.rawD20, 20);
+});
+
+test('advantage omitted (default false) — single d20, behavior unchanged', () => {
+  // Confirm the existing tests' single-d20 flow is unaffected when advantage is false.
+  const rng = seq(die(15, 20), die(4, 8));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 10 }),
+    weapon: longsword,
+    rng,
+  });
+  assert.equal(result.advantageRolls, undefined);
+  assert.equal(result.rawD20, 15);
+  assert.equal(result.hit, true);
+});
+
 // ─── applyDamage tests ────────────────────────────────────────────────────────
 
 console.log('\napplyDamage');

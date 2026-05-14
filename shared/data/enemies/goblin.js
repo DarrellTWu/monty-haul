@@ -87,4 +87,8 @@ export default {
 
   // Override COMBAT_DETECTION_RADIUS; null = use global constant.
   detectionRadius: null,
+
+  // Geometry: can scale platform perimeters without using a step.
+  // Stub for the climbing-skill system; see docs/geometry-sprint-plan.md.
+  canClimb: true,
 };

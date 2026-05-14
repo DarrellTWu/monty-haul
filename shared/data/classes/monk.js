@@ -34,4 +34,8 @@ export const MONK = {
   classFeatures: [],    // no hotbar abilities at level 1; Ki starts at level 2
 
   feat: 'alert',
+
+  // Geometry: monks can scale platform perimeters without using a step.
+  // Stub for the future climbing-skill system; see docs/geometry-sprint-plan.md.
+  canClimb: true,
 };

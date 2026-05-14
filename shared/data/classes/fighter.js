@@ -47,4 +47,7 @@ export const FIGHTER = {
 
   // Proficiency bonus at level 1 is computed by getProficiencyBonus(level)
   // in combat.js — not stored here.
+
+  // Geometry: fighters can't scale platform perimeters — they must use a step.
+  canClimb: false,
 };

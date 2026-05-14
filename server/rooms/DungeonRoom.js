@@ -8,12 +8,14 @@ import { EnemyState }  from '../state/EnemyState.js';
 import { ChestState }  from '../state/ChestState.js';
 import { TrapState }   from '../state/TrapState.js';
 import { StairState }  from '../state/StairState.js';
+import { DoorState }   from '../state/DoorState.js';
 
 import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.js';
 import { GOBLIN, DOG, SKELETON }     from '../../shared/data/enemies/tier1.js';
 import { FLOOR_REGISTRY }            from '../../shared/data/floors/index.js';
 import { getModifier, resolveSave, rollDice } from '../../shared/logic/combat.js';
 import { rollLoot }                  from '../../shared/logic/loot.js';
+import { pointInRect }               from '../../shared/logic/geometry.js';
 import {
   tryOpenContainer, tryCloseContainer, releaseLocksHeldBy, tickContainerLocks,
   tryTakeItem, tryTakeGold, tryDropItem,
@@ -56,6 +58,12 @@ export class DungeonRoom extends Room {
     this._runStartedAt    = new Map(); // sessionId → ms timestamp at onJoin (for run_history.run_duration_s)
     this._maxFloor        = new Map(); // sessionId → highest floor seen (for run_history.floors_reached)
     this._bounds          = { minX: WALL, maxX: WALL, minY: WALL, maxY: WALL }; // overwritten by _loadFloor
+    // Floor geometry — static per floor, populated by _loadFloor.
+    // Walls + platforms aren't synced (no runtime mutation); door lock state
+    // lives on state.doors (synced). Rooms are AI-navigation hints.
+    this._floorWalls      = [];
+    this._floorPlatforms  = [];
+    this._floorRooms      = [];
 
     this._loadFloor(1);
 
@@ -208,6 +216,7 @@ export class DungeonRoom extends Room {
         p.x  = floor.playerSpawn.x;
         p.y  = floor.playerSpawn.y;
         p.vx = 0; p.vy = 0;
+        p.elevation = this._spawnElevation(p.x, p.y);
         this._longRest(p, sid);
         const prev = this._maxFloor.get(sid) ?? 1;
         if (toFloor > prev) this._maxFloor.set(sid, toFloor);
@@ -301,6 +310,7 @@ export class DungeonRoom extends Room {
     const player = new PlayerState();
     player.x     = spawn.x;
     player.y     = spawn.y;
+    player.elevation = this._spawnElevation(spawn.x, spawn.y);
     player.hp    = maxHp;
     player.maxHp = maxHp;
     player.ac    = ac;
@@ -408,6 +418,7 @@ export class DungeonRoom extends Room {
     if (this.state.chests.size  > 0) this.state.chests.clear();
     if (this.state.traps.size   > 0) this.state.traps.clear();
     if (this.state.stairs.size  > 0) this.state.stairs.clear();
+    if (this.state.doors.size   > 0) this.state.doors.clear();
     this._enemyDefs.clear();
     this._lootRolled.clear();
 
@@ -445,6 +456,27 @@ export class DungeonRoom extends Room {
       stair.locked  = !!s.lockedUntilAllEnemiesDead;
       this.state.stairs.set(s.id, stair);
     }
+    for (const d of floor.doors ?? []) {
+      const door = new DoorState();
+      door.id     = d.id;
+      door.x      = d.x;
+      door.y      = d.y;
+      door.w      = d.w;
+      door.h      = d.h;
+      door.locked = !!d.locked;
+      this.state.doors.set(d.id, door);
+    }
+
+    // Stash static geometry refs for MovementSystem / AISystem.
+    this._floorWalls     = floor.walls     ?? [];
+    this._floorPlatforms = floor.platforms ?? [];
+    this._floorRooms     = floor.rooms     ?? [];
+
+    // Seed elevation on every freshly-spawned enemy based on its spawn position
+    // vs the new floor's platforms. Players are seeded by onJoin / descend.
+    for (const [, enemy] of this.state.enemies) {
+      enemy.elevation = this._spawnElevation(enemy.x, enemy.y);
+    }
 
     this.state.floor = n;
     this._bounds.minX = WALL;
@@ -452,7 +484,19 @@ export class DungeonRoom extends Room {
     this._bounds.minY = WALL;
     this._bounds.maxY = floor.height - WALL;
 
-    console.log(`[DungeonRoom] Floor ${n} loaded: ${floor.enemies.length} enemies, ${floor.chests.length} chests, ${floor.traps.length} traps, ${floor.stairs.length} stairs (${floor.width}x${floor.height})`);
+    console.log(`[DungeonRoom] Floor ${n} loaded: ${floor.enemies.length} enemies, ${floor.chests.length} chests, ${floor.traps.length} traps, ${floor.stairs.length} stairs, ${floor.doors?.length ?? 0} doors, ${floor.platforms?.length ?? 0} platforms (${floor.width}x${floor.height})`);
+  }
+
+  /**
+   * Look up the elevation an entity should have when spawned at (x, y) on the
+   * currently-loaded floor. Returns the platform's elevation if the point is
+   * inside any platform rect, otherwise 0.
+   */
+  _spawnElevation(x, y) {
+    for (const p of this._floorPlatforms) {
+      if (pointInRect(x, y, p)) return p.elevation ?? 1;
+    }
+    return 0;
   }
 
   _spawnEnemy(id, def, pos) {
@@ -498,9 +542,16 @@ export class DungeonRoom extends Room {
   // ── Per-tick logic ────────────────────────────────────────────────────────────
 
   _tick(dt) {
-    MovementSystem.update(this.state, dt, this._bounds);
+    MovementSystem.update(this.state, dt, this._bounds, {
+      walls:     this._floorWalls,
+      platforms: this._floorPlatforms,
+    }, this._enemyDefs);
 
-    const aiLogs = AISystem.update(this.state, dt, this._enemyDefs, MELEE_HIT_RANGE_PX);
+    const aiLogs = AISystem.update(this.state, dt, this._enemyDefs, MELEE_HIT_RANGE_PX, {
+      walls:     this._floorWalls,
+      platforms: this._floorPlatforms,
+      rooms:     this._floorRooms,
+    });
     for (const msg of aiLogs) this.broadcast('combat_log', { message: msg });
 
     for (const [sessionId, player] of this.state.players) {

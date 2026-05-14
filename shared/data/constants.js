@@ -37,6 +37,15 @@ export const BASE_SPEED_PX_PER_SEC       = 150; // 30 ft at 5 px/ft
 export const DASH_SPEED_MULTIPLIER       = 2.0; // Speed multiplier while Dashing
 export const LONGSTRIDER_SPEED_BONUS_PX  = 50;  // Longstrider +10 ft at 5 px/ft
 
+// GEOMETRY (walls, doors, platforms, steps)
+export const ENTITY_RADIUS_PX = 16; // Collision radius for players + enemies vs walls/doors/platforms.
+                                     // Half of the visual sprite width — comfortably fits an 80 px door.
+export const STEP_HALF_WIDTH_PX  = 24; // Half-width of the step gap in a platform's perimeter wall.
+                                        // Full gap = 48 px, comfortably wider than an entity diameter (32).
+                                        // Visual step strip width matches: see DungeonScene STEP_STRIP_WIDTH.
+export const PLATFORM_WALL_THICK_PX = 2; // Perimeter wall band thickness. Thin (the platform itself is
+                                          // already a visual cue) but non-zero so AABB push-out has surface.
+
 // EXTRACTION
 export const RITUAL_DURATION_MS = 60000; // 60 seconds to complete an extraction ritual
 export const RITUAL_RADIUS_PX = 120;     // Player must remain within this px of portal

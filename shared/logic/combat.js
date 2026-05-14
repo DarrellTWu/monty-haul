@@ -67,6 +67,11 @@ export function getProficiencyBonus(level) {
  * Natural 20 → automatic hit and critical hit.
  * Otherwise  → compare (d20 + attack bonus + condition modifiers) against target.ac.
  *
+ * With `advantage: true`, two d20s are rolled and the higher is kept. All
+ * subsequent logic (natural 1 / natural 20 / hit threshold) operates on the
+ * kept die. Both rolls are returned in `advantageRolls` so the caller can
+ * surface them in the combat log.
+ *
  * On a hit, weapon damage dice are rolled and flat bonuses added.
  * On a crit, the weapon dice are rolled CRIT_MULTIPLIER times total (e.g. 2× = double dice).
  * Damage bonuses (ability mod, enhancement, damageBonus) are added once regardless of crit.
@@ -77,21 +82,32 @@ export function getProficiencyBonus(level) {
  *   target: import('../types/player.js').Player | import('../types/enemy.js').Enemy,
  *   weapon: import('../types/weapon.js').Weapon | null,
  *   conditions?: string[],
+ *   advantage?: boolean,
  *   rng?: () => number
  * }} params
  *
- * @returns {{ hit: boolean, crit: boolean, damage: number, roll: number }}
- *   hit    — whether the attack connected
- *   crit   — whether it was a natural 20 (only meaningful when hit is true)
- *   damage — raw damage before resistance (0 on a miss)
- *   roll   — total attack roll (d20 + all bonuses); equals raw d20 on a natural 1
+ * @returns {{
+ *   hit: boolean, crit: boolean, damage: number, roll: number,
+ *   rawD20: number, conditionBonus: number,
+ *   advantageRolls?: [number, number]
+ * }}
  */
-export function resolveAttack({ attacker, target, weapon, conditions, rng = Math.random }) {
-  const d20 = rollDice(1, 20, rng);
+export function resolveAttack({ attacker, target, weapon, conditions, advantage = false, rng = Math.random }) {
+  let d20;
+  let advantageRolls;
+  if (advantage) {
+    const a = rollDice(1, 20, rng);
+    const b = rollDice(1, 20, rng);
+    advantageRolls = [a, b];
+    d20 = Math.max(a, b);
+  } else {
+    d20 = rollDice(1, 20, rng);
+  }
 
-  // Natural 1 — automatic miss. Return immediately; don't consume rng for bonuses.
+  // Natural 1 — automatic miss. With advantage, this only fires if BOTH dice
+  // rolled 1 (because we kept the higher). Same rule, applied to the kept die.
   if (d20 === 1) {
-    return { hit: false, crit: false, damage: 0, roll: d20, rawD20: d20, conditionBonus: 0 };
+    return { hit: false, crit: false, damage: 0, roll: d20, rawD20: d20, conditionBonus: 0, advantageRolls };
   }
 
   const isCrit = d20 === 20;
@@ -136,7 +152,7 @@ export function resolveAttack({ attacker, target, weapon, conditions, rng = Math
   const hit = isCrit || totalRoll >= target.ac;
 
   if (!hit) {
-    return { hit: false, crit: false, damage: 0, roll: totalRoll, rawD20: d20, conditionBonus };
+    return { hit: false, crit: false, damage: 0, roll: totalRoll, rawD20: d20, conditionBonus, advantageRolls };
   }
 
   // ── Damage ────────────────────────────────────────────────────────────────
@@ -158,7 +174,7 @@ export function resolveAttack({ attacker, target, weapon, conditions, rng = Math
   // receives the raw value and can distinguish "low roll" from "resisted to 0".
   const damage = (diceDamage + flatBonus) * (isCrit ? CRIT_MULTIPLIER : 1);
 
-  return { hit: true, crit: isCrit, damage, roll: totalRoll, rawD20: d20, conditionBonus };
+  return { hit: true, crit: isCrit, damage, roll: totalRoll, rawD20: d20, conditionBonus, advantageRolls };
 }
 
 // ─── Saving Throws ────────────────────────────────────────────────────────────

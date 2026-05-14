@@ -58,7 +58,10 @@ function applyDueling(weapon, player, fightingStyle) {
  * Shows proficiency and ability mod separately so players can verify the math.
  */
 function rollStr(result, profBonus, abilityMod, abilityKey) {
-  const parts = [`d20:${result.rawD20}`];
+  const dieLabel = result.advantageRolls
+    ? `d20:${result.rawD20} [adv: ${result.advantageRolls[0]}, ${result.advantageRolls[1]}]`
+    : `d20:${result.rawD20}`;
+  const parts = [dieLabel];
   if (profBonus !== 0) parts.push(`${profBonus >= 0 ? '+' : ''}${profBonus}p`);
   if (abilityMod !== 0) parts.push(`${abilityMod >= 0 ? '+' : ''}${abilityMod}${abilityKey}`);
   if (result.conditionBonus) parts.push(`+${result.conditionBonus}bls`);
@@ -110,7 +113,10 @@ export function playerAttack(state, sessionId, enemyDefs = new Map()) {
   const mainAbilMod = isFinesse && dexMod > strMod ? dexMod : strMod;
   const mainAbilKey = isFinesse && dexMod > strMod ? 'dex' : 'str';
 
-  const result = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon });
+  // High-ground advantage: attacker on a platform vs target on the ground rolls 2d20 keep higher.
+  const advantage = player.elevation === 1 && target.state.elevation === 0;
+
+  const result = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon, advantage });
 
   if (result.hit) {
     const applied = applyDamage({
@@ -143,7 +149,7 @@ export function playerAttack(state, sessionId, enemyDefs = new Map()) {
     const offAbilMod   = offIsFinesse && dexMod > strMod ? dexMod : strMod;
     const offAbilKey   = offIsFinesse && dexMod > strMod ? 'dex' : 'str';
 
-    const offResult = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon: offWeapon });
+    const offResult = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon: offWeapon, advantage });
 
     // TWF: remove positive ability mod from damage (SRD rule).
     let offRawDamage = offResult.damage;
@@ -185,7 +191,7 @@ export function playerAttack(state, sessionId, enemyDefs = new Map()) {
     const maAbilMod = dexMod > strMod ? dexMod : strMod;
     const maAbilKey = dexMod > strMod ? 'dex' : 'str';
 
-    const maResult = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon: maWeapon });
+    const maResult = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon: maWeapon, advantage });
 
     if (maResult.hit) {
       const applied = applyDamage({
@@ -225,7 +231,10 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
     conditions:  [],
   };
 
-  const result = resolveAttack({ attacker, target: playerToTarget(targetPlayer), weapon: null });
+  // High-ground advantage: enemy on a platform vs player on the ground.
+  const advantage = enemyState.elevation === 1 && targetPlayer.elevation === 0;
+
+  const result = resolveAttack({ attacker, target: playerToTarget(targetPlayer), weapon: null, advantage });
 
   if (result.hit) {
     const applied = applyDamage({
@@ -253,9 +262,12 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
 
   const tLabel = enemyState.type || 'enemy';
   const pLabel = targetPlayer.class ? targetPlayer.class[0].toUpperCase() + targetPlayer.class.slice(1) : 'Player';
+  const dieLabel = result.advantageRolls
+    ? `d20:${result.rawD20} [adv: ${result.advantageRolls[0]}, ${result.advantageRolls[1]}]`
+    : `d20:${result.rawD20}`;
   const log = result.hit
-    ? `${tLabel} → ${pLabel}: hit (d20:${result.rawD20}+${enemyDef.attackBonus}atk = ${result.roll} vs AC ${targetPlayer.ac}), ${result.damage} ${enemyDef.damageType}`
-    : `${tLabel} → ${pLabel}: miss (d20:${result.rawD20}+${enemyDef.attackBonus}atk = ${result.roll} vs AC ${targetPlayer.ac})`;
+    ? `${tLabel} → ${pLabel}: hit (${dieLabel}+${enemyDef.attackBonus}atk = ${result.roll} vs AC ${targetPlayer.ac}), ${result.damage} ${enemyDef.damageType}`
+    : `${tLabel} → ${pLabel}: miss (${dieLabel}+${enemyDef.attackBonus}atk = ${result.roll} vs AC ${targetPlayer.ac})`;
 
   return { log };
 }

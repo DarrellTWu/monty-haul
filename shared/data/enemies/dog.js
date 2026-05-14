@@ -89,4 +89,7 @@ export default {
   speed: 200,
 
   detectionRadius: null,
+
+  // Geometry: dogs can't climb platform perimeters — they must route to a step.
+  canClimb: false,
 };

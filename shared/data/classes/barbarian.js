@@ -31,4 +31,7 @@ export const BARBARIAN = {
   rageUses: 2, // activations per run; restored on long rest
 
   feat: 'alert',
+
+  // Geometry: barbarians can't scale platform perimeters — they must use a step.
+  canClimb: false,
 };
