@@ -96,6 +96,7 @@ export function circleOverlapsAny(pos, radius, rects) {
  *
  * @returns {boolean}
  */
+// TODO(deferred): line-of-sight / ranged combat — see docs/agent-context/geometry-elevation.md §Known V1 Limitations.
 export function isLineBlocked(_x1, _y1, _x2, _y2, _walls, _doors) {
   return false;
 }

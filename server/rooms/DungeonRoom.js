@@ -643,6 +643,8 @@ export class DungeonRoom extends Room {
     }
   }
 
+  // TODO(deferred): extract to shared/logic/conditions.js — see CLAUDE.md §"Deferred Features".
+  // Timer code is hand-rolled here until the module lands.
   _tickConditions(dt) {
     for (const [sessionId, player] of this.state.players) {
       for (const condition of [...player.conditions]) {
@@ -764,7 +766,8 @@ export class DungeonRoom extends Room {
     return {
       classId:       player?.class || 'unknown',
       floorsReached: this._maxFloor.get(sessionId) ?? 1,
-      kills:         0, // deferred; see Phase 3 #3 plan
+      // TODO(deferred): kill attribution — see docs/agent-context/combat.md §Kill Attribution.
+      kills:         0,
       runDurationS:  Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
     };
   }
