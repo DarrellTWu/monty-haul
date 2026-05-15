@@ -1,3 +1,8 @@
+---
+status: design-only
+updated: 2026-03
+purpose: Crafting & itemization GDD (three-part item model, biomes, recipe acquisition, six benches). Describes intended scope larger than what is built. Use as design context.
+---
 **MONTY HAUL\'S DUNGEON CRAWL**
 
 **Crafting & Itemization Systems**

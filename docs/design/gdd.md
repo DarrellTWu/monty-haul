@@ -1,3 +1,8 @@
+---
+status: design-only
+updated: 2026-03
+purpose: Game design document. Describes intended scope larger than what is built. Use as design context, not binding spec — current implementation in docs/PROJECT_STRUCTURE.md.
+---
 ## MONTY HAUL'S DUNGEON CRAWL
 *Game Design Document | Internal Reference*
 

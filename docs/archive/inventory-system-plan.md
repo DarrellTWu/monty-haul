@@ -1,3 +1,8 @@
+---
+status: archived
+updated: 2026-04
+purpose: Build plan for inventory, hotbar, equipment slots. Shipped. For current behavior see docs/agent-context/inventory-loot.md.
+---
 # Inventory System — Build Plan
 
 ## What We're Building

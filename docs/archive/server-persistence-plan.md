@@ -1,3 +1,8 @@
+---
+status: archived
+updated: 2026-05-10
+purpose: Phase 0–3 server persistence build plan. Shipped. For current behavior see docs/agent-context/persistence.md.
+---
 # Server-Side Persistence Plan
 *Internal Reference | Two-Phase Implementation*
 

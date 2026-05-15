@@ -1,3 +1,8 @@
+---
+status: archived
+updated: 2026-05-10
+purpose: Snapshot of proposed work at the close of Phase 3 hardening. Superseded — do not act on this list without re-checking current state.
+---
 # Proposed Work — 2026-05-10
 *Internal reference. Captured at the close of the Phase 3 hardening session. Treat as input, not commitment.*
 

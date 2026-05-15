@@ -1,3 +1,8 @@
+---
+status: archived
+updated: 2026-04
+purpose: Build plan for floor 2 + Scroll of Extraction. Shipped. For current behavior see docs/agent-context/floors.md.
+---
 # Floor 2 + Extraction Scroll — Build Plan
 
 > **Scope note:** Both floors' contents (enemy counts, chest stock, sub-room layout, scroll placement) are tuned for combat testing and prototype iteration. Nothing here reflects the final design vision — the GDD's biome/cohort/extraction-ritual model supersedes all of this once we get there.

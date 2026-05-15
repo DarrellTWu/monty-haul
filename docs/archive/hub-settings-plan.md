@@ -1,3 +1,8 @@
+---
+status: archived
+updated: 2026-05-11
+purpose: Build plan for hub Settings panel (rename, logout, Debug Mode placeholder). Shipped. For current behavior see docs/agent-context/hub-economy.md §Debug Mode.
+---
 # Hub Settings Panel — Feature Plan
 
 > **Status: Shipped (2026-05-11).** Phase 1 + Phase 2 both implemented and

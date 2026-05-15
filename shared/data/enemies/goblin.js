@@ -89,6 +89,6 @@ export default {
   detectionRadius: null,
 
   // Geometry: can scale platform perimeters without using a step.
-  // Stub for the climbing-skill system; see docs/geometry-sprint-plan.md.
+  // Stub for the climbing-skill system; see docs/agent-context/geometry-elevation.md.
   canClimb: true,
 };

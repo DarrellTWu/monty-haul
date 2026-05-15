@@ -1,3 +1,8 @@
+---
+status: archived
+updated: 2026-05-11
+purpose: Build plan + design rationale for walls, doors, platforms, steps, rooms, elevation, high-ground advantage. Shipped. For current behavior see docs/agent-context/geometry-elevation.md.
+---
 # Dungeon Geometry Sprint Plan
 ## Walls, Doors, and Elevated Platforms
 

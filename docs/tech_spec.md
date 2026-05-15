@@ -1,3 +1,9 @@
+---
+status: shipped
+updated: 2026-05-14
+purpose: High-level architecture and target/planned systems. For actual file layout see PROJECT_STRUCTURE.md; for shipped-feature deep dives see agent-context/.
+---
+
 ## MONTY HAUL'S DUNGEON CRAWL
 ## Technical Architecture & Project Structure
 *v0.4 | Internal Reference | Beta Build Target*
@@ -5,80 +11,12 @@
 ---
 
 # Current Implementation State
-> **Read this before the rest of the spec.** The sections below describe the target architecture. This section describes what actually exists now.
+> Sections below describe the **target** architecture (some planned, some shipped). For what **actually exists today** see [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md); for shipped-feature behavior see [`agent-context/`](agent-context/).
 
-**Active phase:** Server persistence shipped and hardened (last refreshed 2026-05-11). Phase 2 (Supabase backend) and Phase 3 (hardening: per-player mutation lock, server-authoritative pricing, run_history writes, retry/backoff, dead-letter queue, atomic-safe sync via UPSERT + DELETE-NOT-IN) are all complete and verified by 263 passing tests. The phase numbering in this section refers to `docs/server-persistence-plan.md` — it is independent of the broader Phase 0–5 build phases in Section 6 below. The hub (login + stash + shop + crafting scaffold + settings panel: rename, logout, Debug Mode placeholder), floor 1 → floor 2 progression via locked stair, and scroll-only extraction are in place. Cohort branches, procedural floor generation, conditions/AI module extraction, matchmaking, and subclasses are not yet built. Floors are hand-authored data in `shared/data/floors/`.
+**Active phase (as of 2026-05-14):** Server persistence (Phase 0–3) shipped and hardened. Hub (login + stash + shop + crafting scaffold + settings panel) shipped. Floor 1 → Floor 2 progression via locked stair + scroll-only extraction shipped. Geometry sprint (walls, doors, platforms, steps, elevation, high-ground advantage) shipped. 263 tests passing.
 
-## Files That Exist Today
+**Not yet built:** cohort branches, procedural floor generation, conditions/AI module extraction to `shared/logic/`, matchmaking, subclasses, ranged weapons. See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) "Not yet built" sections per package.
 
-**server/**
-- `index.js` — Express app + Colyseus server on the same Node `http.Server` (port 2567). Mounts `hubRouter` at `/hub`, wraps the server in `WebSocketTransport`. On startup, calls `deadLetterCount()` and logs a warning if any unflushed extract/death payloads exist.
-- `rooms/DungeonRoom.js` — session lifecycle, all WebSocket message handling, equip/unequip/loot/hotbar/trap logic; rolls loot on enemy death; handles `open_container`, `close_container`, `take_item`, `take_gold`, `drop_item`, and `descend`. Floors loaded from `FLOOR_REGISTRY` via `_loadFloor(n)` (clears entity MapSchemas — guarded on size>0 to avoid an OPERATION.CLEAR patch poisoning initial state sync — and repopulates). Descend swaps the floor for everyone and applies `_longRest`. Run completion is scroll-only (`extract` consumable type). Tracks per-session `_playerIds`, `_extracted`, `_runStartedAt`, `_maxFloor`; `_buildRunMeta` feeds `commitExtract` and `commitDeath` for `run_history` writes.
-- `routes/hub.js` — Express router at `/hub`. 9 routes: `POST /login`, `GET /:playerId`, `POST /:playerId/raider/add|remove|dump`, `POST /:playerId/buy|sell|craft`, `POST /:playerId/rename`. CORS-enabled for Vite dev. All routes delegate to `playerStore` and accept `{ itemId }` / `{ recipeId }` / `{ username }` only — pricing, recipe internals, and length/uniqueness validation are resolved server-side. `POST /login` and `GET /:playerId` return `username` in the response so the client can display it.
-- `store/playerStore.js` — async write-through cache backed by Supabase. In-memory `Map<playerId, state>` is the fast path; on miss, `loadPlayer` / `loadPlayerByUsername` populate from `gear_stash` + `meta_progression`. Every mutation modifies the cached state then `await`s `syncStashAndMeta`. Per-player mutation lock (`_withLock`) serializes concurrent mutations for the same playerId. Server-authoritative pricing reads `BUYABLE_PRICES`, `sellPrice()`, `RECIPE_REGISTRY` — client-supplied values rejected. `renamePlayer(playerId, newUsername)` validates trim + ≤20 chars server-side, dispatches to `renameUsername`, and on success swaps the old `_byUsername` entry for the new one. Dungeon commit hooks (`commitExtract` / `commitDeath`) wrap `savePlayer` in try/catch; on persistence failure the payload is appended to the dead-letter log via `_safeAppendDeadLetter` before the error propagates.
-- `persistence/supabase.js` — singleton Supabase client init from `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (server-only, bypasses RLS).
-- `persistence/playerLoad.js` — read-side: `loadPlayer(playerId)`, `loadPlayerByUsername(username)`. Aggregates `gear_stash` rows by `item_id`. All SELECTs wrapped in `withRetry`.
-- `persistence/playerSync.js` — write-side: `createProfile(username, initialStash)` (one-shot at user creation, un-retried); `syncStashAndMeta(player)` (UPSERT current items by `(player_id, item_id)`, DELETE rows whose item_id is no longer present, UPSERT meta by PK). UPSERT-first ordering — a crash mid-sync leaves leftover ghost rows but never wipes items the player still owns. All three ops wrapped in `withRetry`. Requires the UNIQUE constraint from `supabase/migrations/002_unique_stash.sql`. `renameUsername(playerId, newUsername)` — UPDATE wrapped in `withRetry`; catches Postgres 23505 from the UNIQUE on `player_profiles.username` and returns `{ ok: false, error: 'username_taken' }` instead of throwing.
-- `persistence/runCommit.js` — `insertRunHistory({...})` writes one row per extract / death to `run_history`. Un-retried (telemetry; losing a row is preferable to duplicating one). Called from `playerStore` inside the per-player lock; failure is logged but never invalidates the stash mutation.
-- `persistence/withRetry.js` — generic 3-attempt 100/200/400ms exponential-backoff HOF. Default predicate skips errors carrying a 5-digit Postgres SQLSTATE.
-- `persistence/deadLetter.js` — append-only JSONL log at `server/.deadletter.jsonl` (gitignored; override path with `MH_DEAD_LETTER_PATH` for tests). Format: `{ kind: 'extract' | 'death', playerId, payload, error, ts }`. Recovery is operator-driven.
-- `systems/CombatSystem.js` — multiplayer wrapper around `shared/logic/combat.js`
-- `systems/MovementSystem.js` — applies velocity to players and enemies each tick
-- `systems/AISystem.js` — enemy state machine (idle → aggro → attack); not yet extracted to `shared/logic/ai.js`
-- `state/` — PlayerState (incl. `gold`, `class`, ability scores, `equippedWeaponId`/`offhandId`/`equippedArmorId`, `inventory`, `hotbar`, condition fields), EnemyState (incl. `lootGold` / `lootItems` / `looted` / `lockedBy`), GameState (incl. `floor` / `stairs`), ChestState (incl. `lockedBy`), TrapState, StairState
-- `tests/` — 11 test files (see Tests below)
-
-**client/src/** (no `rendering/` or `ui/` subdirectories yet)
-- `scenes/HubScene.js` — entry point; checks `localStorage.mh_player_id`, shows username login screen if absent. After login: two-panel layout — left cycles sub-screens (Class, Stash, Shop, Craft); right is Raider Config + Enter Dungeon. Class sub-screen has ability score customization panel (27-point point buy, scores 8–16, non-linear cost). All mutation call sites are async via `HubAPI`; UI uses `.then(ok => { if (ok) handler(); })`. Passes `{ class, abilityScores }` to DungeonScene (no items — server loads raider pack on join). Top bar (persistent across sub-tab switches) shows clickable username + ⚙ that opens a modal settings panel: two modes (menu with `[ Rename ]` / `[ Log Out ]` / Debug Mode placeholder ↔ rename input + Save/Cancel) with a `SETTINGS  ›  RENAME` breadcrumb title. Full-screen backdrop swallows clicks under the panel; Escape is mode-aware (rename→menu, menu→close). Log Out clears the session via `logout()` and `scene.restart({})`.
-- `scenes/DungeonScene.js` — main gameplay: renders server state, wires input; receives `{ class, abilityScores }` via `init(data)` and passes `playerId` (from `stash.getPlayerId()`) to the server on join — server loads the raider pack. On extract/death, server commits stash + gold — no client-side stash mutations on run end. F-key dispatches to chest, corpse, or unlocked stair via `_tryInteractNearby`. Room dimensions + camera bounds redraw via `_applyFloorLayout` on `state.floor` change; per-entity `onRemove` handlers translate server-side CLEAR ops on descend into per-entity gfx destroy.
-- `scenes/HUDScene.js` — overlay: HP, condition rings, cooldown arc, hotbar, combat log
-- `scenes/InventoryScene.js` — equipment slots, bag, hotbar assignment UI; live `GOLD N gp` line; renders crafting materials. Bag stacks duplicate items with `× N` qty (display-only — server inventory stays flat). Loot mode replaces the left column with a loot panel for chests/corpses.
-- `network/ColyseusClient.js` — `joinDungeon(opts)` forwards `{ class, playerId, abilityScores }` to server; loot container protocol + `sendDescend`
-- `network/HubAPI.js` — thin async fetch wrapper for `/hub` routes. Derives base URL from `VITE_COLYSEUS_URL` (replaces `ws` → `http`). Exports: `login`, `getState`, `addToRaider`, `removeFromRaider`, `dumpToStash`, `buy`, `sell`, `craft`, `rename`.
-- `store/stash.js` — server-backed item store. `localStorage` used ONLY to persist `mh_player_id` across sessions. In-memory cache (`_cache = { stash, gold, raiderPack }`) populated by `initFromServer(playerId, state)` on login/load — server wins; module-level `_username` populated alongside. Sync reads: `getStash`, `getRaiderPack`, `getRaiderPackFlat`, `getHubGold`, `getPlayerId`, `getUsername`. Async mutations (call `HubAPI`, update cache, return `Promise<bool>`): `stashToRaider`, `raiderToStash`, `dumpRaiderPackToStash`, `buyItem`, `sellItem`, `craftRecipe`. `renameUser(newUsername)` returns the full server result `{ ok, username?, error? }` so the UI can distinguish `username_taken` / `invalid_username` / network failure. `logout()` clears `_username`, `_playerId`, and `_cache`, then removes `mh_player_id` from localStorage — no server call needed (sessions are stateless between runs). ALL hub-side state mutations route through this file.
-- `input/InputHandler.js` — WASD/attack/hotbar key bindings
-- `main.js` — Phaser config and scene registration; HubScene is first (auto-starts)
-
-**shared/**
-- `data/constants.js`, `data/weapons/melee.js`, `data/armor/armor.js`
-- `data/values.js` — canonical `ITEM_GOLD_VALUE` map and `sellPrice(id)` helper (1/4× value, floor, min 1 gp). Single source of truth.
-- `data/shop.js` — `VENDOR_CATALOG` keyed by vendor (potions, armor); each entry `{ id, price }` computed from `ITEM_GOLD_VALUE`. Also exports `BUYABLE_PRICES` — a flat `{ itemId → price }` map used server-side to gate `/buy`.
-- `data/items/consumables.js` (incl. `extraction_scroll`, type `extract` — run-control), `data/items/shields.js`, `data/items/materials.js`
-- `data/enemies/tier1.js` (goblin, dog, skeleton)
-- `data/floors/floor1.js` + `floor2.js` + `index.js` — `FLOOR_REGISTRY` keyed by floor number. Both floors' contents are tuned for combat testing — not final design.
-- `data/loot/tier1.js` — LOOT_TABLE_REGISTRY keyed by enemy id; drop entries support literal item ids and `@pool_name` references.
-- `data/classes/fighter.js`, `data/classes/barbarian.js`, `data/classes/monk.js`, `data/classes/index.js` — CLASS_REGISTRY pattern.
-- `data/crafting/benches.js` — `BENCH_REGISTRY` of six benches; planned benches render a "coming soon" placeholder.
-- `data/crafting/recipes.js` — `RECIPE_REGISTRY`; `recipesForBench(benchId)` helper. Seeds Tan Hide (Forge) and Bone Brew (Apothecary).
-- `logic/combat.js` — full attack resolution (pure functions)
-- `logic/loot.js` — pure `rollLoot(table, rng?)`; rng-injected for deterministic tests
-- `logic/loot-window.js` — pure container-lock protocol
-- `tests/combat.test.js`, `tests/loot.test.js`
-- `types/player.js`, `types/enemy.js`, `types/weapon.js`
-
-**supabase/migrations/**
-- `001_initial_schema.sql` — `player_profiles`, `gear_stash`, `meta_progression`, `run_history`. Schema is current-state oriented (one row per `(player_id, item_id)` in gear_stash after migration 002).
-- `002_unique_stash.sql` — adds `UNIQUE (player_id, item_id)` to `gear_stash`. Required for the UPSERT pattern in `syncStashAndMeta`.
-
-## Tests (263 total, all passing)
-- `shared/tests/combat.test.js` — 23
-- `shared/tests/loot.test.js` — 33
-- `server/tests/container-lock.test.js` — 21
-- `server/tests/loot-flow.test.js` — 35
-- `server/tests/supabase-smoke.js` — 34 (real dev Supabase: createProfile, sync, loaders, convergence, negative cases)
-- `server/tests/concurrency-smoke.js` — 7 (20 concurrent buys → no duplicate rows)
-- `server/tests/anti-cheat-smoke.js` — 25 (exploit attempts on buy/sell/craft routes)
-- `server/tests/rename-smoke.js` — 31 (real dev Supabase: rename happy path, no-op, collision via UNIQUE, validation edges, boundary at 20 chars, trim, not-found, `_byUsername` cache eviction, re-login persistence)
-- `server/tests/run-history-smoke.js` — 19 (commitExtract / commitDeath row writes)
-- `server/tests/with-retry.test.js` — 17 (pure unit; no Supabase)
-- `server/tests/dead-letter.test.js` — 18 (pure unit; uses `MH_DEAD_LETTER_PATH` to redirect to a temp file)
-
-## Not Yet Built
-`server/matchmaking/`, `client/rendering/`, `client/ui/`, `shared/data/subclasses/`, `shared/data/gear/`, `shared/logic/conditions.js` (condition timer code is still hand-rolled in DungeonRoom), `shared/logic/ai.js` (logic still in `server/systems/AISystem.js`), `shared/logic/floor-generator.js`, ranged weapons, floor generation beyond floors 1–2, cohort/branch maps, kill attribution (`run_history.kills` always 0 — column exists). Crafting scaffold exists (Forge + Apothecary open with one recipe each); Binder / Artificer / Scriptorium / Refinery are placeholder benches awaiting recipes. Production gameplay path (the OFF side of the settings panel's Debug Mode toggle) is not yet wired — `[ OFF ]` is dim and non-interactive; when matchmaking, fresh-party rooms, and production loot tuning land, wire it per CLAUDE.md "Hub Settings: Debug Mode Toggle".
-
-## Known Limitations
-- **Late-join into an in-progress room.** Single-room model lets a second crawler join while a first is mid-run; the joiner spawns on the current floor and their `run_history.floors_reached` reflects that floor (not 1). Internally consistent with "deepest floor touched" semantics; skews analytics that read it as "depth descended through this run." Resolves itself when matchmaking lands. See `docs/server-persistence-plan.md` (Known Limitations).
-- **Username login is trust-on-first-use.** Anyone with a username can become that player. Real auth (Supabase Auth) is in `docs/server-persistence-plan.md` Migration Notes as future work.
 
 ---
 
@@ -766,7 +704,7 @@ Minimal schema for beta. Designed to be extended. All tables have row-level secu
 > *The GDD describes crafting recipes as a meta-progression unlock. For beta, recipe IDs are stored in meta_progression.unlocked_options JSONB alongside subclass and prestige unlocks. If crafting grows into its own economy with material types, recipe trees, and yield tables, extract to dedicated tables: crafting_recipes (recipe definitions) and crafting_materials (player material inventory). This is a post-beta concern — don't build it until the crafting system is designed.*
 # 6. Build Phases
 
-> **Status note (2026-05-10).** The phase table below is the original build-out plan. The project actually evolved through a different sequence: a single-room single-player prototype on Phaser + Vite came first; multiplayer joined that prototype next (Colyseus DungeonRoom, shared room, no cohorts yet); then the server-persistence track began, documented separately in `docs/server-persistence-plan.md` (its own Phase 1 = in-memory store, Phase 2 = Supabase backend, Phase 3 = hardening). Cohort branches, the floor 4 convergence map, and the full 12-player loop described below are not yet built — they remain the long-range target. Treat this table as design intent, not status.
+> **Status note (2026-05-10).** The phase table below is the original build-out plan. The project actually evolved through a different sequence: a single-room single-player prototype on Phaser + Vite came first; multiplayer joined that prototype next (Colyseus DungeonRoom, shared room, no cohorts yet); then the server-persistence track began, documented separately in `docs/archive/server-persistence-plan.md` (its own Phase 1 = in-memory store, Phase 2 = Supabase backend, Phase 3 = hardening). Cohort branches, the floor 4 convergence map, and the full 12-player loop described below are not yet built — they remain the long-range target. Treat this table as design intent, not status.
 
   ----------- --------------------------- -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- -------------------------
   **Phase**   **Scope**                   **Key Deliverable**                                                                                                                                                                                **Multiplayer?**

@@ -36,6 +36,6 @@ export const MONK = {
   feat: 'alert',
 
   // Geometry: monks can scale platform perimeters without using a step.
-  // Stub for the future climbing-skill system; see docs/geometry-sprint-plan.md.
+  // Stub for the future climbing-skill system; see docs/agent-context/geometry-elevation.md.
   canClimb: true,
 };

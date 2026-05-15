@@ -1,3 +1,8 @@
+---
+status: archived
+updated: 2026-04
+purpose: Build plan for ability-score point-buy. Shipped. For current behavior see docs/agent-context/combat.md.
+---
 # Character Creation — Ability Score Assignment
 *Feature Plan | Point Buy System*
 

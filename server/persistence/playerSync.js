@@ -1,6 +1,6 @@
 // Write-side ops for player state in Supabase.
 //
-// Storage model: current-state (see docs/server-persistence-plan.md).
+// Storage model: current-state (see docs/agent-context/persistence.md).
 //   - gear_stash: one row per (player_id, item_id). Snapshot-replaced on every sync.
 //   - meta_progression: one row per player_id (PK). Upserted on every sync.
 //

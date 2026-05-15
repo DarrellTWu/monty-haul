@@ -1,3 +1,8 @@
+---
+status: archived
+updated: 2026-04
+purpose: Build plan for loot tables, gold tracking, corpse looting / container protocol. Shipped. For current behavior see docs/agent-context/inventory-loot.md.
+---
 # Loot System — Build Plan
 
 ## What We're Building
