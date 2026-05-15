@@ -5,7 +5,30 @@ purpose: Architecture + documentation review. Findings only — no code/doc chan
 ---
 # Architecture & Documentation Review — 2026-05-14
 
-Scope: full project walk-through of `C:\projects\monty-haul`. Findings only — no code or doc changes made.
+Scope: full project walk-through of `C:\projects\monty-haul`. Findings only when the review was written — work has since happened against several of these. Inline status markers added 2026-05-14 (same day) after the doc-restructure pass.
+
+## Status legend
+- ✅ **Done** — addressed; verify against current code/docs.
+- 🟡 **Partial** — some aspect addressed; rest pending.
+- ⏳ **Pending** — open. Picked up in a future session.
+- ➖ **No action needed** — finding noted, but no work required.
+
+## Status summary (2026-05-14, end of restructure session)
+
+| § | Finding | Status |
+|---|---|---|
+| 2.1 | `DungeonRoom.js` god object | ⏳ Pending |
+| 2.2 | `HubScene.js` oversized | ⏳ Pending |
+| 2.3 | `DungeonScene.js` rendering extraction | ⏳ Pending |
+| 2.4 | `playerStore.js` well-designed | ➖ No action |
+| 2.5 | Pure logic modules excellent | ➖ No action |
+| 3.1 | Inconsistent async return shapes | ⏳ Pending |
+| 3.2 | Server-side ability score validation gap | ⏳ Pending |
+| 3.3 | Elevation flow implicit | 🟡 Partial — causal chain now documented in `agent-context/geometry-elevation.md`; code unchanged |
+| 3.4 | Deferred features unmarked in code | ✅ Done — `TODO(deferred)` comments added at the 3 sites (kills, `isLineBlocked`, conditions module) |
+| 3.5 | Floor data schema validation missing | ⏳ Pending |
+| 4 | Test coverage gaps (AI, client, integration) | ⏳ Pending |
+| 5 | Documentation review — restructure, archive, frontmatter | ✅ Done — see commits `23c3941`, `2dad7ff` |
 
 ---
 
@@ -28,7 +51,7 @@ File sizes worth flagging up front:
 
 ## 2. Architecture Critique
 
-### 2.1 `DungeonRoom.js` is a god object (HIGH)
+### 2.1 `DungeonRoom.js` is a god object (HIGH) — ⏳ Pending
 Bundles three responsibilities in one 816-line file:
 1. Colyseus lifecycle (onCreate / onJoin / onLeave / onDispose)
 2. ~11 message handlers (move, attack, equip, unequip, open/close/take/drop, descend, hotbar) — ~400 LOC
@@ -38,49 +61,49 @@ Equip/unequip slot logic is duplicated inline rather than living in a `shared/lo
 
 **Suggested split:** `equipment.js` (pure), `descendHandler.js` (server-side), `lootDeath.js`. Reduces `DungeonRoom` to a thin router (~300 LOC).
 
-### 2.2 `HubScene.js` is a UI framework masquerading as a scene (HIGH)
+### 2.2 `HubScene.js` is a UI framework masquerading as a scene (HIGH) — ⏳ Pending
 1200 lines housing: login screen, class panel + 27-pt point-buy UI, stash panel, shop panel, craft panel, raider config panel, settings modal (two modes: menu / rename) with its own keyboard handler. Each sub-panel is a 50–150-LOC private method (`_buildClassPanel`, `_buildStashPanel`, etc.). A single `create()` is unreadable.
 
 **Suggested split:** dedicated `LoginPanel.js`, `ClassPanel.js`, `StashPanel.js`, `ShopPanel.js`, `CraftPanel.js`, `SettingsPanel.js` files. `HubScene` becomes a ~300 LOC orchestrator.
 
-### 2.3 `DungeonScene.js` (MEDIUM)
+### 2.3 `DungeonScene.js` (MEDIUM) — ⏳ Pending
 701 lines is borderline. The lifecycle/sync code is clean. The ~150 LOC of room rendering (`_drawRoom`, `_drawDoorBand`, platform/step/wall painting) should be extracted to a `RoomRenderer.js` so visual-constant changes are isolated from scene logic.
 
-### 2.4 `playerStore.js` is well-designed (no action)
+### 2.4 `playerStore.js` is well-designed (no action) — ➖
 Per-player `_withLock` correctly serializes mutations. Write-through cache pattern is clean. Dead-letter on persistence failure is good defensive design. Minor nit: no lock-contention or wait-time logging.
 
-### 2.5 Pure logic modules are excellent (no action)
+### 2.5 Pure logic modules are excellent (no action) — ➖
 `shared/logic/combat.js`, `geometry.js`, `loot.js`, `loot-window.js` — all framework-free, RNG-injected, well-commented. Tests exercise them directly. This is the layer the rest of the codebase should be modeled after.
 
 ---
 
 ## 3. Cross-Cutting Issues
 
-### 3.1 Inconsistent async return shapes (LOW)
+### 3.1 Inconsistent async return shapes (LOW) — ⏳ Pending
 `renameUser()` returns `{ ok, username?, error? }`; `buyItem()`/`sellItem()`/`craftRecipe()` return plain booleans. UI can't show specific error messaging for buy/sell/craft failures. Normalize to `{ ok, error? }` everywhere — single mapping layer in `HubAPI.js`.
 
-### 3.2 Ability score validation duplicated, server-side incomplete (MEDIUM)
+### 3.2 Ability score validation duplicated, server-side incomplete (MEDIUM) — ⏳ Pending
 - HubScene: point-buy UI enforces 27 budget + 8–16 range.
 - DungeonRoom `_validateAbilityScores`: only checks the keys exist; does **not** enforce the budget or range.
 
 A crafted client could send `{ str: 20, ... }` and have it accepted. Move to `shared/logic/character.js` `validateAbilityScores(scores)`, import in both places. This is the one spot I found where the "server never trusts client" rule is materially weak.
 
-### 3.3 Elevation flow is implicit (LOW)
+### 3.3 Elevation flow is implicit (LOW) — 🟡 Partial
 Elevation is set in 4 places (DungeonRoom `_spawnElevation`, MovementSystem `tryAutoClimb`, DungeonScene render depth, data flags `canClimb`). The causal chain isn't centrally documented. CLAUDE.md describes the *what* but not the *flow*.
 
-### 3.4 Deferred features are unmarked (LOW)
-- Kills attribution: always 0, no `TODO`.
-- `isLineBlocked` in geometry.js: stub returning false, no `TODO`.
-- `shared/data/conditions.js`: referenced in CLAUDE.md as planned, doesn't exist; condition timers hand-rolled in DungeonRoom.
+**Update (2026-05-14):** Causal chain now documented in `docs/agent-context/geometry-elevation.md` §"Elevation Flow" (5-step sequence: seeding → mutation → gating → visual → combat). Code itself unchanged — the 4 places are still scattered. Code-level consolidation (e.g. a single `ElevationManager` or pure helper in `shared/logic/`) remains pending.
 
-Add explicit `// TODO` markers — agents reading the code can't currently tell stubbed-future-feature from finished code.
+### 3.4 Deferred features are unmarked (LOW) — ✅ Done (2026-05-14, commit `c785654`)
+- ~~Kills attribution: always 0, no `TODO`.~~ → `TODO(deferred)` added in `DungeonRoom._buildRunMeta` pointing at `agent-context/combat.md` §Kill Attribution.
+- ~~`isLineBlocked` in geometry.js: stub returning false, no `TODO`.~~ → `TODO(deferred)` added in `shared/logic/geometry.js` pointing at `agent-context/geometry-elevation.md` §Known V1 Limitations.
+- ~~`shared/data/conditions.js`: referenced in CLAUDE.md as planned, doesn't exist; condition timers hand-rolled in DungeonRoom.~~ → `TODO(deferred)` added on `DungeonRoom._tickConditions` pointing at `CLAUDE.md` §Deferred Features. (Module name in this finding was a typo — should have been `shared/logic/conditions.js`. Correct path used in the actual TODO.)
 
-### 3.5 Floor data has no schema validation (LOW)
+### 3.5 Floor data has no schema validation (LOW) — ⏳ Pending
 `_loadFloor` assumes `floor.enemies`, `floor.platforms`, etc. all exist. A malformed floor file crashes at iteration. A `validateFloorData()` at server startup would catch authoring errors early.
 
 ---
 
-## 4. Test Coverage
+## 4. Test Coverage — ⏳ Pending (gaps unchanged)
 
 | Layer | Tests | Verdict |
 |---|---|---|
@@ -95,7 +118,10 @@ Phaser UI testing is awkward but the critical flows (login → class select → 
 
 ---
 
-## 5. Documentation Review
+## 5. Documentation Review — ✅ Done (2026-05-14, commits `23c3941` + `2dad7ff`)
+
+> **Post-restructure note.** All sub-findings below were addressed by the doc restructure. Kept here for the audit trail. New layout: `docs/README.md` (manifest), `docs/PROJECT_STRUCTURE.md` (canonical file layout), `docs/agent-context/*.md` (7 topical deep-dives loaded on demand), `docs/archive/*.md` (completed sprint plans), `docs/design/*.md` (GDDs marked design-only). CLAUDE.md trimmed from 254 → 165 LOC. Every doc carries `status`/`updated`/`purpose` frontmatter.
+
 
 ### 5.1 `docs/` inventory
 
@@ -153,39 +179,54 @@ Rough estimate: a restructured CLAUDE.md could drop to ~150 LOC (~4500 tokens) w
 ## 6. Prioritized Recommendations
 
 **High (do before next major feature)**
-1. Extract equip/unequip + descend handlers out of `DungeonRoom` into shared/server modules.
-2. Split `HubScene` into per-panel modules.
-3. Add server-side ability-score validation (budget + range) in `shared/logic/character.js`.
+1. ⏳ Extract equip/unequip + descend handlers out of `DungeonRoom` into shared/server modules.
+2. ⏳ Split `HubScene` into per-panel modules.
+3. ⏳ Add server-side ability-score validation (budget + range) in `shared/logic/character.js`.
 
 **Medium**
-4. Extract `RoomRenderer` from `DungeonScene`.
-5. Normalize client mutation return shape to `{ ok, error? }`.
-6. Consolidate `tech_spec.md` "Files That Exist Today" with CLAUDE.md "Current File Structure" into a single `PROJECT_STRUCTURE.md`; both reference it.
-7. Move completed sprint plans to `docs/archive/`; add `Status:` header to each plan doc.
-8. Mark deferred features with explicit `TODO` comments at the code site (kills, `isLineBlocked`, conditions module).
+4. ⏳ Extract `RoomRenderer` from `DungeonScene`.
+5. ⏳ Normalize client mutation return shape to `{ ok, error? }`.
+6. ✅ Consolidate `tech_spec.md` "Files That Exist Today" with CLAUDE.md "Current File Structure" into a single `PROJECT_STRUCTURE.md`; both reference it. *(commit `23c3941`)*
+7. ✅ Move completed sprint plans to `docs/archive/`; add `Status:` header to each plan doc. *(commit `23c3941`)*
+8. ✅ Mark deferred features with explicit `TODO` comments at the code site (kills, `isLineBlocked`, conditions module). *(commit `c785654`)*
 
 **Low**
-9. Trim CLAUDE.md to a ~150-LOC core + topical reference docs in `docs/agent-context/`.
-10. Add floor data schema validation at server startup.
-11. Add a minimal client test harness for HubScene flows + AISystem unit tests for elevation/room routing.
-12. Add timestamps + `Status:` header to all docs.
+9. ✅ Trim CLAUDE.md to a ~150-LOC core + topical reference docs in `docs/agent-context/`. *(commit `23c3941`; landed at 165 LOC — moderate trim per design decision in same session)*
+10. ⏳ Add floor data schema validation at server startup.
+11. ⏳ Add a minimal client test harness for HubScene flows + AISystem unit tests for elevation/room routing.
+12. ✅ Add timestamps + `Status:` header to all docs. *(commit `23c3941`)*
+
+## Pending pickup for future session
+
+| # | Item | Severity |
+|---|---|---|
+| 1 | Extract equip/unequip + descend handlers from `DungeonRoom.js` | HIGH |
+| 2 | Split `HubScene.js` into per-panel modules | HIGH |
+| 3 | Server-side ability-score validation in `shared/logic/character.js` | MEDIUM |
+| 4 | Extract `RoomRenderer` from `DungeonScene.js` | MEDIUM |
+| 5 | Normalize client mutation return shape to `{ ok, error? }` | LOW |
+| 10 | Floor data schema validation at server startup | LOW |
+| 11 | Client test harness (HubScene flows) + AISystem unit tests | LOW |
+| 3.3 | Code-level consolidation of the elevation flow (4 scattered call sites) | LOW |
 
 ---
 
-## 7. Summary Scorecard
+## 7. Summary Scorecard (updated 2026-05-14)
 
-| Area | Status |
-|---|---|
-| Shared logic + data | Excellent |
-| Persistence layer (playerStore, withRetry, dead-letter) | Excellent |
-| Test coverage (shared + server) | Good |
-| `DungeonRoom.js` | **God object — needs split** |
-| `HubScene.js` | **Oversized — needs split** |
-| `DungeonScene.js` | Borderline; geometry rendering extractable |
-| Client mutation API consistency | Inconsistent |
-| Server-side ability score validation | **Incomplete — material trust gap** |
-| Client tests / AI tests / integration tests | Absent |
-| CLAUDE.md | Comprehensive but token-heavy |
-| Docs directory | Useful but redundant w/ CLAUDE.md, no archive boundary |
-| Sprint plan docs | Exemplary |
-| Deferred-feature signaling in code | Missing TODOs |
+| Area | Status at review | Status after restructure pass |
+|---|---|---|
+| Shared logic + data | Excellent | Excellent ➖ |
+| Persistence layer (playerStore, withRetry, dead-letter) | Excellent | Excellent ➖ |
+| Test coverage (shared + server) | Good | Good ➖ |
+| `DungeonRoom.js` | **God object — needs split** | ⏳ Pending — unchanged |
+| `HubScene.js` | **Oversized — needs split** | ⏳ Pending — unchanged |
+| `DungeonScene.js` | Borderline; geometry rendering extractable | ⏳ Pending — unchanged |
+| Client mutation API consistency | Inconsistent | ⏳ Pending — unchanged |
+| Server-side ability score validation | **Incomplete — material trust gap** | ⏳ Pending — unchanged |
+| Client tests / AI tests / integration tests | Absent | ⏳ Pending — unchanged |
+| CLAUDE.md | Comprehensive but token-heavy | ✅ Slimmed to 165 LOC + agent-context split |
+| Docs directory | Useful but redundant w/ CLAUDE.md, no archive boundary | ✅ Restructured: `agent-context/`, `archive/`, `design/`, frontmatter on every doc |
+| Sprint plan docs | Exemplary | ✅ Moved to `archive/`, flagged with frontmatter |
+| Deferred-feature signaling in code | Missing TODOs | ✅ `TODO(deferred)` comments added at 3 sites |
+
+**Summary:** Documentation track fully addressed in this session. All code-refactor recommendations (`DungeonRoom` split, `HubScene` split, `RoomRenderer` extraction, ability-score validation, mutation return shape normalization, floor data validation, client/AI test additions) remain pending — see §6 "Pending pickup for future session" table.
