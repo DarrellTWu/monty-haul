@@ -10,6 +10,9 @@ purpose: Docs index. First stop for "which doc do I need?"
 - [`../CLAUDE.md`](../CLAUDE.md) — principles, stack, commands, agent task context
 - [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) — canonical file layout
 
+## Read before non-trivial doc work
+- [`DOC_PRINCIPLES.md`](DOC_PRINCIPLES.md) — principles + reasoning behind the current docs structure. Read this before adding a new doc, restructuring existing docs, or introducing a new system that needs documentation. Includes a checklist for "adding a new system."
+
 ## Read when your task involves...
 
 | Task touches… | Read |

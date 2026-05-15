@@ -147,6 +147,8 @@ After completing any task, flag to the user if the changes warrant updates. Trig
 
 Don't update the docs unprompted — flag it and let the user decide.
 
+**Before doing non-trivial doc work** (new agent-context file, restructure, new sprint plan) read [`docs/DOC_PRINCIPLES.md`](docs/DOC_PRINCIPLES.md). It captures the principles + reasoning behind the current docs structure — what is canonical where, why agent-context vs archive, how "See also" should be written, what frontmatter conventions to use. Helps avoid drift as the project grows.
+
 ## Doc Status Convention
 Every doc carries YAML frontmatter:
 ```yaml
