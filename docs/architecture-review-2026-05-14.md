@@ -17,13 +17,13 @@ Scope: full project walk-through of `C:\projects\monty-haul`. Findings only when
 
 | § | Finding | Status |
 |---|---|---|
-| 2.1 | `DungeonRoom.js` god object | ⏳ Pending |
+| 2.1 | `DungeonRoom.js` god object | ✅ Done — equip/unequip → `shared/logic/equipment.js`; descend → `_descendTo()` named method; death-loot → `applyDeathLoot` in `shared/logic/loot.js`. `WEAPON_REGISTRY` deduped to `shared/data/weapons/melee.js`. DungeonRoom: 819 → 719 LOC. |
 | 2.2 | `HubScene.js` oversized | ⏳ Pending |
-| 2.3 | `DungeonScene.js` rendering extraction | ⏳ Pending |
+| 2.3 | `DungeonScene.js` rendering extraction | ✅ Done — `drawRoom` + `drawDoorBand` extracted to `client/src/rendering/RoomRenderer.js`. DungeonScene: 701 → 597 LOC. |
 | 2.4 | `playerStore.js` well-designed | ➖ No action |
 | 2.5 | Pure logic modules excellent | ➖ No action |
-| 3.1 | Inconsistent async return shapes | ⏳ Pending |
-| 3.2 | Server-side ability score validation gap | ⏳ Pending |
+| 3.1 | Inconsistent async return shapes | ✅ Done — `stash.js` mutations now return `{ ok, error? }`. HubScene call sites updated; failures log the server error to console. |
+| 3.2 | Server-side ability score validation gap | ✅ Done — `validateAbilityScores` extracted to `shared/logic/character.js`; both HubScene + DungeonRoom now share it. Server-side check already enforced budget + range; the fix was deduplication. Test: `shared/tests/character.test.js` |
 | 3.3 | Elevation flow implicit | 🟡 Partial — causal chain now documented in `agent-context/geometry-elevation.md`; code unchanged |
 | 3.4 | Deferred features unmarked in code | ✅ Done — `TODO(deferred)` comments added at the 3 sites (kills, `isLineBlocked`, conditions module) |
 | 3.5 | Floor data schema validation missing | ⏳ Pending |

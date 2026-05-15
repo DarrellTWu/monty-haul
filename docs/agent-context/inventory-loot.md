@@ -1,6 +1,6 @@
 ---
 status: shipped
-updated: 2026-05-14
+updated: 2026-05-15
 purpose: Inventory, hotbar, containers (chests + corpses), loot tables. Read when the task touches items, drops, or container interaction.
 ---
 
@@ -10,7 +10,7 @@ purpose: Inventory, hotbar, containers (chests + corpses), loot tables. Read whe
 - Tables live in `shared/data/loot/tier1.js` keyed by enemy id (`LOOT_TABLE_REGISTRY`).
 - Shape per enemy: `{ gold: { dice, bonus } | null, drops: [{ itemId, chance, qty }] }`.
 - `itemId` accepts literal ids OR `@pool_name` references resolved by `shared/logic/loot.js` (currently only `@potion_any` → `CONSUMABLE_REGISTRY`, filtered to exclude `type === 'extract'`). Add new pools to the POOLS map in `loot.js`.
-- `DungeonRoom._tick` calls `_rollLootForFreshDeaths()` each tick — idempotent via `_lootRolled` Set guard. Enemies with no table drop nothing silently.
+- `DungeonRoom._tick` calls `applyDeathLoot(enemies, rolledSet, LOOT_TABLE_REGISTRY, onDrop)` from `shared/logic/loot.js` each tick — idempotent via the room's `_lootRolled` Set guard. Enemies with no table drop nothing silently.
 - All numeric tuning (dice, chances, gold ranges) lives in the table file, **not** in logic.
 
 ## Container Protocol (chests + corpses)

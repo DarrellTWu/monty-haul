@@ -1,6 +1,6 @@
 ---
 status: shipped
-updated: 2026-05-14
+updated: 2026-05-15
 purpose: Canonical file-layout reference. Source of truth — CLAUDE.md and tech_spec.md link here, do not duplicate.
 ---
 
@@ -13,7 +13,7 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | File | Purpose |
 |---|---|
 | `index.js` | Express app + Colyseus on one Node `http.Server` (port 2567). Mounts `hubRouter` at `/hub`, wraps in `WebSocketTransport`. Startup: warns if `deadLetterCount() > 0`. |
-| `rooms/DungeonRoom.js` | Colyseus room lifecycle + all WebSocket message handlers + tick orchestration. Rolls loot on enemy death; handles container protocol (`open_container`/`close_container`/`take_item`/`take_gold`/`drop_item`) and `descend`. Floors loaded via `_loadFloor(n)` (clears MapSchemas guarded on `size>0`, repopulates from `FLOOR_REGISTRY`). Descend swaps floor for everyone and applies `_longRest`. Run completion is scroll-only (`extract` consumable). Tracks `_playerIds`, `_extracted`, `_runStartedAt`, `_maxFloor`; `_buildRunMeta` feeds `commitExtract`/`commitDeath`. |
+| `rooms/DungeonRoom.js` | Colyseus room lifecycle + WebSocket message handlers + tick orchestration. Equip/unequip route through `shared/logic/equipment.js`; death loot via `applyDeathLoot` from `shared/logic/loot.js`. Container protocol (`open_container`/`close_container`/`take_item`/`take_gold`/`drop_item`) and `descend` (→ `_descendTo(toFloor)`). Floors loaded via `_loadFloor(n)` (clears MapSchemas guarded on `size>0`, repopulates from `FLOOR_REGISTRY`); `_descendTo` swaps floor for everyone and applies `_longRest`. Run completion is scroll-only (`extract` consumable). Tracks `_playerIds`, `_extracted`, `_runStartedAt`, `_maxFloor`; `_buildRunMeta` feeds `commitExtract`/`commitDeath`. |
 | `routes/hub.js` | Express router at `/hub`, CORS-enabled. 9 routes: `POST /login`, `GET /:playerId`, `POST /:playerId/raider/{add,remove,dump}`, `POST /:playerId/{buy,sell,craft}`, `POST /:playerId/rename`. All delegate to `playerStore`. Accepts `{itemId}` / `{recipeId}` / `{username}` only — pricing + recipe + validation resolved server-side. `/login` and `GET` return `username`. |
 | `store/playerStore.js` | Async write-through cache backed by Supabase. In-memory `Map<playerId, state>` is fast path; miss → `loadPlayer`/`loadPlayerByUsername`. Every mutation modifies cached state then awaits `syncStashAndMeta`. Per-player mutation lock (`_withLock`). Server-authoritative pricing (`BUYABLE_PRICES`, `sellPrice()`, `RECIPE_REGISTRY`). `commitExtract`/`commitDeath` wrap `savePlayer` in try/catch; on persistence failure appends to dead-letter log before propagating. `renamePlayer` trims + ≤20 chars validated server-side. |
 | `systems/CombatSystem.js` | Wraps `shared/logic/combat.js`. Computes `advantage = attacker.elevation===1 && target.elevation===0` at every `resolveAttack` call site. |
@@ -39,15 +39,16 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 |---|---|
 | `main.js` | Phaser config + scene registration. HubScene auto-starts. |
 | `scenes/HubScene.js` | Entry point. Checks `localStorage.mh_player_id` → login screen if absent. Two-panel layout: left cycles Class/Stash/Shop/Craft sub-screens, right is Raider Config + Enter Dungeon. Class panel includes 27-pt point-buy. Top bar (username + ⚙) opens modal Settings panel (menu / rename modes). Logout clears session + `scene.restart({})`. |
-| `scenes/DungeonScene.js` | Gameplay rendering + input wiring. Receives `{class, abilityScores}` via `init(data)`; passes `playerId` (from `stash.getPlayerId()`) to server. F-key dispatches to chest/corpse/stair via `_tryInteractNearby`. Geometry rendering (`_drawRoom`, `_drawDoorBand`) paints platforms, steps, walls, doors. Entity render depth: ground=2, elevated=4. Per-entity `onRemove` handlers tear down gfx on floor change. |
+| `scenes/DungeonScene.js` | Gameplay rendering + input wiring. Receives `{class, abilityScores}` via `init(data)`; passes `playerId` (from `stash.getPlayerId()`) to server. F-key dispatches to chest/corpse/stair via `_tryInteractNearby`. Floor geometry rendering (`drawRoom`, `drawDoorBand` from `rendering/RoomRenderer.js`) paints platforms, steps, walls, doors. Entity render depth: ground=2, elevated=4. Per-entity `onRemove` handlers tear down gfx on floor change. |
+| `rendering/RoomRenderer.js` | Pure floor-geometry painters: `drawRoom(scene, floor)` returns a Graphics with base ground + outer walls + platform tint + step strips + interior walls; `drawDoorBand(gfx, doorState)` paints/repaints a single door. Owns the `COLOR_*`/`WALL`/`STEP_STRIP_*` visual constants. |
 | `scenes/HUDScene.js` | HP, condition rings, cooldown arc, hotbar, combat log. |
 | `scenes/InventoryScene.js` | Equipment slots, bag (with `× N` stacking display-only), hotbar assignment, live `GOLD N gp`. Bag scrollable via `GeometryMask`. Loot mode replaces left column with container panel (`sendOpenContainer` on create, `sendCloseContainer` on shutdown). |
 | `network/ColyseusClient.js` | `joinDungeon(opts)` (forwards `class`/`playerId`/`abilityScores`); container protocol senders; `sendDescend`. |
 | `network/HubAPI.js` | Thin async fetch wrapper for `/hub` routes. Base URL from `VITE_COLYSEUS_URL` (`ws` → `http`). Exports `login`, `getState`, `addToRaider`, `removeFromRaider`, `dumpToStash`, `buy`, `sell`, `craft`, `rename`. Used exclusively by `store/stash.js`. |
-| `store/stash.js` | Server-backed item store. `localStorage` only persists `mh_player_id`. In-memory cache `{stash, gold, raiderPack}` populated by `initFromServer` — server wins. Sync reads + async mutations (return `Promise<bool>` except `renameUser` which returns full `{ok, username?, error?}`). `logout()` clears session locally. **All hub-side mutations route through this file.** |
+| `store/stash.js` | Server-backed item store. `localStorage` only persists `mh_player_id`. In-memory cache `{stash, gold, raiderPack}` populated by `initFromServer` — server wins. Sync reads + async mutations (all return `Promise<{ok, error?}>`; `renameUser` additionally returns `username`). `logout()` clears session locally. **All hub-side mutations route through this file.** |
 | `input/InputHandler.js` | WASD/attack/hotbar key bindings. |
 
-**Not yet built:** `client/rendering/`, `client/ui/` subdirectories (currently flat).
+**Not yet built:** `client/src/ui/` subdirectory (currently flat — HubScene split deferred; see `architecture-review-2026-05-14.md` §2.2).
 
 ## Shared (`shared/`)
 
@@ -56,7 +57,7 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `data/constants.js` | Tuning constants (`ENTITY_RADIUS_PX=16`, `STEP_HALF_WIDTH_PX=24`, `PLATFORM_WALL_THICK_PX=2`, attack cooldowns, regen rates, etc). |
 | `data/values.js` | Canonical `ITEM_GOLD_VALUE` map + `sellPrice(id)` helper (¼× value, floor, min 1 gp). Single source of truth. |
 | `data/shop.js` | `VENDOR_CATALOG` (keyed by vendor: potions, armor) + flat `BUYABLE_PRICES` for server gate. |
-| `data/weapons/melee.js`, `data/armor/armor.js` | Weapon + armor definitions. |
+| `data/weapons/melee.js`, `data/armor/armor.js` | Weapon + armor definitions. `melee.js` exports the canonical `WEAPON_REGISTRY` (id → def, excluding `UNARMED`); `armor.js` exports `ARMOR_REGISTRY` + `computeAC`. |
 | `data/items/{consumables,shields,materials}.js` | Item registries. `consumables.js` includes `extraction_scroll` (type `extract`). |
 | `data/enemies/tier1.js` | Goblin, dog, skeleton. Each carries `canClimb: bool` (goblin true, others false). |
 | `data/classes/{fighter,barbarian,monk,index}.js` | `CLASS_REGISTRY`. Each class carries `canClimb: bool` (monk true, fighter/barbarian false). |
@@ -65,13 +66,15 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `data/crafting/recipes.js` | `RECIPE_REGISTRY` + `recipesForBench(benchId)`. Currently: Tan Hide (forge), Bone Brew (apothecary). |
 | `data/floors/{floor1,floor2,index}.js` | `FLOOR_REGISTRY`. Each floor: `{width, height, playerSpawn, enemies, chests, traps, stairs, walls, doors, platforms, rooms}`. Both floors tuned for combat testing — not final design. |
 | `logic/combat.js` | `resolveAttack(...)` — full attack resolution. Accepts optional `advantage: boolean`; returns `advantageRolls: [a, b]` when active. |
-| `logic/loot.js` | Pure `rollLoot(table, rng?)` → `{gold, items}`. `@potion_any` pool filters out `type==='extract'`. |
+| `logic/loot.js` | Pure `rollLoot(table, rng?)` → `{gold, items}`; `applyDeathLoot(enemies, rolledSet, registry, onDrop?, rng?)` — idempotent fresh-death loot resolution used by `DungeonRoom._tick`. `@potion_any` pool filters out `type==='extract'`. |
 | `logic/loot-window.js` | Pure container-lock protocol: `tryOpenContainer`, `tryCloseContainer`, `releaseLocksHeldBy`, `tickContainerLocks`, `tryTakeItem`, `tryTakeGold`, `tryDropItem`, `checkLootAccess`, `refreshSourceFlags`. |
 | `logic/geometry.js` | Pure geometry: `resolveWallCollision`, `circleOverlapsAny`, `isLineBlocked` (stub), `tryAutoClimb`, `platformPerimeterRects`, `segmentIntersectsCircle`, `segmentPerimeterCrossing`, `pointInRect`. |
+| `logic/character.js` | `validateAbilityScores(scores)` → `{ok}` or `{ok:false, error}`. Enforces six keys present, integer in `[SCORE_MIN, SCORE_MAX]`, point cost ≤ `POINT_BUY_BUDGET`. Used by HubScene (pre-submit) + DungeonRoom.onJoin (auth gate). |
+| `logic/equipment.js` | `equipItem(player, {itemId, slot?})`, `unequipItem(player, {slot})`, `recomputeStats(player)`. Owns SRD slot routing (auto-detect armor/shield/weapon, two-handed handling, shield + main-hand interactions) and the derived-stat hook called after any score or equipment change. |
 | `types/{player,enemy,weapon}.js` | JSDoc `@typedef` shapes. |
-| `tests/{combat,loot,geometry}.test.js` | Pure-logic unit tests. |
+| `tests/{combat,loot,geometry,character,equipment}.test.js` | Pure-logic unit tests. |
 
-**Not yet built:** `shared/data/subclasses/`, `shared/data/gear/`, `shared/logic/conditions.js` (timer code hand-rolled in DungeonRoom), `shared/logic/ai.js` (still in `server/systems/AISystem.js`), `shared/logic/floor-generator.js`, `shared/logic/character.js`, `shared/logic/items.js`, `shared/logic/extraction.js`.
+**Not yet built:** `shared/data/subclasses/`, `shared/data/gear/`, `shared/logic/conditions.js` (timer code hand-rolled in DungeonRoom), `shared/logic/ai.js` (still in `server/systems/AISystem.js`), `shared/logic/floor-generator.js`, `shared/logic/items.js`, `shared/logic/extraction.js`.
 
 ## Supabase (`supabase/migrations/`)
 
@@ -80,13 +83,15 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `001_initial_schema.sql` | `player_profiles`, `gear_stash`, `meta_progression`, `run_history`. Current-state schema (one row per `(player_id, item_id)` after migration 002). |
 | `002_unique_stash.sql` | `UNIQUE (player_id, item_id)` on `gear_stash`. Required for UPSERT in `syncStashAndMeta`. |
 
-## Tests (263 total, all passing)
+## Tests (all passing)
 
 | File | Count | Notes |
 |---|---|---|
-| `shared/tests/combat.test.js` | 23 | |
-| `shared/tests/loot.test.js` | 33 | |
+| `shared/tests/combat.test.js` | 30 | |
+| `shared/tests/loot.test.js` | 38 | Includes `applyDeathLoot` idempotency + drop-callback coverage. |
 | `shared/tests/geometry.test.js` | 47 | AABB push-out, perimeter primitives, `tryAutoClimb`, `platformPerimeterRects`. |
+| `shared/tests/character.test.js` | 10 | `validateAbilityScores` — shape, range, budget. |
+| `shared/tests/equipment.test.js` | 14 | `equipItem`/`unequipItem`/`recomputeStats` — slot routing, two-handed, AC recompute. |
 | `server/tests/container-lock.test.js` | 21 | |
 | `server/tests/loot-flow.test.js` | 35 | |
 | `server/tests/supabase-smoke.js` | 34 | Real dev Supabase. `process.loadEnvFile('server/.env')`. |

@@ -1,6 +1,6 @@
 ---
 status: shipped
-updated: 2026-05-14
+updated: 2026-05-15
 purpose: Combat resolution, class schema, loadout, ability scores. Read when the task touches attacks, classes, or character creation.
 ---
 
@@ -14,7 +14,7 @@ Each class file in `shared/data/classes/` exports a const (see `fighter.js` / `m
 - `baseAbilityScores` — `{ str, dex, con, int, wis, cha }`. Used for attack rolls, saves, AC
 - `getStartingHp(conMod)` — function returning starting HP
 - `startingWeaponId`, `startingArmorId` — item ids (`''` = none)
-- `unarmoredDefense` — optional string key (e.g. `'wis'` for monk). When set, no armor and no shield, AC = 10 + DEX mod + [stat] mod. Handled in `DungeonRoom.onJoin` and `_recomputeStats`
+- `unarmoredDefense` — optional string key (e.g. `'wis'` for monk). When set, no armor and no shield, AC = 10 + DEX mod + [stat] mod. Handled in `DungeonRoom.onJoin` and `recomputeStats` (`shared/logic/equipment.js`)
 - `saveProficiencies` — array of ability keys
 - `fightingStyle` — string or null; passed to `CombatSystem` for Dueling bonus etc.
 - `classFeatures` — array of ability ids seeded into hotbar slots 0–N on join (e.g. `['rage']`)
@@ -31,9 +31,9 @@ Each class file in `shared/data/classes/` exports a const (see `fighter.js` / `m
 Class default gear extracted at run-end enters the raider pack normally and triggers the non-empty branch on the next run.
 
 ## Ability Scores
-- `PlayerState` carries `str, dex, con, int, wis, cha`. Set on join from client point-buy selection; **validated server-side** (currently only checks keys exist — see `architecture-review-2026-05-14.md` §3.2 for the open trust gap). Falls back to `classDef.baseAbilityScores` if invalid.
+- `PlayerState` carries `str, dex, con, int, wis, cha`. Set on join from client point-buy selection; **validated server-side** via `validateAbilityScores` in `shared/logic/character.js` (enforces all six keys present, range `[SCORE_MIN, SCORE_MAX]`, point cost ≤ `POINT_BUY_BUDGET`). Falls back to `classDef.baseAbilityScores` if invalid. HubScene calls the same validator pre-submit as a defensive check.
 - Point-buy budget: 27 points, scores 8–16, non-linear cost via `POINT_COST` in `shared/data/constants.js`. UI in `HubScene.js` class panel.
-- Mutable during run (potions, ASIs). Call `_recomputeStats(player)` after any change to keep derived values (AC, etc.) in sync.
+- Mutable during run (potions, ASIs). Call `recomputeStats(player)` (from `shared/logic/equipment.js`) after any change to keep derived values (AC, etc.) in sync.
 
 ## Attack Resolution (`shared/logic/combat.js`)
 - `resolveAttack(...)` accepts optional `advantage: boolean`.

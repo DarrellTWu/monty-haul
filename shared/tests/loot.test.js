@@ -7,7 +7,7 @@
 // All randomness is controlled via deterministic rng functions.
 
 import assert from 'node:assert/strict';
-import { rollLoot }            from '../logic/loot.js';
+import { rollLoot, applyDeathLoot } from '../logic/loot.js';
 import { GOBLIN_LOOT, SKELETON_LOOT, DOG_LOOT } from '../data/loot/tier1.js';
 import { CONSUMABLE_REGISTRY } from '../data/items/consumables.js';
 
@@ -362,6 +362,63 @@ test('@potion_any uniformly samples all pool entries', () => {
       `${id}: expected ~${expected}, got ${got}`,
     );
   }
+});
+
+// ─── applyDeathLoot ───────────────────────────────────────────────────────────
+
+console.log('\napplyDeathLoot');
+
+// Build a fake enemy whose lootItems behaves like ArraySchema (just needs push).
+function mkEnemy(id, type, { alive = false } = {}) {
+  return [id, { id, type, alive, lootGold: 0, lootItems: [] }];
+}
+
+test('rolls loot for newly-dead enemies and marks them in rolledSet', () => {
+  const enemies = [mkEnemy('g1', 'goblin'), mkEnemy('g2', 'goblin')];
+  const rolled  = new Set();
+  // Force gold roll (2 rng calls for 2d6) + chance success + pool pick — twice.
+  // Use a sequence that yields max-die rolls and chance=0 (success).
+  const rng = seq(0.99, 0.99, 0.0, 0.0,  0.99, 0.99, 0.0, 0.0);
+  applyDeathLoot(enemies, rolled, { goblin: GOBLIN_LOOT }, undefined, rng);
+  assert.equal(rolled.size, 2);
+  assert.ok(rolled.has('g1') && rolled.has('g2'));
+  assert.ok(enemies[0][1].lootItems.length > 0);
+});
+
+test('idempotent: second call rolls nothing for already-marked enemies', () => {
+  const enemies = [mkEnemy('g1', 'goblin')];
+  const rolled  = new Set(['g1']);     // pre-marked
+  // No rng calls should happen — pass an exhaustible sequence with nothing.
+  const rng = seq();
+  applyDeathLoot(enemies, rolled, { goblin: GOBLIN_LOOT }, undefined, rng);
+  assert.equal(enemies[0][1].lootItems.length, 0);
+  assert.equal(enemies[0][1].lootGold, 0);
+});
+
+test('alive enemies are skipped', () => {
+  const enemies = [mkEnemy('g1', 'goblin', { alive: true })];
+  const rolled  = new Set();
+  applyDeathLoot(enemies, rolled, { goblin: GOBLIN_LOOT }, undefined, seq());
+  assert.equal(rolled.size, 0);
+});
+
+test('enemy with no registered table: still marked, no drops', () => {
+  const enemies = [mkEnemy('x1', 'unknown_type')];
+  const rolled  = new Set();
+  applyDeathLoot(enemies, rolled, { goblin: GOBLIN_LOOT }, undefined, seq());
+  assert.ok(rolled.has('x1'));
+  assert.equal(enemies[0][1].lootItems.length, 0);
+});
+
+test('onDrop callback fires only for actual drops', () => {
+  const enemies = [mkEnemy('g1', 'goblin'), mkEnemy('x1', 'unknown')];
+  const rolled  = new Set();
+  const calls   = [];
+  const rng = seq(0.99, 0.99, 0.0, 0.0);   // gold + chance + pool for goblin only
+  applyDeathLoot(enemies, rolled, { goblin: GOBLIN_LOOT },
+    (id, type, gold, items) => calls.push({ id, type, gold, itemCount: items.length }), rng);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].id, 'g1');
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────

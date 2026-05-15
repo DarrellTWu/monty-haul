@@ -89,3 +89,16 @@ export const UNARMED = {
   attackAbility: 'str',
   properties: [],
 };
+
+// Canonical id → weapon-def map. Single source of truth; previously duplicated
+// in DungeonRoom and CombatSystem. UNARMED is intentionally excluded — it's the
+// fallback for the empty weapon slot, not an equippable item.
+export const WEAPON_REGISTRY = {
+  longsword:  LONGSWORD,
+  shortsword: SHORTSWORD,
+  handaxe:    HANDAXE,
+  greataxe:   GREATAXE,
+  greatsword: GREATSWORD,
+  dagger:     DAGGER,
+  mace:       MACE,
+};

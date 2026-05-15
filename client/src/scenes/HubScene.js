@@ -14,6 +14,7 @@ import { BENCH_REGISTRY } from '../../../shared/data/crafting/benches.js';
 import { recipesForBench } from '../../../shared/data/crafting/recipes.js';
 import { CLASS_REGISTRY } from '../../../shared/data/classes/index.js';
 import { POINT_BUY_BUDGET, POINT_COST, SCORE_MIN, SCORE_MAX } from '../../../shared/data/constants.js';
+import { validateAbilityScores } from '../../../shared/logic/character.js';
 
 // Panel geometry
 const LP = { x: 30,  y: 70, w: 760, h: 600 }; // left panel
@@ -841,7 +842,7 @@ export class HubScene extends Phaser.Scene {
         row.on('pointerover',  () => row.setColor('#ffffff'));
         row.on('pointerout',   () => row.setColor('#ffdd88'));
         row.on('pointerdown',  () => {
-          stashToRaider(id).then(ok => { if (ok) this._onPackChanged(); });
+          stashToRaider(id).then(r => { if (r.ok) this._onPackChanged(); else console.warn('[HubScene] stashToRaider failed:', r.error); });
         });
 
         const price = sellPrice(id);
@@ -852,7 +853,7 @@ export class HubScene extends Phaser.Scene {
           sellBtn.on('pointerover', () => sellBtn.setColor('#ffffff'));
           sellBtn.on('pointerout',  () => sellBtn.setColor('#88ccff'));
           sellBtn.on('pointerdown', () => {
-            sellItem(id).then(ok => { if (ok) this._onSold(); });
+            sellItem(id).then(r => { if (r.ok) this._onSold(); else console.warn('[HubScene] sellItem failed:', r.error); });
           });
         }
 
@@ -930,7 +931,7 @@ export class HubScene extends Phaser.Scene {
         buyBtn.on('pointerover', () => buyBtn.setColor('#ffffff'));
         buyBtn.on('pointerout',  () => buyBtn.setColor('#88ccff'));
         buyBtn.on('pointerdown', () => {
-          buyItem(id).then(ok => { if (ok) this._onPurchase(); });
+          buyItem(id).then(r => { if (r.ok) this._onPurchase(); else console.warn('[HubScene] buyItem failed:', r.error); });
         });
       }
 
@@ -1052,7 +1053,7 @@ export class HubScene extends Phaser.Scene {
         craftBtn.on('pointerover', () => craftBtn.setColor('#ffffff'));
         craftBtn.on('pointerout',  () => craftBtn.setColor('#88ccff'));
         craftBtn.on('pointerdown', () => {
-          craftRecipe(recipe.id).then(ok => { if (ok) this._onCraft(); });
+          craftRecipe(recipe.id).then(r => { if (r.ok) this._onCraft(); else console.warn('[HubScene] craftRecipe failed:', r.error); });
         });
       }
       y += 20;
@@ -1144,7 +1145,7 @@ export class HubScene extends Phaser.Scene {
         row.on('pointerover',  () => row.setColor('#ffffff'));
         row.on('pointerout',   () => row.setColor('#88ccff'));
         row.on('pointerdown',  () => {
-          raiderToStash(id).then(ok => { if (ok) this._onPackChanged(); });
+          raiderToStash(id).then(r => { if (r.ok) this._onPackChanged(); else console.warn('[HubScene] raiderToStash failed:', r.error); });
         });
         y += 16;
       }
@@ -1156,7 +1157,7 @@ export class HubScene extends Phaser.Scene {
       dumpBtn.on('pointerover', () => dumpBtn.setColor('#ffffff'));
       dumpBtn.on('pointerout',  () => dumpBtn.setColor('#aabbdd'));
       dumpBtn.on('pointerdown', () => {
-        dumpRaiderPackToStash().then(ok => { if (ok) this._onPackChanged(); });
+        dumpRaiderPackToStash().then(r => { if (r.ok) this._onPackChanged(); else console.warn('[HubScene] dumpRaiderPackToStash failed:', r.error); });
       });
     }
 
@@ -1168,10 +1169,17 @@ export class HubScene extends Phaser.Scene {
     enterBtn.on('pointerover',  () => { if (active) enterBtn.setColor('#ffffff'); });
     enterBtn.on('pointerout',   () => { enterBtn.setColor(active ? '#ffcc44' : '#334455'); });
     enterBtn.on('pointerdown',  () => {
-      if (active) this.scene.start('DungeonScene', {
-        class: this._selectedClass,
-        abilityScores: this._abilityScores ?? { ...CLASS_DISPLAY[this._selectedClass].defaultScores },
-      });
+      if (!active) return;
+      const scores = this._abilityScores ?? { ...CLASS_DISPLAY[this._selectedClass].defaultScores };
+      // Pre-submit assert against the same rule the server enforces. The UI's
+      // incremental gating should already prevent invalid scores; this is a
+      // defensive check so a UI bug can't ship invalid data to the room.
+      const check = validateAbilityScores(scores);
+      if (!check.ok) {
+        console.warn('[HubScene] refusing to enter with invalid abilityScores:', check.error);
+        return;
+      }
+      this.scene.start('DungeonScene', { class: this._selectedClass, abilityScores: scores });
     });
   }
 

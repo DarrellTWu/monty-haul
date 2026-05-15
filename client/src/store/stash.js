@@ -56,41 +56,47 @@ export function getRaiderPackFlat() {
 
 // ── Async mutations ───────────────────────────────────────────────────────────
 
+/**
+ * Update cache from a server result and return `{ ok, error? }` for the caller.
+ * Cache-relevant fields (`stash`/`gold`/`raiderPack`) are stripped from the
+ * returned object so callers depend only on `{ ok, error? }` — read state via
+ * the getter functions in this module.
+ */
 function _apply(result) {
   if (result.ok) {
     if (result.stash      !== undefined) _cache.stash      = result.stash;
     if (result.gold       !== undefined) _cache.gold       = result.gold;
     if (result.raiderPack !== undefined) _cache.raiderPack = result.raiderPack;
   }
-  return result.ok;
+  return result.ok ? { ok: true } : { ok: false, error: result.error ?? 'unknown_error' };
 }
 
-/** Move 1× of item from stash → raider pack. Returns Promise<bool>. */
+/** Move 1× of item from stash → raider pack. */
 export async function stashToRaider(id) {
   return _apply(await HubAPI.addToRaider(_playerId, id));
 }
 
-/** Move 1× of item from raider pack → stash. Returns Promise<bool>. */
+/** Move 1× of item from raider pack → stash. */
 export async function raiderToStash(id) {
   return _apply(await HubAPI.removeFromRaider(_playerId, id));
 }
 
-/** Move all raider pack items → stash. Returns Promise<bool>. */
+/** Move all raider pack items → stash. */
 export async function dumpRaiderPackToStash() {
   return _apply(await HubAPI.dumpToStash(_playerId));
 }
 
-/** Spend gold to add 1× item to stash. Server resolves price. Returns Promise<bool>. */
+/** Spend gold to add 1× item to stash. Server resolves price. */
 export async function buyItem(id) {
   return _apply(await HubAPI.buy(_playerId, id));
 }
 
-/** Remove 1× item from stash, gain canonical sell value in gold. Returns Promise<bool>. */
+/** Remove 1× item from stash, gain canonical sell value in gold. */
 export async function sellItem(id) {
   return _apply(await HubAPI.sell(_playerId, id));
 }
 
-/** Consume recipe inputs and add output to stash. Server resolves recipe by id. Returns Promise<bool>. */
+/** Consume recipe inputs and add output to stash. Server resolves recipe by id. */
 export async function craftRecipe(recipeId) {
   return _apply(await HubAPI.craft(_playerId, recipeId));
 }

@@ -82,3 +82,37 @@ export function rollLoot(table, rng = Math.random) {
 
   return { gold, items };
 }
+
+/**
+ * For each enemy that has died but hasn't yet had its loot rolled, look up its
+ * table by `enemy.type` and roll once. Idempotent: each enemy id is added to
+ * `rolledSet`, so calling this every tick is safe.
+ *
+ * Enemy mutation: writes `lootGold` and pushes into `lootItems`. Enemies with
+ * no table drop nothing silently.
+ *
+ * @param {Iterable<[string, { type: string, alive: boolean, lootGold: number, lootItems: { push: (s: string) => void } }]>} enemies
+ *   Iterable of [id, enemyState]. Works for Colyseus MapSchema and plain Map.
+ * @param {Set<string>} rolledSet
+ *   Mutated: ids added as their drops are resolved.
+ * @param {Record<string, object>} lootTableRegistry
+ *   id → loot table.
+ * @param {(enemyId: string, type: string, gold: number, items: string[]) => void} [onDrop]
+ *   Optional callback for logging/telemetry. Skipped when no drop is rolled.
+ * @param {() => number} [rng]
+ */
+export function applyDeathLoot(enemies, rolledSet, lootTableRegistry, onDrop, rng = Math.random) {
+  for (const [id, enemy] of enemies) {
+    if (enemy.alive) continue;
+    if (rolledSet.has(id)) continue;
+    rolledSet.add(id);
+
+    const table = lootTableRegistry[enemy.type];
+    if (!table) continue;
+
+    const { gold, items } = rollLoot(table, rng);
+    enemy.lootGold = gold;
+    for (const itemId of items) enemy.lootItems.push(itemId);
+    onDrop?.(id, enemy.type, gold, items);
+  }
+}

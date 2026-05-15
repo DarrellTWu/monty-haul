@@ -6,25 +6,16 @@ import {
   getModifier, getProficiencyBonus,
 } from '../../shared/logic/combat.js';
 import { ATTACK_COOLDOWN_MS, MELEE_HIT_RANGE_PX, RAGE_DAMAGE_BONUS } from '../../shared/data/constants.js';
-import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, GREATSWORD, DAGGER, MACE, UNARMED } from '../../shared/data/weapons/melee.js';
+import { WEAPON_REGISTRY, UNARMED } from '../../shared/data/weapons/melee.js';
 import { SHIELD_REGISTRY } from '../../shared/data/items/shields.js';
 import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.js';
-
-const WEAPON_REGISTRY = {
-  longsword:  LONGSWORD,
-  shortsword: SHORTSWORD,
-  handaxe:    HANDAXE,
-  greataxe:   GREATAXE,
-  greatsword: GREATSWORD,
-  dagger:     DAGGER,
-  mace:       MACE,
-  unarmed:    UNARMED,
-};
 
 // Monk weapons: unarmed strikes and light/simple melee weapons per SRD.
 const MONK_WEAPON_IDS = new Set(['shortsword', 'dagger', 'handaxe', 'mace', 'unarmed', '']);
 
 function getWeapon(equippedWeaponId) {
+  // Empty/unknown slot → UNARMED (the registry intentionally excludes 'unarmed'
+  // since it's a fallback, not an equippable item).
   return WEAPON_REGISTRY[equippedWeaponId] ?? UNARMED;
 }
 

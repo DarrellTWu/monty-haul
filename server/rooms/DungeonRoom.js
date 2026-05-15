@@ -14,33 +14,29 @@ import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.j
 import { GOBLIN, DOG, SKELETON }     from '../../shared/data/enemies/tier1.js';
 import { FLOOR_REGISTRY }            from '../../shared/data/floors/index.js';
 import { getModifier, resolveSave, rollDice } from '../../shared/logic/combat.js';
-import { rollLoot }                  from '../../shared/logic/loot.js';
+import { applyDeathLoot }            from '../../shared/logic/loot.js';
 import { pointInRect }               from '../../shared/logic/geometry.js';
+import { validateAbilityScores }     from '../../shared/logic/character.js';
+import { equipItem, unequipItem, recomputeStats } from '../../shared/logic/equipment.js';
 import {
   tryOpenContainer, tryCloseContainer, releaseLocksHeldBy, tickContainerLocks,
   tryTakeItem, tryTakeGold, tryDropItem,
 } from '../../shared/logic/loot-window.js';
 import { LOOT_TABLE_REGISTRY }       from '../../shared/data/loot/tier1.js';
 import { ARMOR_REGISTRY, computeAC } from '../../shared/data/armor/armor.js';
-import { LONGSWORD, SHORTSWORD, HANDAXE, GREATAXE, GREATSWORD, DAGGER, MACE } from '../../shared/data/weapons/melee.js';
+import { WEAPON_REGISTRY }           from '../../shared/data/weapons/melee.js';
 import { SHIELD_REGISTRY }           from '../../shared/data/items/shields.js';
 import { CONSUMABLE_REGISTRY }       from '../../shared/data/items/consumables.js';
 import {
   SERVER_TICK_RATE_HZ, MELEE_HIT_RANGE_PX, CHEST_LOOT_RANGE_PX,
   TRAP_DAMAGE, TRAP_SAVE_DC, TRAP_RADIUS_PX, TRAP_COOLDOWN_MS,
   RAGE_DURATION_MS, RAGE_DAMAGE_BONUS,
-  POINT_BUY_BUDGET, POINT_COST, SCORE_MIN, SCORE_MAX,
 } from '../../shared/data/constants.js';
 
 import * as MovementSystem from '../systems/MovementSystem.js';
 import * as AISystem       from '../systems/AISystem.js';
 import { playerAttack, enemyAttack, applySecondWind } from '../systems/CombatSystem.js';
 import { getPlayer, commitExtract, commitDeath } from '../store/playerStore.js';
-
-const WEAPON_REGISTRY = {
-  longsword: LONGSWORD, shortsword: SHORTSWORD,
-  handaxe: HANDAXE, greataxe: GREATAXE, greatsword: GREATSWORD, dagger: DAGGER, mace: MACE,
-};
 
 // type string → enemy stat block. Used by _loadFloor when reading floor data.
 const ENEMY_REGISTRY = { goblin: GOBLIN, dog: DOG, skeleton: SKELETON };
@@ -88,75 +84,20 @@ export class DungeonRoom extends Room {
     });
 
     // ── Equip / unequip ───────────────────────────────────────────────────────────
-    // 'equip' message: { itemId, slot? }
-    //   slot = 'weapon' | 'offhand' | 'armor' | undefined (auto-detect)
-    // Server validates: item in inventory, SRD constraints respected.
+    // Slot routing + SRD constraints live in shared/logic/equipment.js so the
+    // logic is testable and shared with any future client-side preview.
+    // 'equip'  payload: { itemId, slot? }  — slot auto-detected if omitted
+    // 'unequip' payload: { slot }          — 'weapon' | 'offhand' | 'armor'
     this.onMessage('equip', (client, { itemId, slot }) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
-      const id  = String(itemId);
-      const idx = player.inventory.indexOf(id);
-      if (idx === -1) return; // item must be in bag
-
-      const isShield = !!SHIELD_REGISTRY[id];
-      const isWeapon = !!WEAPON_REGISTRY[id];
-      const isArmor  = !!ARMOR_REGISTRY[id];
-
-      // Auto-detect target slot if not specified.
-      const targetSlot = slot || (isArmor ? 'armor' : isShield ? 'offhand' : 'weapon');
-
-      if (targetSlot === 'armor') {
-        if (!isArmor) return;
-        // Return old armor to bag first.
-        if (player.equippedArmorId) player.inventory.push(player.equippedArmorId);
-        player.inventory.splice(player.inventory.indexOf(id), 1);
-        player.equippedArmorId = id;
-        this._recomputeStats(player);
-
-      } else if (targetSlot === 'offhand') {
-        // Offhand accepts one-handed weapons OR shields. Blocks two-handed.
-        if (isWeapon && WEAPON_REGISTRY[id]?.properties?.includes('two-handed')) return;
-        // Equipping anything to offhand auto-unequips a two-handed weapon from main hand.
-        if (player.equippedWeaponId && WEAPON_REGISTRY[player.equippedWeaponId]?.properties?.includes('two-handed')) {
-          player.inventory.push(player.equippedWeaponId);
-          player.equippedWeaponId = '';
-        }
-        if (player.offhandId) player.inventory.push(player.offhandId);
-        player.inventory.splice(player.inventory.indexOf(id), 1);
-        player.offhandId = id;
-        this._recomputeStats(player);
-
-      } else { // weapon slot
-        if (isShield || isArmor) return;
-        const newWeapon = WEAPON_REGISTRY[id];
-        if (!newWeapon) return;
-        // Two-handed weapon: auto-unequip offhand (player chose to go two-handed).
-        if (newWeapon.properties?.includes('two-handed') && player.offhandId) {
-          player.inventory.push(player.offhandId);
-          player.offhandId = '';
-        }
-        if (player.equippedWeaponId) player.inventory.push(player.equippedWeaponId);
-        player.inventory.splice(player.inventory.indexOf(id), 1);
-        player.equippedWeaponId = id;
-        this._recomputeStats(player);
-      }
+      equipItem(player, { itemId, slot });
     });
 
     this.onMessage('unequip', (client, { slot }) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
-      if (slot === 'weapon' && player.equippedWeaponId) {
-        player.inventory.push(player.equippedWeaponId);
-        player.equippedWeaponId = '';
-      } else if (slot === 'offhand' && player.offhandId) {
-        player.inventory.push(player.offhandId);
-        player.offhandId = '';
-        this._recomputeStats(player);
-      } else if (slot === 'armor' && player.equippedArmorId) {
-        player.inventory.push(player.equippedArmorId);
-        player.equippedArmorId = '';
-        this._recomputeStats(player); // unarmored: AC = 10 + DEX
-      }
+      unequipItem(player, { slot });
     });
 
     // ── Container lock (loot window open/close) ──────────────────────────────────
@@ -197,8 +138,8 @@ export class DungeonRoom extends Room {
     });
 
     // ── Descend stairs ────────────────────────────────────────────────────────────
-    // Single-room model: when one player descends, the floor swaps for everyone.
-    // All players are teleported to the new floor's spawn and given a long rest.
+    // Handler only validates the request (alive, stair exists, unlocked, in range)
+    // and forwards to `_descendTo`, which performs the floor swap.
     this.onMessage('descend', (client, { stairId }) => {
       const player = this.state.players.get(client.sessionId);
       const stair  = this.state.stairs.get(String(stairId));
@@ -207,24 +148,7 @@ export class DungeonRoom extends Room {
       const dx = player.x - stair.x;
       const dy = player.y - stair.y;
       if (Math.sqrt(dx * dx + dy * dy) > CHEST_LOOT_RANGE_PX) return;
-
-      const toFloor = stair.toFloor;
-      this._loadFloor(toFloor);
-
-      const floor = FLOOR_REGISTRY[toFloor];
-      for (const [sid, p] of this.state.players) {
-        p.x  = floor.playerSpawn.x;
-        p.y  = floor.playerSpawn.y;
-        p.vx = 0; p.vy = 0;
-        p.elevation = this._spawnElevation(p.x, p.y);
-        this._longRest(p, sid);
-        const prev = this._maxFloor.get(sid) ?? 1;
-        if (toFloor > prev) this._maxFloor.set(sid, toFloor);
-      }
-      this.broadcast('combat_log', {
-        message: `── Descending to Floor ${toFloor} — long rest taken (HP, rage, Second Wind restored) ──`,
-      });
-      console.log(`[DungeonRoom] Floor ${toFloor} loaded; ${this.state.players.size} player(s) descended`);
+      this._descendTo(stair.toFloor);
     });
 
     // ── Hotbar management ─────────────────────────────────────────────────────────
@@ -279,9 +203,12 @@ export class DungeonRoom extends Room {
       : [];
 
     // Resolve ability scores: use client-provided point-buy if valid, else class defaults.
-    const scores = this._validateAbilityScores(options.abilityScores)
-      ? options.abilityScores
-      : classDef.baseAbilityScores;
+    // Single source of truth lives in shared/logic/character.js — see validateAbilityScores.
+    const check = validateAbilityScores(options.abilityScores);
+    if (!check.ok && options.abilityScores) {
+      console.warn(`[DungeonRoom] rejecting client abilityScores from ${client.sessionId}: ${check.error}`);
+    }
+    const scores = check.ok ? options.abilityScores : classDef.baseAbilityScores;
 
     const conMod = getModifier(scores.con);
     const dexMod = getModifier(scores.dex);
@@ -349,7 +276,7 @@ export class DungeonRoom extends Room {
           }
         }
       }
-      this._recomputeStats(player);
+      recomputeStats(player);
     }
 
     // Auto-assign consumables to the first available hotbar slots.
@@ -499,6 +426,30 @@ export class DungeonRoom extends Room {
     return 0;
   }
 
+  /**
+   * Swap the active floor and reposition every player to the new spawn. Each
+   * player takes a long rest (HP/rage/Second Wind restored) and has their max-
+   * floor tracker bumped if applicable. The single-room model means the floor
+   * changes for everyone — the descend handler is just the trigger.
+   */
+  _descendTo(toFloor) {
+    this._loadFloor(toFloor);
+    const floor = FLOOR_REGISTRY[toFloor];
+    for (const [sid, p] of this.state.players) {
+      p.x  = floor.playerSpawn.x;
+      p.y  = floor.playerSpawn.y;
+      p.vx = 0; p.vy = 0;
+      p.elevation = this._spawnElevation(p.x, p.y);
+      this._longRest(p, sid);
+      const prev = this._maxFloor.get(sid) ?? 1;
+      if (toFloor > prev) this._maxFloor.set(sid, toFloor);
+    }
+    this.broadcast('combat_log', {
+      message: `── Descending to Floor ${toFloor} — long rest taken (HP, rage, Second Wind restored) ──`,
+    });
+    console.log(`[DungeonRoom] Floor ${toFloor} loaded; ${this.state.players.size} player(s) descended`);
+  }
+
   _spawnEnemy(id, def, pos) {
     const enemy = new EnemyState();
     enemy.id      = id;
@@ -560,7 +511,9 @@ export class DungeonRoom extends Room {
 
     this._tickTraps(dt);
     this._tickConditions(dt);
-    this._rollLootForFreshDeaths();
+    applyDeathLoot(this.state.enemies, this._lootRolled, LOOT_TABLE_REGISTRY,
+      (id, type, gold, items) =>
+        console.log(`[DungeonRoom] ${type} (${id}) dropped: ${gold} gp, items=[${items.join(', ')}]`));
     tickContainerLocks(this.state, CHEST_LOOT_RANGE_PX);
 
     // Stair unlock: any stair gated on enemies-dead flips open the first tick
@@ -578,27 +531,6 @@ export class DungeonRoom extends Room {
           }
         }
       }
-    }
-  }
-
-  /**
-   * For each enemy that died this tick (first time we see alive=false), look up
-   * its loot table and roll once. Idempotent via `_lootRolled` guard so this can
-   * run every tick without re-rolling. Enemies with no table drop nothing silently.
-   */
-  _rollLootForFreshDeaths() {
-    for (const [id, enemy] of this.state.enemies) {
-      if (enemy.alive) continue;
-      if (this._lootRolled.has(id)) continue;
-      this._lootRolled.add(id);
-
-      const table = LOOT_TABLE_REGISTRY[enemy.type];
-      if (!table) continue;
-
-      const { gold, items } = rollLoot(table);
-      enemy.lootGold = gold;
-      for (const itemId of items) enemy.lootItems.push(itemId);
-      console.log(`[DungeonRoom] ${enemy.type} (${id}) dropped: ${gold} gp, items=[${items.join(', ')}]`);
     }
   }
 
@@ -784,36 +716,4 @@ export class DungeonRoom extends Room {
     });
   }
 
-  /**
-   * Validate a client-provided abilityScores object against the point buy rules.
-   * Returns true only if all six scores are present, in range, and within budget.
-   * A false result causes onJoin to fall back to classDef.baseAbilityScores silently.
-   */
-  _validateAbilityScores(scores) {
-    const keys = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
-    if (!scores || typeof scores !== 'object') return false;
-    if (!keys.every(k => typeof scores[k] === 'number')) return false;
-    if (!keys.every(k => scores[k] >= SCORE_MIN && scores[k] <= SCORE_MAX)) return false;
-    const cost = keys.reduce((sum, k) => sum + (POINT_COST[scores[k]] ?? 999), 0);
-    return cost <= POINT_BUY_BUDGET;
-  }
-
-  /**
-   * Recompute all derived stats from the player's current ability scores and equipment.
-   * Call this whenever scores or equipment change (equip/unequip, Potion of Giant Strength,
-   * racial bonus, level-up ASI, etc.).
-   *
-   * Future additions: attack modifier, initiative, spell save DC.
-   */
-  _recomputeStats(player) {
-    const classDef  = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
-    const dexMod    = getModifier(player.dex);
-    const hasShield = !!SHIELD_REGISTRY[player.offhandId];
-    if (!player.equippedArmorId && !hasShield && classDef.unarmoredDefense) {
-      const udMod = getModifier(player[classDef.unarmoredDefense]);
-      player.ac = 10 + dexMod + udMod;
-    } else {
-      player.ac = computeAC(ARMOR_REGISTRY[player.equippedArmorId] ?? null, dexMod, hasShield);
-    }
-  }
 }

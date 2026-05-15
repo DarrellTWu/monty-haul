@@ -119,7 +119,7 @@ Before any game logic task, read these files:
   - `secondWindAvailable, blessRemainingMs, longstriderRemainingMs, falseLifeRemainingMs, tempHp`
   - `rageRemainingMs, rageUsesRemaining` — Barbarian rage tracking (synced for HUD ring + inventory)
   - `gold` — run-scope wallet; committed via `playerStore.commitExtract` on extract, lost on death/disconnect
-  - `str, dex, con, int, wis, cha` — ability scores; set on join from client point-buy (validated server-side); fall back to `classDef.baseAbilityScores` if invalid. Mutable during run. Call `_recomputeStats(player)` after any change.
+  - `str, dex, con, int, wis, cha` — ability scores; set on join from client point-buy (validated server-side via `validateAbilityScores` in `shared/logic/character.js`); fall back to `classDef.baseAbilityScores` if invalid. Mutable during run. Call `recomputeStats(player)` (from `shared/logic/equipment.js`) after any change.
   - `elevation` — 0 = ground, 1 = elevated. Synced. Seeded on join + descend by `DungeonRoom._spawnElevation(x, y)`; mutated each tick by `MovementSystem.tryAutoClimb`. See `docs/agent-context/geometry-elevation.md`.
 - `server/state/EnemyState.js` — synced enemy schema:
   - `lootGold, lootItems, looted` — populated on first tick after death via `rollLoot`; `looted` bidirectional (flips back if items dropped in)
@@ -135,7 +135,6 @@ Marked as **DEFERRED** in relevant agent-context docs. When you add code that ov
 - `isLineBlocked` in `shared/logic/geometry.js` — stub returns false until LoS/ranged combat lands.
 - `shared/logic/conditions.js` — not built; timer code hand-rolled in `DungeonRoom`.
 - Debug Mode OFF (production gameplay path) — locked toggle, awaits matchmaking + production loot tuning. See `agent-context/hub-economy.md`.
-- Server-side ability score budget validation — only key existence checked today. See `architecture-review-2026-05-14.md` §3.2.
 
 ## Keeping Docs Current
 After completing any task, flag to the user if the changes warrant updates. Triggers:
