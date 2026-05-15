@@ -46,7 +46,10 @@ Broadcasts a long-rest combat-log line.
 - The `@potion_any` loot pool filters out `type === 'extract'` (Scroll is run-control, not loot).
 
 ## Floor 2 Tuning
-Floor 2 contents (1, 2, 4, 6, 8, 10 enemies per arm × 3 arms; entry chest with scroll + 10× each potion) are tuned for combat testing — **not final design**. See `archive/floor-2-plan.md`.
+Floor 2 contents (1, 2, 4, 6, 8, 10 enemies per arm × 3 arms; entry chest with scroll + 10× each potion) are tuned for combat testing — **not final design**.
 
 ## Floor `kills` (DEFERRED)
 `_buildRunMeta` returns `kills: 0` literally. `run_history.kills` always 0. Attribution deferred.
+
+## See also — historical context
+`archive/floor-2-plan.md` — original build plan for floor 2 + Scroll of Extraction. Read only if you need: the locked-decisions log (why scroll-only extraction was chosen over auto-complete-on-clear), the original message-protocol additions, or the three-commit build sequence. Frozen at sprint completion.

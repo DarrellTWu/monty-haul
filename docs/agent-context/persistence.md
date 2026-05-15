@@ -59,11 +59,20 @@ When `savePlayer` throws after `withRetry` exhausts (sustained Supabase outage):
 4. A no-op rename (current name) is a fast-path success.
 5. UNIQUE conflict surfaces as `{ ok: false, error: 'username_taken' }` from the persistence layer.
 
-## Schema Conventions
-- Schema is **current-state oriented** — one row per `(player_id, item_id)` in `gear_stash` after migration 002.
+## Storage Model — Current-State (decided 2026-05-09)
+`gear_stash` is treated as **current state**, not an event log: one logical row per `(player_id, item_id)`. The sync pattern (UPSERT current items + DELETE-NOT-IN) effectively snapshot-replaces the player's stash rows.
+
+This was a deliberate pick over an audit-trail interpretation because it mirrors the in-memory `playerStore` shape 1:1 — the Phase 2 Supabase migration stayed a pure storage swap with zero behavior change. The `acquired_via` / `acquired_at` columns become "last sync" metadata in this mode and are **not** relied on for provenance.
+
+**Future provenance path:** an append-only `gear_events` table can be layered alongside the current-state `gear_stash` when audit/analytics demand it. The current-state table stays the source of truth for "what does the player own right now"; events answer "how did they get it." Sketch in `archive/server-persistence-plan.md` §"Future Work — gear_events".
+
+## Other Schema Conventions
 - `run_history` is append-only telemetry.
 - See `supabase/migrations/`.
 
 ## Known Limitations
 - **Username login is trust-on-first-use.** Anyone with a username can become that player. Real auth (Supabase Auth) is future work.
 - **`run_history.kills` always 0.** Column exists; attribution deferred.
+
+## See also — historical context
+`archive/server-persistence-plan.md` — Phase 0–3 build plan + post-implementation audit. Read only if you need: the original Phase 1/2/3 decomposition and rationale, the 2026-05-09 audit findings (snapshot-replace row-op waste, etc.), the full Phase 3 hardening pre-flight list (per-player lock, server-authoritative pricing, retry, dead-letter, atomic-safe sync — all shipped), the future `gear_events` table sketch, or the Supabase Auth migration notes. Frozen at Phase 3 completion (2026-05-10).

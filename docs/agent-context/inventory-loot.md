@@ -46,3 +46,7 @@ Launched by `DungeonScene` with `{ lootSource: { kind, id } }`. Replaces the lef
 - Armor: `shared/data/armor/armor.js`.
 - Consumables / shields / materials: `shared/data/items/{consumables,shields,materials}.js`.
 - `consumables.js` includes `extraction_scroll` (`type: 'extract'`).
+
+## See also — historical context
+- `archive/inventory-system-plan.md` — original build plan for inventory + hotbar + equipment slots. Read only if you need: the original data-model decisions (flat ArraySchema vs. stacked qty), the future server-side migration notes, or why the bag stacks displays-only rather than at the server schema. Frozen at sprint completion.
+- `archive/loot-system-plan.md` — original build plan for loot tables + container protocol. Read only if you need: the locked decisions (gold-as-int, no rarity tiers yet, table-driven not loot-class-driven), the original message-protocol design (why `take_item` carries `itemIndex` rather than `itemId`), or the abandoned `loot_corpse` single-shot message. Frozen at sprint completion.

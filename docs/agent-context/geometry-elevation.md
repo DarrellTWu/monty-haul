@@ -34,7 +34,12 @@ Platforms = visual ground at elevation 1 + perimeter wall band with gaps at each
 5. **Combat**: `CombatSystem` computes `advantage = attacker.elev===1 && target.elev===0` (see `combat.md`).
 
 ## `canClimb`
-Class-level flag (Monk = true; Fighter/Barbarian = false) and enemy-def-level flag (Goblin = true; Dog/Skeleton = false). Read at call time from `CLASS_REGISTRY` / `enemyDefs`. **Not synced.** Long-term: replace with a per-character skill/feat.
+Class-level flag (Monk = true; Fighter/Barbarian = false) and enemy-def-level flag (Goblin = true; Dog/Skeleton = false). Read at call time from `CLASS_REGISTRY` / `enemyDefs`. **Not synced** — `canClimb` never changes during a run, so syncing it would be wasteful. Server pure-logic helpers (`resolveWallCollision`, `tryAutoClimb`) take a plain `canClimb: boolean` parameter, decoupling them from def lookup.
+
+### Why this is a stub (DEFERRED)
+`canClimb` is a class-level flag, **not a skill**. Long-term, climbing is expected to be a learnable skill/feat per character — climbing should join other movement-related skills (e.g. Athletics) rather than being class-gated. For this sprint, Monk has `canClimb: true` as a stand-in for that future system. **Treat this as a placeholder, not the final model.**
+
+The migration target: replace the class/enemy-def flag with a per-character runtime check (e.g. a `skills` set on `PlayerState`). Timing: when the broader skill system is designed. Historical decision record: `archive/geometry-sprint-plan.md` §"Open Questions" #12.
 
 ## AI Navigation (`AISystem.selectTargetPosition`)
 Two routing layers:
@@ -60,3 +65,6 @@ Placeholders, no tiles yet.
 - `isLineBlocked` is a stub (returns false; awaits LoS/ranged system)
 - Multi-level stacking (>1) out of scope
 - `canClimb` is a class flag, not yet a skill
+
+## See also — historical context
+`archive/geometry-sprint-plan.md` — original sprint design rationale + build plan. Read only if you need: the full Open Questions list (#1–#15 with "when to revisit" triggers), the abandoned step-circle model and why it was replaced, the original Collision Model decision table, or the build-order/milestone log. Frozen at sprint completion (2026-05-11).

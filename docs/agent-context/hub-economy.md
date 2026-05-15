@@ -56,3 +56,6 @@ The production gameplay path doesn't exist yet, which is why OFF is locked. When
 1. Make `[ OFF ]` interactive
 2. Persist the toggle state (likely in `client/src/store/stash.js`)
 3. Branch on it inside `_buildRaiderPanel`'s `[ Enter Dungeon ]` `pointerdown` handler before `this.scene.start('DungeonScene', ...)`
+
+## See also — historical context
+`archive/hub-settings-plan.md` — original feature plan for the Settings panel (rename + logout + Debug Mode placeholder). Read only if you need: the Phase 1/Phase 2 split decisions, the original modal/keyboard interaction design, or why Debug Mode was chosen as a routing hook rather than a real persisted setting. Covers settings only — shop and craft were built incrementally without a corresponding sprint plan. Frozen at sprint completion (2026-05-11).
