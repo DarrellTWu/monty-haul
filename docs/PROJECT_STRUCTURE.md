@@ -1,7 +1,7 @@
 ---
 status: shipped
 updated: 2026-05-16
-purpose: Canonical file-layout reference. Source of truth — CLAUDE.md and tech_spec.md link here, do not duplicate. Last bump: HubScene split landed.
+purpose: Canonical file-layout reference. Source of truth — CLAUDE.md and tech_spec.md link here, do not duplicate. Last bump: target-selection landed.
 ---
 
 # Project Structure (Actual)
@@ -94,9 +94,10 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `shared/tests/geometry.test.js` | 47 | AABB push-out, perimeter primitives, `tryAutoClimb`, `platformPerimeterRects`. |
 | `shared/tests/character.test.js` | 10 | `validateAbilityScores` — shape, range, budget. |
 | `shared/tests/equipment.test.js` | 14 | `equipItem`/`unequipItem`/`recomputeStats` — slot routing, two-handed, AC recompute. |
-| `shared/tests/conditions.test.js` | 15 | `applyCondition`/`tickConditions`/`clearPlayerConditions` — idempotency, mirror sync, expiry side effects, multi-player isolation. |
+| `shared/tests/conditions.test.js` | 18 | `applyCondition`/`tickConditions`/`clearPlayerConditions` — idempotency, mirror sync, expiry side effects, multi-player isolation. |
 | `server/tests/container-lock.test.js` | 21 | |
 | `server/tests/loot-flow.test.js` | 35 | |
+| `server/tests/target-selection.test.js` | 17 | Explicit-target validation in `playerAttack` — fallback, override, out-of-range/invalid denials, cooldown preservation. |
 | `server/tests/supabase-smoke.js` | 34 | Real dev Supabase. `process.loadEnvFile('server/.env')`. |
 | `server/tests/concurrency-smoke.js` | 7 | N concurrent buys → no duplicate rows. |
 | `server/tests/anti-cheat-smoke.js` | 25 | Buy/sell/craft rejection paths. |

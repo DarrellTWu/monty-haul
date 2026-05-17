@@ -9,6 +9,21 @@ Entries are newest-first within each session.
 
 ### Completed
 
+#### Target selection: click + Tab to designate attack targets
+
+SPACE still attacks, but the target is now under player control. Click an enemy or Tab through nearby living enemies to designate which one SPACE hits; with no selection, the existing nearest-enemy fallback runs. Selection is client-side UI state — the server validates `targetId` on every attack and rejects out-of-range / invalid targets without consuming the attack cooldown, so the player keeps their action.
+
+- `shared/data/constants.js` — `MELEE_SELECT_RANGE_PX = 160` (~2.5× hit range). Tab cycles enemies within this radius; click works on any rendered enemy.
+- `server/systems/CombatSystem.js` — `playerAttack(state, sessionId, enemyDefs, targetId?)`. Explicit target validates exists/alive/in-range; failures return `{ denied: 'out_of_range' | 'invalid_target' }` with cooldown preserved.
+- `server/rooms/DungeonRoom.js` — `attack` handler forwards `targetId`, replies `attack_denied` per-client on denial (not broadcast).
+- `client/src/input/InputHandler.js` — Tab key added with `addCapture('TAB')` so the browser doesn't move focus. SPACE now fires `onAttack` callback so the scene can supply `targetId`.
+- `client/src/scenes/DungeonScene.js` — `_selectedEnemyId` state, yellow selection ring per enemy, pointer-down hit-test (hit → select, miss → clear), Tab cycles by distance sorted ascending and wraps, auto-clears on death (per-frame) and floor change (via `onRemove`). `attack_denied` listener pipes "Target out of range." to HUD log.
+- `server/tests/target-selection.test.js` — 17 cases: fallback path, explicit override, out-of-range/dead/nonexistent denials, cooldown gate.
+- Plan archived: `docs/archive/target-selection-plan.md`.
+- Docs: `protocol.md` (new `attack` payload + `attack_denied` message), `combat.md` (Target Selection section), `PROJECT_STRUCTURE.md` (new test row + corrected `conditions.test.js` count: 15 → 18).
+
+**Decision:** Out-of-range explicit attacks fail loudly rather than falling back to nearest — preserves player intent, and forward-compatible with ranged weapons whose validation gate will be variable per-weapon. The `MELEE_SELECT_RANGE_PX` name signals where `weapon.selectRangePx` will hook in.
+
 #### Conditions refactor → `shared/logic/conditions.js`
 
 Extracted the hand-rolled condition-timer code from `DungeonRoom` into a pure module. The mapping `conditionId → mirror *RemainingMs field` is now defined once in `CONDITION_DEFS` instead of being re-encoded in `_useConsumable`, `_activateRage`, `_tickConditions`, and `_longRest`.
