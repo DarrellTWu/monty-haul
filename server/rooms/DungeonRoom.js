@@ -585,13 +585,10 @@ export class DungeonRoom extends Room {
       player.hp  = Math.min(player.maxHp, player.hp + heal);
       this.broadcast('combat_log', { message: `${c.label}: ${className} recovers ${heal} HP` });
     } else if (c.type === 'bless') {
-      // Bless does not refresh while already active — match original behavior.
-      if (!player.conditions.includes('bless')) {
-        applyCondition(player, 'bless', c.conditionDurationMs, this._conditionTimers, sessionId);
-        this.broadcast('combat_log', {
-          message: `${c.label}: ${className} gains Bless (+1d4 to attacks, ${c.conditionDurationMs / 1000}s)`,
-        });
-      }
+      applyCondition(player, 'bless', c.conditionDurationMs, this._conditionTimers, sessionId);
+      this.broadcast('combat_log', {
+        message: `${c.label}: ${className} gains Bless (+1d4 to attacks, ${c.conditionDurationMs / 1000}s)`,
+      });
     } else if (c.type === 'longstrider') {
       applyCondition(player, 'longstrider', c.conditionDurationMs, this._conditionTimers, sessionId);
       this.broadcast('combat_log', {
