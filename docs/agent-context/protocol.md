@@ -1,6 +1,6 @@
 ---
 status: shipped
-updated: 2026-05-14
+updated: 2026-05-16
 purpose: Client↔server WebSocket message protocol + Hub HTTP routes. Read when the task adds, removes, or modifies a message/route.
 ---
 
@@ -15,7 +15,7 @@ All messages handled in `DungeonRoom.js` `onCreate`.
 |---|---|---|
 | `move` | `{ dx, dy }` | Normalized direction (-1..1 each axis) |
 | `stop` | — | Zero player velocity |
-| `attack` | — | Attempt melee attack |
+| `attack` | `{ targetId? }` | Attempt melee attack. If `targetId` is provided, server attacks that specific enemy (validated alive + in `MELEE_HIT_RANGE_PX`). Omit/null → server falls back to nearest-living-enemy. Invalid/out-of-range explicit targets reply with `attack_denied` and **do not consume the attack cooldown**. |
 | `equip` | `{ itemId, slot? }` | `slot`: `'weapon' \| 'offhand' \| 'armor'` or omit for auto-detect |
 | `unequip` | `{ slot }` | `slot`: `'weapon' \| 'offhand' \| 'armor'` |
 | `open_container` | `{ sourceKind, sourceId }` | `sourceKind`: `'chest' \| 'corpse'`. Server replies `container_lock_denied` if already locked by another player |
@@ -33,6 +33,7 @@ All messages handled in `DungeonRoom.js` `onCreate`.
 |---|---|---|
 | `combat_log` | `{ message }` | Text line pushed to the HUD combat log |
 | `container_lock_denied` | `{ sourceKind, sourceId, holder }` | Sent when `open_container` is rejected; `InventoryScene` shows a HUD log line and closes |
+| `attack_denied` | `{ reason }` | Sent to the attacker only when an explicit-target `attack` fails validation. `reason`: `'out_of_range' \| 'invalid_target'`. Client shows a HUD log line; cooldown is preserved. |
 
 ### Validation Discipline
 Server validates all inputs. If invalid (item not in bag, two-handed + offhand conflict, locked stair, etc.), the message is processed silently (no error feedback sent to client). Client relies on state sync to detect successful changes; UI reflects server state, **never** client prediction.

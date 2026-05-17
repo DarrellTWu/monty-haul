@@ -1,7 +1,7 @@
 ---
 status: shipped
 updated: 2026-05-16
-purpose: Combat resolution, class schema, loadout, ability scores. Read when the task touches attacks, classes, or character creation.
+purpose: Combat resolution, target selection, class schema, loadout, ability scores. Read when the task touches attacks, classes, or character creation.
 ---
 
 # Combat, Classes, Loadout
@@ -39,6 +39,13 @@ Class default gear extracted at run-end enters the raider pack normally and trig
 - `resolveAttack(...)` accepts optional `advantage: boolean`.
 - When `advantage` true: rolls 2d20, keeps higher; natural 1 / natural 20 / hit threshold use the kept die. Returns `advantageRolls: [a, b]` (kept + discarded).
 - `CombatSystem` computes `advantage = attacker.elevation === 1 && target.elevation === 0` at every call site (player main + offhand + monk MA, enemy attack). Asymmetric — no reverse disadvantage. Combat log renders `d20:N [adv: a, b]` when active. See `agent-context/geometry-elevation.md`.
+
+## Target Selection
+- `playerAttack(state, sessionId, enemyDefs, targetId?)` in `server/systems/CombatSystem.js`. With `targetId`: validates enemy exists, alive, and within `MELEE_HIT_RANGE_PX`. Failures return `{ denied: 'out_of_range' | 'invalid_target' }` — **cooldown is not consumed**. Without `targetId`: existing nearest-living-enemy fallback.
+- `DungeonRoom` `attack` handler forwards `targetId` from the client and replies `attack_denied` (per-client, not broadcast) on denial.
+- Selection is **client-side only**, lives on `DungeonScene._selectedEnemyId`. Not on `PlayerState`; other players don't see your reticle.
+- Client controls: pointer-down hit-tests living enemies (hit → select, miss → clear); Tab cycles enemies within `MELEE_SELECT_RANGE_PX` of the local player sorted by distance (wraps); SPACE sends `sendAttack(selectedId)`. Selection auto-clears when the target dies or the floor changes.
+- `MELEE_SELECT_RANGE_PX` (`shared/data/constants.js`) is wider than hit range so the player can pre-select before stepping in. When ranged weapons land this becomes a per-weapon `selectRangePx`.
 
 ## Kill Attribution (DEFERRED)
 `PlayerState.kills` not implemented. `run_history.kills` always 0; column exists for future use. `_buildRunMeta` returns `kills: 0` literally. When attribution lands, increment in `CombatSystem` on enemy death.
