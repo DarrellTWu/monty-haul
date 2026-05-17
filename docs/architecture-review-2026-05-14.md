@@ -18,7 +18,7 @@ Scope: full project walk-through of `C:\projects\monty-haul`. Findings only when
 | § | Finding | Status |
 |---|---|---|
 | 2.1 | `DungeonRoom.js` god object | ✅ Done — equip/unequip → `shared/logic/equipment.js`; descend → `_descendTo()` named method; death-loot → `applyDeathLoot` in `shared/logic/loot.js`. `WEAPON_REGISTRY` deduped to `shared/data/weapons/melee.js`. DungeonRoom: 819 → 719 LOC. |
-| 2.2 | `HubScene.js` oversized | ⏳ Pending |
+| 2.2 | `HubScene.js` oversized | ✅ Done — split into 8 modules under `client/src/ui/hub/` (`hub-data.js` + Login/Settings/Class/Stash/Shop/Craft/Raider panels). HubScene reduced 1208 → 247 LOC (a ~80% drop); now a pure orchestrator holding cross-panel state + refresh hooks. |
 | 2.3 | `DungeonScene.js` rendering extraction | ✅ Done — `drawRoom` + `drawDoorBand` extracted to `client/src/rendering/RoomRenderer.js`. DungeonScene: 701 → 597 LOC. |
 | 2.4 | `playerStore.js` well-designed | ➖ No action |
 | 2.5 | Pure logic modules excellent | ➖ No action |

@@ -1,7 +1,7 @@
 ---
 status: shipped
-updated: 2026-05-15
-purpose: Canonical file-layout reference. Source of truth — CLAUDE.md and tech_spec.md link here, do not duplicate.
+updated: 2026-05-16
+purpose: Canonical file-layout reference. Source of truth — CLAUDE.md and tech_spec.md link here, do not duplicate. Last bump: HubScene split landed.
 ---
 
 # Project Structure (Actual)
@@ -38,7 +38,8 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | File | Purpose |
 |---|---|
 | `main.js` | Phaser config + scene registration. HubScene auto-starts. |
-| `scenes/HubScene.js` | Entry point. Checks `localStorage.mh_player_id` → login screen if absent. Two-panel layout: left cycles Class/Stash/Shop/Craft sub-screens, right is Raider Config + Enter Dungeon. Class panel includes 27-pt point-buy. Top bar (username + ⚙) opens modal Settings panel (menu / rename modes). Logout clears session + `scene.restart({})`. |
+| `scenes/HubScene.js` | Hub orchestrator (~250 LOC). Checks `localStorage.mh_player_id` → login screen if absent. Two-panel layout: left cycles Class/Stash/Shop/Craft sub-screens (rendered by panel modules under `ui/hub/`), right is the persistent Raider Config + Enter Dungeon. Owns cross-panel state (`_selectedClass`, `_abilityScores`, `_shopVendor`, `_craftBench`, `_leftView`) + refresh hooks (`_onPackChanged`, `_onPurchase`, `_onSold`, `_onCraft`, `_refreshRaider`, `_refreshVault`) that panels invoke after server mutations. |
+| `ui/hub/` | Hub panel modules. Each exports a `render*Panel(scene)` (and `refresh*Panel(scene)` where relevant) function that builds gfx via the scene-level `_l`/`_r` trackers. Panel files: `LoginPanel.js`, `SettingsPanel.js` (two-mode menu/rename modal with its own keydown listener), `ClassPanel.js` (class select + 27-pt point-buy), `StashPanel.js`, `ShopPanel.js`, `CraftPanel.js`, `RaiderPanel.js` (right-side + Enter Dungeon submit). `hub-data.js` holds shared constants (`LP`/`RP` geometry, `ITEM_META`, `STASH_ORDER`, `STASH_SECTIONS`, `CLASS_DISPLAY`, `STAT_KEYS`, point-buy helpers). |
 | `scenes/DungeonScene.js` | Gameplay rendering + input wiring. Receives `{class, abilityScores}` via `init(data)`; passes `playerId` (from `stash.getPlayerId()`) to server. F-key dispatches to chest/corpse/stair via `_tryInteractNearby`. Floor geometry rendering (`drawRoom`, `drawDoorBand` from `rendering/RoomRenderer.js`) paints platforms, steps, walls, doors. Entity render depth: ground=2, elevated=4. Per-entity `onRemove` handlers tear down gfx on floor change. |
 | `rendering/RoomRenderer.js` | Pure floor-geometry painters: `drawRoom(scene, floor)` returns a Graphics with base ground + outer walls + platform tint + step strips + interior walls; `drawDoorBand(gfx, doorState)` paints/repaints a single door. Owns the `COLOR_*`/`WALL`/`STEP_STRIP_*` visual constants. |
 | `scenes/HUDScene.js` | HP, condition rings, cooldown arc, hotbar, combat log. |
@@ -48,7 +49,7 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `store/stash.js` | Server-backed item store. `localStorage` only persists `mh_player_id`. In-memory cache `{stash, gold, raiderPack}` populated by `initFromServer` — server wins. Sync reads + async mutations (all return `Promise<{ok, error?}>`; `renameUser` additionally returns `username`). `logout()` clears session locally. **All hub-side mutations route through this file.** |
 | `input/InputHandler.js` | WASD/attack/hotbar key bindings. |
 
-**Not yet built:** `client/src/ui/` subdirectory (currently flat — HubScene split deferred; see `architecture-review-2026-05-14.md` §2.2).
+**Layout note:** UI helper modules now live under `client/src/ui/hub/` (panels) and `client/src/rendering/` (gameplay rendering).
 
 ## Shared (`shared/`)
 

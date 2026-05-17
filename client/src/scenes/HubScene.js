@@ -1,118 +1,30 @@
 // client/src/scenes/HubScene.js
-// Hub layout: left panel cycles through sub-screens (Class, Stash, future additions);
-// right panel is a persistent Raider Config summary. Enter Dungeon lives on the right.
+// Hub orchestrator. The panel modules under client/src/ui/hub/ own their own
+// build/refresh; this scene wires them together, holds cross-panel state
+// (`_selectedClass`, `_abilityScores`, `_shopVendor`, `_craftBench`, `_leftView`),
+// and exposes the shared callbacks panels invoke after server mutations:
+//   _onPackChanged — pack/stash changed (rebuild raider + stash if visible)
+//   _onPurchase    — buy completed (refresh vault + shop)
+//   _onSold        — sell completed (refresh vault + stash)
+//   _onCraft       — craft completed (refresh craft list)
+//   _refreshRaider — class change triggers raider rebuild
+//   _refreshVault  — gold-only updates (cheap)
+//   _refreshTopBar — username change after rename
+//
+// Panels track gfx via `_l` (left panel) / `_r` (right panel) for cleanup on
+// tab switch / full rebuild.
 
-import {
-  getStash, getRaiderPack, stashToRaider, raiderToStash, getHubGold,
-  buyItem, sellItem, craftRecipe, dumpRaiderPackToStash,
-  initFromServer, getPlayerId, getUsername, logout, renameUser,
-} from '../store/stash.js';
+import { getHubGold, getPlayerId, getUsername, initFromServer } from '../store/stash.js';
 import { HubAPI } from '../network/HubAPI.js';
-import { VENDOR_CATALOG } from '../../../shared/data/shop.js';
-import { sellPrice } from '../../../shared/data/values.js';
-import { BENCH_REGISTRY } from '../../../shared/data/crafting/benches.js';
-import { recipesForBench } from '../../../shared/data/crafting/recipes.js';
-import { CLASS_REGISTRY } from '../../../shared/data/classes/index.js';
-import { POINT_BUY_BUDGET, POINT_COST, SCORE_MIN, SCORE_MAX } from '../../../shared/data/constants.js';
-import { validateAbilityScores } from '../../../shared/logic/character.js';
 
-// Panel geometry
-const LP = { x: 30,  y: 70, w: 760, h: 600 }; // left panel
-const RP = { x: 810, y: 70, w: 440, h: 600 }; // right panel (raider config)
-
-// Item display metadata (label + one-line detail).
-const ITEM_META = {
-  longsword:           { label: 'Longsword',        detail: '1d8  slashing'    },
-  shortsword:          { label: 'Shortsword',       detail: '1d6  piercing'    },
-  dagger:              { label: 'Dagger',           detail: '1d4  piercing'    },
-  handaxe:             { label: 'Handaxe',          detail: '1d6  slashing'    },
-  mace:                { label: 'Mace',             detail: '1d6  bludgeoning' },
-  greataxe:            { label: 'Greataxe',         detail: '1d12 slashing'    },
-  greatsword:          { label: 'Greatsword',       detail: '2d6  slashing'    },
-  padded:              { label: 'Padded',           detail: 'AC 11+DEX  light' },
-  leather:             { label: 'Leather',          detail: 'AC 11+DEX  light' },
-  studded_leather:     { label: 'Studded Leather',  detail: 'AC 12+DEX  light' },
-  hide:                { label: 'Hide',             detail: 'AC 12+DEX  med'   },
-  chain_shirt:         { label: 'Chain Shirt',      detail: 'AC 13+DEX  med'   },
-  scale_mail:          { label: 'Scale Mail',       detail: 'AC 14+DEX  med'   },
-  breastplate:         { label: 'Breastplate',      detail: 'AC 14+DEX  med'   },
-  ring_mail:           { label: 'Ring Mail',        detail: 'AC 14  heavy'     },
-  chain_mail:          { label: 'Chain Mail',       detail: 'AC 16  heavy'     },
-  splint:              { label: 'Splint',           detail: 'AC 17  heavy'     },
-  half_plate:          { label: 'Half Plate',       detail: 'AC 15+DEX  med'   },
-  plate:               { label: 'Plate',            detail: 'AC 18  heavy'     },
-  shield:              { label: 'Shield',           detail: '+2 AC'            },
-  healing_potion:      { label: 'Healing Potion',   detail: '2d4+2 HP'         },
-  bless_potion:        { label: 'Bless Potion',     detail: '+1d4 atk 60s'     },
-  longstrider_potion:  { label: 'Longstrider Pot',  detail: '+10ft spd 2m'     },
-  false_life_potion:   { label: 'False Life Pot',   detail: '1d4+4 tmp HP 2m'  },
-  skeleton_bone:       { label: 'Skeleton Bone',    detail: 'crafting material'},
-  wolf_pelt:           { label: 'Wolf Pelt',        detail: 'crafting material'},
-};
-
-const STASH_ORDER = [
-  'longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword',
-  'padded','leather','studded_leather',
-  'hide','chain_shirt','scale_mail','breastplate','half_plate',
-  'ring_mail','chain_mail','splint','plate',
-  'shield',
-  'healing_potion','longstrider_potion','false_life_potion','bless_potion',
-  'skeleton_bone','wolf_pelt',
-];
-
-const ARMOR_IDS = [
-  'padded','leather','studded_leather',
-  'hide','chain_shirt','scale_mail','breastplate','half_plate',
-  'ring_mail','chain_mail','splint','plate',
-];
-
-const STASH_SECTIONS = [
-  { label: 'Weapons',        ids: new Set(['longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword']) },
-  { label: 'Armor & Shield', ids: new Set([...ARMOR_IDS, 'shield']) },
-  { label: 'Potions',        ids: new Set(['healing_potion','bless_potion','longstrider_potion','false_life_potion']) },
-  { label: 'Materials',      ids: new Set(['skeleton_bone','wolf_pelt']) },
-];
-
-// Stat labels for the point buy UI, in display order.
-const STAT_KEYS   = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
-const STAT_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
-
-function scoreMod(score) { return Math.floor((score - 10) / 2); }
-function scoreModStr(score) { const m = scoreMod(score); return `(${m >= 0 ? '+' : ''}${m})`; }
-function pointsSpent(scores) {
-  return STAT_KEYS.reduce((sum, k) => sum + (POINT_COST[scores[k]] ?? 0), 0);
-}
-
-// Class display metadata for the hub UI.
-// defaultScores: the recommended standard-array allocation for each class (costs exactly 27 pts).
-const CLASS_DISPLAY = {
-  fighter: {
-    label: 'Fighter',
-    traits: [
-      'Longsword · Chain Mail',
-      'Second Wind — 1d10+level HP (1/rest)',
-      'Fighting Style: Dueling (+2 dmg)',
-    ],
-    defaultScores: { str: 15, dex: 13, con: 14, int: 8, wis: 12, cha: 10 },
-  },
-  monk: {
-    label: 'Monk',
-    traits: [
-      'Shortsword · Unarmored Defense (AC = 10+DEX+WIS)',
-      'Martial Arts — DEX attacks, d4 unarmed',
-      'Bonus unarmed strike after monk weapon attack',
-    ],
-    defaultScores: { str: 12, dex: 15, con: 13, int: 8, wis: 14, cha: 10 },
-  },
-  barbarian: {
-    label: 'Barbarian',
-    traits: [
-      'Greatsword · Chain Mail',
-      'Rage — +2 dmg, resist physical dmg (2 uses, 30s)',
-    ],
-    defaultScores: { str: 15, dex: 13, con: 14, int: 8, wis: 10, cha: 12 },
-  },
-};
+import { LP, RP } from '../ui/hub/hub-data.js';
+import { showLoginPanel } from '../ui/hub/LoginPanel.js';
+import { openSettingsPanel } from '../ui/hub/SettingsPanel.js';
+import { renderClassPanel } from '../ui/hub/ClassPanel.js';
+import { renderStashPanel } from '../ui/hub/StashPanel.js';
+import { renderShopPanel, refreshShopPanel } from '../ui/hub/ShopPanel.js';
+import { renderCraftPanel, refreshCraftPanel } from '../ui/hub/CraftPanel.js';
+import { renderRaiderPanel } from '../ui/hub/RaiderPanel.js';
 
 export class HubScene extends Phaser.Scene {
   constructor() {
@@ -141,7 +53,7 @@ export class HubScene extends Phaser.Scene {
 
     const playerId = getPlayerId();
     if (!playerId) {
-      this._showLoginScreen();
+      showLoginPanel(this, { onSuccess: () => this._buildHub() });
       return;
     }
 
@@ -152,91 +64,6 @@ export class HubScene extends Phaser.Scene {
     this._loadHubFromServer(playerId);
   }
 
-  // ── Login flow ────────────────────────────────────────────────────────────────
-
-  _showLoginScreen() {
-    const cx = 640, cy = 340;
-
-    this._loginObjs.push(this.add.text(cx, cy - 120, "MONTY HAUL'S DUNGEON CRAWL", {
-      fontSize: '26px', color: '#ffdd88', fontFamily: 'monospace',
-    }).setOrigin(0.5));
-
-    const panel = this.add.graphics();
-    panel.fillStyle(0x12121e, 0.97);
-    panel.fillRect(cx - 240, cy - 70, 480, 180);
-    panel.lineStyle(1, 0x334466);
-    panel.strokeRect(cx - 240, cy - 70, 480, 180);
-    this._loginObjs.push(panel);
-
-    this._loginObjs.push(this.add.text(cx, cy - 44, 'RAIDER NAME', {
-      fontSize: '12px', color: '#556677', fontFamily: 'monospace',
-    }).setOrigin(0.5));
-
-    this._loginInputDisplay = this.add.text(cx, cy - 8, '█', {
-      fontSize: '22px', color: '#ffcc44', fontFamily: 'monospace',
-    }).setOrigin(0.5);
-    this._loginObjs.push(this._loginInputDisplay);
-
-    this._loginObjs.push(this.add.graphics()
-      .lineStyle(1, 0x334466)
-      .lineBetween(cx - 200, cy + 22, cx + 200, cy + 22));
-
-    this._loginStatusText = this.add.text(cx, cy + 44, 'type your name and press Enter', {
-      fontSize: '11px', color: '#445566', fontFamily: 'monospace',
-    }).setOrigin(0.5);
-    this._loginObjs.push(this._loginStatusText);
-
-    const enterBtn = this.add.text(cx, cy + 80, '[ Enter the Dungeon ]', {
-      fontSize: '15px', color: '#334455', fontFamily: 'monospace',
-    }).setOrigin(0.5);
-    this._loginObjs.push(enterBtn);
-    this._loginEnterBtn = enterBtn;
-
-    this._loginUsername = '';
-
-    this._keyHandler = (e) => {
-      if (e.key === 'Backspace') {
-        this._loginUsername = this._loginUsername.slice(0, -1);
-      } else if (e.key === 'Enter') {
-        if (this._loginUsername.trim()) this._submitLogin();
-      } else if (e.key.length === 1 && this._loginUsername.length < 20) {
-        this._loginUsername += e.key;
-      }
-      const display = this._loginUsername || '';
-      this._loginInputDisplay?.setText(display + '█');
-      const ready = !!this._loginUsername.trim();
-      this._loginEnterBtn?.setColor(ready ? '#ffcc44' : '#334455');
-      if (ready) {
-        this._loginEnterBtn?.setInteractive();
-        this._loginEnterBtn?.removeAllListeners();
-        this._loginEnterBtn?.on('pointerdown', () => this._submitLogin());
-        this._loginEnterBtn?.on('pointerover', () => this._loginEnterBtn.setColor('#ffffff'));
-        this._loginEnterBtn?.on('pointerout',  () => this._loginEnterBtn.setColor('#ffcc44'));
-      }
-    };
-    window.addEventListener('keydown', this._keyHandler);
-  }
-
-  async _submitLogin() {
-    const username = this._loginUsername.trim();
-    if (!username) return;
-    this._loginStatusText?.setText('Connecting...');
-    this._loginEnterBtn?.setColor('#556677');
-
-    try {
-      const data = await HubAPI.login(username);
-      if (!data.ok) {
-        this._loginStatusText?.setText('Could not connect — is the server running?');
-        return;
-      }
-      this._cleanupLogin();
-      initFromServer(data.playerId, data);
-      this._buildHub();
-    } catch {
-      this._loginStatusText?.setText('Could not connect — is the server running?');
-    }
-  }
-
   async _loadHubFromServer(playerId) {
     try {
       const data = await HubAPI.getState(playerId);
@@ -245,7 +72,7 @@ export class HubScene extends Phaser.Scene {
       if (!data.ok) {
         // Player not in server store (server restarted) — fall back to login.
         localStorage.removeItem('mh_player_id');
-        this._showLoginScreen();
+        showLoginPanel(this, { onSuccess: () => this._buildHub() });
         return;
       }
       initFromServer(playerId, data);
@@ -253,23 +80,11 @@ export class HubScene extends Phaser.Scene {
     } catch {
       this._loadingText?.destroy();
       this._loadingText = null;
-      this._showLoginScreen();
+      showLoginPanel(this, { onSuccess: () => this._buildHub() });
     }
   }
 
-  _cleanupLogin() {
-    if (this._keyHandler) {
-      window.removeEventListener('keydown', this._keyHandler);
-      this._keyHandler = null;
-    }
-    for (const obj of this._loginObjs) obj.destroy();
-    this._loginObjs = [];
-    this._loginInputDisplay = null;
-    this._loginStatusText   = null;
-    this._loginEnterBtn     = null;
-  }
-
-  // ── Hub build (was create() body) ─────────────────────────────────────────────
+  // ── Hub build ────────────────────────────────────────────────────────────────
 
   _buildHub() {
     this.add.text(640, 38, "MONTY HAUL'S DUNGEON CRAWL", {
@@ -287,7 +102,7 @@ export class HubScene extends Phaser.Scene {
     this._drawShells();
     this._buildSubNav();
     this._showLeftContent();
-    this._buildRaiderPanel();
+    renderRaiderPanel(this);
   }
 
   // ── Top bar: username + settings icon (persistent across tab switches) ────────
@@ -314,294 +129,16 @@ export class HubScene extends Phaser.Scene {
     this._topObjs.push(gearIcon);
   }
 
-  // ── Settings panel (modal overlay) ────────────────────────────────────────────
-  //
-  // Two modes: 'menu' (Rename + Log Out as equal options) and 'rename' (input
-  // field + Save/Cancel). The chrome (backdrop, frame, title, "Logged in as",
-  // Close) persists across mode swaps; only the body is re-rendered.
   _openSettings() {
-    if (this._settingsOpen) return;
-    this._settingsOpen     = true;
-    this._settingsMode     = 'menu';
-    this._renameInput      = '';
-    this._renameSubmitting = false;
-
-    // Full-screen backdrop swallows clicks under the panel and closes on click.
-    const backdrop = this.add.rectangle(0, 0, 1280, 720, 0x000000, 0.45)
-      .setOrigin(0)
-      .setInteractive();
-    backdrop.on('pointerdown', () => this._closeSettings());
-    this._settingsObjs.push(backdrop);
-
-    // Centered panel: 360 × 240 at (640, 360).
-    const PW = 360, PH = 240;
-    const px = 640 - PW / 2, py = 360 - PH / 2;
-    this._settingsGeom = { px, py, PW, PH };
-
-    const panel = this.add.graphics();
-    panel.fillStyle(0x12121e, 0.98);
-    panel.fillRect(px, py, PW, PH);
-    panel.lineStyle(1, 0x334466);
-    panel.strokeRect(px, py, PW, PH);
-    this._settingsObjs.push(panel);
-
-    // Clicks on the panel body should NOT propagate to the backdrop.
-    const panelHit = this.add.rectangle(px, py, PW, PH, 0x000000, 0).setOrigin(0).setInteractive();
-    this._settingsObjs.push(panelHit);
-
-    this._settingsTitleText = this.add.text(px + PW / 2, py + 22, 'SETTINGS', {
-      fontSize: '14px', color: '#aaaacc', fontFamily: 'monospace',
-    }).setOrigin(0.5);
-    this._settingsObjs.push(this._settingsTitleText);
-
-    this._settingsObjs.push(this.add.graphics()
-      .lineStyle(1, 0x223355)
-      .lineBetween(px + 20, py + 42, px + PW - 20, py + 42));
-
-    // "Logged in as" lives in chrome but its text object is tracked so it can
-    // be refreshed when the rename succeeds and we swap back to menu mode.
-    this._loggedInAsText = this.add.text(px + 20, py + 60,
-      `Logged in as: ${getUsername() ?? '(unknown)'}`, {
-      fontSize: '12px', color: '#8899bb', fontFamily: 'monospace',
+    openSettingsPanel(this, {
+      onRefreshTopBar: () => this._buildTopBar(),
+      // Pass {} explicitly so any prior init({ view: 'stash' }) from DungeonScene
+      // doesn't leak through scene.restart.
+      onLogout:        () => this.scene.restart({}),
     });
-    this._settingsObjs.push(this._loggedInAsText);
-
-    const closeBtn = this.add.text(px + PW - 20, py + PH - 24, '[ × Close ]', {
-      fontSize: '12px', color: '#8888aa', fontFamily: 'monospace',
-    }).setOrigin(1, 0.5).setInteractive();
-    closeBtn.on('pointerover', () => closeBtn.setColor('#ffffff'));
-    closeBtn.on('pointerout',  () => closeBtn.setColor('#8888aa'));
-    closeBtn.on('pointerdown', () => this._closeSettings());
-    this._settingsObjs.push(closeBtn);
-
-    this._renderSettingsBody();
-
-    // Single keydown handler — Escape is mode-aware (rename→menu, menu→close);
-    // edit/submit keys only apply in rename mode.
-    this._settingsKeyHandler = (e) => {
-      if (e.key === 'Escape') {
-        if (this._settingsMode === 'rename') this._switchToMenuMode();
-        else                                  this._closeSettings();
-        return;
-      }
-      if (this._settingsMode !== 'rename' || this._renameSubmitting) return;
-      if (e.key === 'Enter')     { this._submitRename(); return; }
-      if (e.key === 'Backspace') {
-        this._renameInput = this._renameInput.slice(0, -1);
-        this._setRenameStatus('', '#778899');
-        this._refreshRenameInputDisplay();
-        return;
-      }
-      if (e.key.length === 1 && this._renameInput.length < 20) {
-        this._renameInput += e.key;
-        this._setRenameStatus('', '#778899');
-        this._refreshRenameInputDisplay();
-      }
-    };
-    window.addEventListener('keydown', this._settingsKeyHandler);
   }
 
-  // ── Body renderers (mode-specific) ────────────────────────────────────────────
-
-  _renderSettingsBody() {
-    for (const obj of this._settingsBodyObjs) obj.destroy();
-    this._settingsBodyObjs = [];
-    this._renameInputText  = null;
-    this._renameStatusText = null;
-    this._renameBtn        = null;
-    this._renameCancelBtn  = null;
-
-    if (this._settingsMode === 'rename') this._renderRenameBody();
-    else                                  this._renderMenuBody();
-  }
-
-  _renderMenuBody() {
-    const { px, py } = this._settingsGeom;
-
-    // Debug Mode toggle. Locked to ON for now — the only dungeon we ship today
-    // is the debug/testing build with full loot and all classes unlocked.
-    // When OFF becomes live, entering the dungeon should route through the
-    // intended end-user gameplay path (matchmaking, fresh-party rooms, etc.).
-    this._settingsBodyObjs.push(this.add.text(px + 20, py + 82, 'DEBUG MODE', {
-      fontSize: '12px', color: '#8899bb', fontFamily: 'monospace',
-    }));
-
-    this._settingsBodyObjs.push(this.add.text(px + 130, py + 80, '[ ON ]', {
-      fontSize: '14px', color: '#ffcc44', fontFamily: 'monospace',
-    }));
-
-    this._settingsBodyObjs.push(this.add.text(px + 190, py + 80, '[ OFF ]', {
-      fontSize: '14px', color: '#445566', fontFamily: 'monospace',
-    }));
-
-    this._settingsBodyObjs.push(this.add.text(px + 20, py + 102,
-      'locked — dungeon is tuned for testing', {
-      fontSize: '10px', color: '#556677', fontFamily: 'monospace',
-    }));
-
-    const renameBtn = this.add.text(px + 20, py + 128, '[ Rename ]', {
-      fontSize: '14px', color: '#ffcc44', fontFamily: 'monospace',
-    }).setInteractive();
-    renameBtn.on('pointerover', () => renameBtn.setColor('#ffffff'));
-    renameBtn.on('pointerout',  () => renameBtn.setColor('#ffcc44'));
-    renameBtn.on('pointerdown', () => this._switchToRenameMode());
-    this._settingsBodyObjs.push(renameBtn);
-
-    const logoutBtn = this.add.text(px + 20, py + 158, '[ Log Out ]', {
-      fontSize: '14px', color: '#ffcc44', fontFamily: 'monospace',
-    }).setInteractive();
-    logoutBtn.on('pointerover', () => logoutBtn.setColor('#ffffff'));
-    logoutBtn.on('pointerout',  () => logoutBtn.setColor('#ffcc44'));
-    logoutBtn.on('pointerdown', () => this._doLogout());
-    this._settingsBodyObjs.push(logoutBtn);
-  }
-
-  _renderRenameBody() {
-    const { px, py, PW } = this._settingsGeom;
-
-    this._settingsBodyObjs.push(this.add.text(px + 20, py + 92, 'NEW NAME', {
-      fontSize: '11px', color: '#556677', fontFamily: 'monospace',
-    }));
-
-    // Outlined input box so the field reads as "type here."
-    const inputBox = this.add.graphics();
-    inputBox.lineStyle(1, 0x334466);
-    inputBox.strokeRect(px + 20, py + 106, PW - 40, 24);
-    this._settingsBodyObjs.push(inputBox);
-
-    this._renameInputText = this.add.text(px + 26, py + 110, '', {
-      fontSize: '13px', color: '#ffcc44', fontFamily: 'monospace',
-    });
-    this._settingsBodyObjs.push(this._renameInputText);
-    this._refreshRenameInputDisplay();
-
-    this._renameBtn = this.add.text(px + 20, py + 142, '[ Save ]', {
-      fontSize: '13px', color: '#88ccff', fontFamily: 'monospace',
-    }).setInteractive();
-    this._renameBtn.on('pointerover', () => { if (!this._renameSubmitting) this._renameBtn.setColor('#ffffff'); });
-    this._renameBtn.on('pointerout',  () => { if (!this._renameSubmitting) this._renameBtn.setColor('#88ccff'); });
-    this._renameBtn.on('pointerdown', () => this._submitRename());
-    this._settingsBodyObjs.push(this._renameBtn);
-
-    this._renameCancelBtn = this.add.text(px + 90, py + 142, '[ Cancel ]', {
-      fontSize: '13px', color: '#8888aa', fontFamily: 'monospace',
-    }).setInteractive();
-    this._renameCancelBtn.on('pointerover', () => this._renameCancelBtn.setColor('#ffffff'));
-    this._renameCancelBtn.on('pointerout',  () => this._renameCancelBtn.setColor('#8888aa'));
-    this._renameCancelBtn.on('pointerdown', () => this._switchToMenuMode());
-    this._settingsBodyObjs.push(this._renameCancelBtn);
-
-    this._renameStatusText = this.add.text(px + 180, py + 144, '', {
-      fontSize: '11px', color: '#778899', fontFamily: 'monospace',
-    });
-    this._settingsBodyObjs.push(this._renameStatusText);
-  }
-
-  // ── Mode transitions ──────────────────────────────────────────────────────────
-
-  _switchToRenameMode() {
-    this._settingsMode     = 'rename';
-    this._renameInput      = getUsername() ?? '';
-    this._renameSubmitting = false;
-    this._settingsTitleText?.setText('SETTINGS  ›  RENAME');
-    this._settingsTitleText?.setColor('#ffcc44');
-    this._renderSettingsBody();
-  }
-
-  _switchToMenuMode() {
-    this._settingsMode     = 'menu';
-    this._renameInput      = '';
-    this._renameSubmitting = false;
-    this._settingsTitleText?.setText('SETTINGS');
-    this._settingsTitleText?.setColor('#aaaacc');
-    // Refresh "Logged in as" so a just-completed rename is reflected.
-    this._loggedInAsText?.setText(`Logged in as: ${getUsername() ?? '(unknown)'}`);
-    this._renderSettingsBody();
-  }
-
-  _refreshRenameInputDisplay() {
-    if (!this._renameInputText) return;
-    this._renameInputText.setText(`${this._renameInput}█`);
-  }
-
-  _setRenameStatus(text, color) {
-    if (!this._renameStatusText) return;
-    this._renameStatusText.setText(text);
-    this._renameStatusText.setColor(color);
-  }
-
-  async _submitRename() {
-    if (this._renameSubmitting) return;
-    const trimmed = this._renameInput.trim();
-    if (!trimmed) {
-      this._setRenameStatus('Name cannot be empty', '#cc7766');
-      return;
-    }
-    if (trimmed === getUsername()) {
-      this._setRenameStatus('Already named that', '#aaaa88');
-      return;
-    }
-
-    this._renameSubmitting = true;
-    this._renameBtn?.setColor('#556677');
-    this._setRenameStatus('Renaming…', '#aaaaaa');
-
-    let result;
-    try {
-      result = await renameUser(trimmed);
-    } catch {
-      this._renameSubmitting = false;
-      this._renameBtn?.setColor('#88ccff');
-      this._setRenameStatus('Could not connect', '#cc7766');
-      return;
-    }
-
-    if (result.ok) {
-      this._setRenameStatus('Saved ✓', '#88cc88');
-      this._buildTopBar();
-      // Disable buttons so a stray click during the close delay can't fire.
-      this._renameBtn?.disableInteractive();
-      this._renameCancelBtn?.disableInteractive();
-      this.time.delayedCall(600, () => this._closeSettings());
-      return;
-    }
-
-    this._renameSubmitting = false;
-    this._renameBtn?.setColor('#88ccff');
-    if (result.error === 'username_taken')        this._setRenameStatus('Name already taken', '#cc7766');
-    else if (result.error === 'invalid_username') this._setRenameStatus('Invalid name', '#cc7766');
-    else                                          this._setRenameStatus(result.error ?? 'Failed', '#cc7766');
-  }
-
-  _closeSettings() {
-    if (!this._settingsOpen) return;
-    if (this._settingsKeyHandler) {
-      window.removeEventListener('keydown', this._settingsKeyHandler);
-      this._settingsKeyHandler = null;
-    }
-    for (const obj of this._settingsBodyObjs) obj.destroy();
-    for (const obj of this._settingsObjs)     obj.destroy();
-    this._settingsBodyObjs   = [];
-    this._settingsObjs       = [];
-    this._settingsOpen       = false;
-    this._settingsTitleText  = null;
-    this._loggedInAsText     = null;
-    this._renameInputText    = null;
-    this._renameStatusText = null;
-    this._renameBtn        = null;
-    this._renameCancelBtn  = null;
-    this._renameSubmitting = false;
-  }
-
-  _doLogout() {
-    this._closeSettings();
-    logout();
-    // Pass {} explicitly so any prior init({ view: 'stash' }) from DungeonScene
-    // doesn't leak through scene.restart.
-    this.scene.restart({});
-  }
-
-  // ── Permanent shell ───────────────────────────────────────────────────────────
+  // ── Permanent shell ──────────────────────────────────────────────────────────
 
   _drawShells() {
     const g = this.add.graphics();
@@ -613,7 +150,7 @@ export class HubScene extends Phaser.Scene {
     g.strokeRect(RP.x, RP.y, RP.w, RP.h);
   }
 
-  // ── Sub-nav (left panel tabs — permanent) ─────────────────────────────────────
+  // ── Sub-nav (left panel tabs — permanent) ────────────────────────────────────
 
   _buildSubNav() {
     const tabs = [
@@ -649,6 +186,9 @@ export class HubScene extends Phaser.Scene {
 
   _switchLeftView(view) {
     if (this._leftView === view) return;
+    // Class panel preserves _abilityScores across leaves; on first ever Class
+    // visit, seed scores from the selected class' defaults so the point-buy
+    // UI has data to render.
     this._leftView = view;
     this._updateSubNav();
     for (const obj of this._leftObjs) obj.destroy();
@@ -656,540 +196,39 @@ export class HubScene extends Phaser.Scene {
     this._showLeftContent();
   }
 
-  // ── Left panel content ────────────────────────────────────────────────────────
-
   _showLeftContent() {
-    if      (this._leftView === 'class') this._showClassScreen();
-    else if (this._leftView === 'shop')  this._showShopScreen();
-    else if (this._leftView === 'craft') this._showCraftScreen();
-    else                                 this._showStashScreen();
+    if      (this._leftView === 'class') renderClassPanel(this);
+    else if (this._leftView === 'shop')  renderShopPanel(this);
+    else if (this._leftView === 'craft') renderCraftPanel(this);
+    else                                 renderStashPanel(this);
   }
 
-  _showClassScreen() {
-    const x = LP.x + 20;
-    let y = LP.y + 52;
-
-    this._l(this.add.text(x, y, 'SELECT CLASS', {
-      fontSize: '12px', color: '#aaaacc', fontFamily: 'monospace',
-    })); y += 24;
-
-    for (const [id, def] of Object.entries(CLASS_DISPLAY)) {
-      const selected = this._selectedClass === id;
-      const row = this._l(this.add.text(x + 8, y,
-        `${selected ? '► ' : '  '}${def.label}`,
-        { fontSize: '15px', color: selected ? '#ffcc44' : '#8899bb', fontFamily: 'monospace' },
-      ).setInteractive());
-      row.on('pointerover',  () => { if (this._selectedClass !== id) row.setColor('#ccddff'); });
-      row.on('pointerout',   () => { if (this._selectedClass !== id) row.setColor('#8899bb'); });
-      row.on('pointerdown',  () => this._selectClass(id));
-      y += 24;
-    }
-
-    y += 8;
-    this._l(this.add.graphics().lineStyle(1, 0x223355).lineBetween(x, y, LP.x + LP.w - 20, y));
-    y += 14;
-
-    if (this._selectedClass) {
-      const def = CLASS_DISPLAY[this._selectedClass];
-      this._l(this.add.text(x, y, def.label, {
-        fontSize: '14px', color: '#ccddff', fontFamily: 'monospace', fontStyle: 'bold',
-      })); y += 22;
-      for (const trait of def.traits) {
-        this._l(this.add.text(x + 8, y, `· ${trait}`, {
-          fontSize: '12px', color: '#8899bb', fontFamily: 'monospace',
-        })); y += 17;
-      }
-      y += 10;
-      this._showAbilityScores(x, y);
-    } else {
-      this._l(this.add.text(x + 8, y, 'Select a class to see details.', {
-        fontSize: '12px', color: '#334455', fontFamily: 'monospace',
-      }));
-    }
-  }
-
-  _refreshClassScreen() {
-    for (const obj of this._leftObjs) obj.destroy();
-    this._leftObjs = [];
-    this._showClassScreen();
-  }
-
-  _showAbilityScores(x, startY) {
-    let y = startY;
-    const scores  = this._abilityScores;
-    const spent   = pointsSpent(scores);
-    const remaining = POINT_BUY_BUDGET - spent;
-
-    this._l(this.add.text(x, y, 'ABILITY SCORES', {
-      fontSize: '11px', color: '#aaaacc', fontFamily: 'monospace',
-    }));
-    this._l(this.add.text(LP.x + LP.w - 20, y,
-      `Points: ${remaining} / ${POINT_BUY_BUDGET}`,
-      { fontSize: '11px', color: remaining === 0 ? '#88ccaa' : '#ffcc44', fontFamily: 'monospace' },
-    ).setOrigin(1, 0));
-    y += 16;
-
-    this._l(this.add.graphics()
-      .lineStyle(1, 0x223355)
-      .lineBetween(x, y, LP.x + LP.w - 20, y));
-    y += 10;
-
-    for (const key of STAT_KEYS) {
-      const score   = scores[key];
-      const cost    = POINT_COST[score] ?? 0;
-      const nextCost = POINT_COST[score + 1] ?? 999;
-      const canDec  = score > SCORE_MIN;
-      const canInc  = score < SCORE_MAX && (nextCost - cost) <= remaining;
-
-      const decBtn = this._l(this.add.text(x + 8, y, '[ − ]', {
-        fontSize: '12px',
-        color: canDec ? '#88ccff' : '#334455',
-        fontFamily: 'monospace',
-      }));
-      if (canDec) {
-        decBtn.setInteractive();
-        decBtn.on('pointerover', () => decBtn.setColor('#ffffff'));
-        decBtn.on('pointerout',  () => decBtn.setColor('#88ccff'));
-        decBtn.on('pointerdown', () => {
-          this._abilityScores[key] = score - 1;
-          this._refreshClassScreen();
-        });
-      }
-
-      this._l(this.add.text(x + 55, y,
-        `${STAT_LABELS[key]}  ${String(score).padStart(2)}  ${scoreModStr(score)}`,
-        { fontSize: '12px', color: '#cccccc', fontFamily: 'monospace' },
-      ));
-
-      const incCost  = nextCost - cost;
-      const incLabel = score < SCORE_MAX ? `[+](${incCost})` : '[ + ]';
-      const incBtn = this._l(this.add.text(x + 168, y, incLabel, {
-        fontSize: '12px',
-        color: canInc ? '#88ccff' : '#334455',
-        fontFamily: 'monospace',
-      }));
-      if (canInc) {
-        incBtn.setInteractive();
-        incBtn.on('pointerover', () => incBtn.setColor('#ffffff'));
-        incBtn.on('pointerout',  () => incBtn.setColor('#88ccff'));
-        incBtn.on('pointerdown', () => {
-          this._abilityScores[key] = score + 1;
-          this._refreshClassScreen();
-        });
-      }
-
-      y += 18;
-    }
-
-    y += 4;
-    this._l(this.add.graphics()
-      .lineStyle(1, 0x223355)
-      .lineBetween(x, y, LP.x + LP.w - 20, y));
-    y += 10;
-
-    const classDef = CLASS_REGISTRY[this._selectedClass];
-    if (classDef) {
-      const conMod = scoreMod(scores.con);
-      const hp     = Math.floor((classDef.hitDie + conMod) * 2);
-      this._l(this.add.text(x + 8, y, `Estimated starting HP: ${hp}`, {
-        fontSize: '11px', color: '#88ccaa', fontFamily: 'monospace',
-      }));
-      y += 18;
-    }
-
-    const resetBtn = this._l(this.add.text(x + 8, y, '[ Reset to Class Defaults ]', {
-      fontSize: '11px', color: '#8888aa', fontFamily: 'monospace',
-    }).setInteractive());
-    resetBtn.on('pointerover', () => resetBtn.setColor('#aabbdd'));
-    resetBtn.on('pointerout',  () => resetBtn.setColor('#8888aa'));
-    resetBtn.on('pointerdown', () => {
-      this._abilityScores = { ...CLASS_DISPLAY[this._selectedClass].defaultScores };
-      this._refreshClassScreen();
-    });
-  }
-
-  _showStashScreen() {
-    const stash = getStash();
-    const x = LP.x + 20;
-    let y = LP.y + 52;
-
-    this._l(this.add.text(x, y, 'STASH', {
-      fontSize: '12px', color: '#aaaacc', fontFamily: 'monospace',
-    }));
-    this._l(this.add.text(LP.x + LP.w - 20, y, 'click row → pack  ·  [ Sell ] → vault', {
-      fontSize: '10px', color: '#445566', fontFamily: 'monospace',
-    }).setOrigin(1, 0));
-    y += 22;
-
-    let hasItems = false;
-    for (const section of STASH_SECTIONS) {
-      const items = stash
-        .filter(e => section.ids.has(e.id))
-        .sort((a, b) => STASH_ORDER.indexOf(a.id) - STASH_ORDER.indexOf(b.id));
-      if (!items.length) continue;
-
-      hasItems = true;
-      this._l(this.add.text(x, y, section.label, {
-        fontSize: '11px', color: '#556677', fontFamily: 'monospace',
-      })); y += 14;
-
-      for (const { id, qty } of items) {
-        const meta = ITEM_META[id] ?? { label: id, detail: '' };
-        const row  = this._l(this.add.text(x + 8, y,
-          `${meta.label.padEnd(18)} ${meta.detail}${qty > 1 ? `  ×${qty}` : ''}`,
-          { fontSize: '12px', color: '#ffdd88', fontFamily: 'monospace' },
-        ).setInteractive());
-        row.on('pointerover',  () => row.setColor('#ffffff'));
-        row.on('pointerout',   () => row.setColor('#ffdd88'));
-        row.on('pointerdown',  () => {
-          stashToRaider(id).then(r => { if (r.ok) this._onPackChanged(); else console.warn('[HubScene] stashToRaider failed:', r.error); });
-        });
-
-        const price = sellPrice(id);
-        if (price > 0) {
-          const sellBtn = this._l(this.add.text(LP.x + LP.w - 20, y, `[ Sell ${price} gp ]`, {
-            fontSize: '11px', color: '#88ccff', fontFamily: 'monospace',
-          }).setOrigin(1, 0).setInteractive());
-          sellBtn.on('pointerover', () => sellBtn.setColor('#ffffff'));
-          sellBtn.on('pointerout',  () => sellBtn.setColor('#88ccff'));
-          sellBtn.on('pointerdown', () => {
-            sellItem(id).then(r => { if (r.ok) this._onSold(); else console.warn('[HubScene] sellItem failed:', r.error); });
-          });
-        }
-
-        y += 16;
-      }
-      y += 8;
-    }
-
-    if (!hasItems) {
-      this._l(this.add.text(x + 8, y, '(empty)', {
-        fontSize: '12px', color: '#334455', fontFamily: 'monospace',
-      }));
-    }
-  }
-
-  _showShopScreen() {
-    const x = LP.x + 20;
-    let   y = LP.y + 52;
-
-    this._l(this.add.text(x, y, 'SHOP', {
-      fontSize: '12px', color: '#aaaacc', fontFamily: 'monospace',
-    }));
-    this._l(this.add.text(LP.x + LP.w - 20, y, 'click [ Buy ] to add to stash  ›', {
-      fontSize: '10px', color: '#445566', fontFamily: 'monospace',
-    }).setOrigin(1, 0));
-    y += 22;
-
-    const vendors = [{ id: 'potions', label: 'Potion Vendor' }, { id: 'armor', label: 'Armor Vendor' }];
-    let vx = x;
-    for (const { id, label } of vendors) {
-      const active = this._shopVendor === id;
-      const btn = this._l(this.add.text(vx, y, `[ ${label} ]`, {
-        fontSize: '13px',
-        color: active ? '#ffcc44' : '#8888aa',
-        fontFamily: 'monospace',
-      }).setInteractive());
-      btn.on('pointerover', () => { if (this._shopVendor !== id) btn.setColor('#aabbdd'); });
-      btn.on('pointerout',  () => { if (this._shopVendor !== id) btn.setColor('#8888aa'); });
-      btn.on('pointerdown', () => {
-        if (this._shopVendor === id) return;
-        this._shopVendor = id;
-        this._refreshShopScreen();
-      });
-      vx += btn.width + 16;
-    }
-    y += 28;
-
-    this._l(this.add.graphics()
-      .lineStyle(1, 0x223355)
-      .lineBetween(x, y, LP.x + LP.w - 20, y));
-    y += 12;
-
-    const gold  = getHubGold();
-    const items = VENDOR_CATALOG[this._shopVendor] ?? [];
-
-    for (const { id, price } of items) {
-      const meta       = ITEM_META[id] ?? { label: id, detail: '' };
-      const affordable = gold >= price;
-      const itemColor  = affordable ? '#ffdd88' : '#445566';
-
-      this._l(this.add.text(x + 8, y,
-        `${meta.label.padEnd(18)} ${meta.detail.padEnd(20)} ${String(price).padStart(5)} gp`,
-        { fontSize: '12px', color: itemColor, fontFamily: 'monospace' },
-      ));
-
-      const buyX = LP.x + LP.w - 24;
-      const buyBtn = this._l(this.add.text(buyX, y, '[ Buy ]', {
-        fontSize: '12px',
-        color: affordable ? '#88ccff' : '#334455',
-        fontFamily: 'monospace',
-      }).setOrigin(1, 0));
-
-      if (affordable) {
-        buyBtn.setInteractive();
-        buyBtn.on('pointerover', () => buyBtn.setColor('#ffffff'));
-        buyBtn.on('pointerout',  () => buyBtn.setColor('#88ccff'));
-        buyBtn.on('pointerdown', () => {
-          buyItem(id).then(r => { if (r.ok) this._onPurchase(); else console.warn('[HubScene] buyItem failed:', r.error); });
-        });
-      }
-
-      y += 18;
-    }
-  }
+  // ── Refresh hooks invoked by panels after server mutations ───────────────────
 
   _refreshVault() {
     if (this._vaultGoldText) this._vaultGoldText.setText(`${getHubGold()} gp`);
   }
 
-  _refreshShopScreen() {
-    for (const obj of this._leftObjs) obj.destroy();
-    this._leftObjs = [];
-    this._showShopScreen();
+  _refreshRaider() {
+    renderRaiderPanel(this);
   }
 
   _onPurchase() {
     this._refreshVault();
-    this._refreshShopScreen();
-  }
-
-  // ── Crafting screen ──────────────────────────────────────────────────────────
-
-  _showCraftScreen() {
-    const x = LP.x + 20;
-    let   y = LP.y + 52;
-
-    this._l(this.add.text(x, y, 'CRAFTING', {
-      fontSize: '12px', color: '#aaaacc', fontFamily: 'monospace',
-    }));
-    this._l(this.add.text(LP.x + LP.w - 20, y, 'click [ Craft ] to consume mats  ›', {
-      fontSize: '10px', color: '#445566', fontFamily: 'monospace',
-    }).setOrigin(1, 0));
-    y += 22;
-
-    let bx = x;
-    for (const bench of Object.values(BENCH_REGISTRY)) {
-      const active = this._craftBench === bench.id;
-      const btn = this._l(this.add.text(bx, y, `[ ${bench.label} ]`, {
-        fontSize: '12px',
-        color: active ? '#ffcc44' : (bench.status === 'open' ? '#8888aa' : '#556677'),
-        fontFamily: 'monospace',
-      }).setInteractive());
-      btn.on('pointerover', () => { if (this._craftBench !== bench.id) btn.setColor('#aabbdd'); });
-      btn.on('pointerout',  () => {
-        if (this._craftBench !== bench.id) {
-          btn.setColor(bench.status === 'open' ? '#8888aa' : '#556677');
-        }
-      });
-      btn.on('pointerdown', () => {
-        if (this._craftBench === bench.id) return;
-        this._craftBench = bench.id;
-        this._refreshCraftScreen();
-      });
-      bx += btn.width + 10;
-    }
-    y += 26;
-
-    this._l(this.add.graphics()
-      .lineStyle(1, 0x223355)
-      .lineBetween(x, y, LP.x + LP.w - 20, y));
-    y += 12;
-
-    const bench = BENCH_REGISTRY[this._craftBench];
-    this._l(this.add.text(x, y, bench.label.toUpperCase(), {
-      fontSize: '14px', color: '#ccddff', fontFamily: 'monospace', fontStyle: 'bold',
-    })); y += 18;
-    this._l(this.add.text(x, y, bench.blurb, {
-      fontSize: '11px', color: '#778899', fontFamily: 'monospace',
-    })); y += 22;
-
-    if (bench.status !== 'open') {
-      this._l(this.add.text(x + 8, y, '(coming soon)', {
-        fontSize: '12px', color: '#445566', fontFamily: 'monospace',
-      }));
-      return;
-    }
-
-    const stash   = getStash();
-    const stashOf = (id) => (stash.find(e => e.id === id)?.qty ?? 0);
-    const recipes = recipesForBench(bench.id);
-
-    if (recipes.length === 0) {
-      this._l(this.add.text(x + 8, y, '(no recipes available)', {
-        fontSize: '12px', color: '#445566', fontFamily: 'monospace',
-      }));
-      return;
-    }
-
-    for (const recipe of recipes) {
-      const affordable = recipe.inputs.every(({ id, qty }) => stashOf(id) >= qty);
-
-      const inputsStr = recipe.inputs.map(({ id, qty }) => {
-        const meta = ITEM_META[id] ?? { label: id };
-        return `${qty}× ${meta.label}`;
-      }).join(' + ');
-
-      const outMeta = ITEM_META[recipe.output.id] ?? { label: recipe.output.id };
-      const outStr  = `${recipe.output.qty > 1 ? recipe.output.qty + '× ' : ''}${outMeta.label}`;
-
-      const rowColor = affordable ? '#ffdd88' : '#445566';
-      this._l(this.add.text(x + 8, y, recipe.label.padEnd(14), {
-        fontSize: '12px', color: rowColor, fontFamily: 'monospace',
-      }));
-      this._l(this.add.text(x + 8 + 110, y, `${inputsStr}  →  ${outStr}`, {
-        fontSize: '12px', color: rowColor, fontFamily: 'monospace',
-      }));
-
-      const buyX = LP.x + LP.w - 24;
-      const craftBtn = this._l(this.add.text(buyX, y, '[ Craft ]', {
-        fontSize: '12px',
-        color: affordable ? '#88ccff' : '#334455',
-        fontFamily: 'monospace',
-      }).setOrigin(1, 0));
-
-      if (affordable) {
-        craftBtn.setInteractive();
-        craftBtn.on('pointerover', () => craftBtn.setColor('#ffffff'));
-        craftBtn.on('pointerout',  () => craftBtn.setColor('#88ccff'));
-        craftBtn.on('pointerdown', () => {
-          craftRecipe(recipe.id).then(r => { if (r.ok) this._onCraft(); else console.warn('[HubScene] craftRecipe failed:', r.error); });
-        });
-      }
-      y += 20;
-    }
-  }
-
-  _refreshCraftScreen() {
-    for (const obj of this._leftObjs) obj.destroy();
-    this._leftObjs = [];
-    this._showCraftScreen();
+    refreshShopPanel(this);
   }
 
   _onCraft() {
-    this._refreshCraftScreen();
-  }
-
-  _selectClass(classId) {
-    this._selectedClass = classId;
-    this._abilityScores = { ...CLASS_DISPLAY[classId].defaultScores };
-    for (const obj of this._leftObjs) obj.destroy();
-    this._leftObjs = [];
-    this._showClassScreen();
-    this._buildRaiderPanel();
-  }
-
-  // ── Right panel: Raider Config (rebuilt on any raider state change) ───────────
-
-  _buildRaiderPanel() {
-    for (const obj of this._rightObjs) obj.destroy();
-    this._rightObjs = [];
-
-    const x = RP.x + 20;
-    let y = RP.y + 16;
-
-    this._r(this.add.text(x, y, 'RAIDER CONFIG', {
-      fontSize: '13px', color: '#aaaacc', fontFamily: 'monospace',
-    })); y += 26;
-
-    this._r(this.add.text(x, y, 'CLASS', {
-      fontSize: '11px', color: '#556677', fontFamily: 'monospace',
-    })); y += 15;
-
-    if (this._selectedClass) {
-      const def = CLASS_DISPLAY[this._selectedClass];
-      this._r(this.add.text(x + 8, y, def.label, {
-        fontSize: '14px', color: '#ffcc44', fontFamily: 'monospace',
-      })); y += 20;
-      for (const trait of def.traits) {
-        this._r(this.add.text(x + 8, y, `· ${trait}`, {
-          fontSize: '11px', color: '#778899', fontFamily: 'monospace',
-        })); y += 14;
-      }
-    } else {
-      this._r(this.add.text(x + 8, y, '(none — select on Class tab)', {
-        fontSize: '11px', color: '#445566', fontFamily: 'monospace',
-      })); y += 16;
-    }
-    y += 10;
-
-    this._r(this.add.graphics()
-      .lineStyle(1, 0x223355)
-      .lineBetween(RP.x + 8, y, RP.x + RP.w - 8, y));
-    y += 12;
-
-    this._r(this.add.text(x, y, 'PACK', {
-      fontSize: '11px', color: '#556677', fontFamily: 'monospace',
-    }));
-    this._r(this.add.text(RP.x + RP.w - 20, y, '‹ click to return to stash', {
-      fontSize: '10px', color: '#445566', fontFamily: 'monospace',
-    }).setOrigin(1, 0));
-    y += 15;
-
-    const pack = getRaiderPack();
-    if (pack.length === 0) {
-      this._r(this.add.text(x + 8, y, '(empty — default class gear on entry)', {
-        fontSize: '11px', color: '#334455', fontFamily: 'monospace',
-      }));
-    } else {
-      const sorted = [...pack].sort((a, b) => {
-        const ai = STASH_ORDER.indexOf(a.id), bi = STASH_ORDER.indexOf(b.id);
-        return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
-      });
-      for (const { id, qty } of sorted) {
-        const meta = ITEM_META[id] ?? { label: id, detail: '' };
-        const row  = this._r(this.add.text(x + 8, y,
-          `${meta.label.padEnd(16)} ${meta.detail}${qty > 1 ? `  ×${qty}` : ''}`,
-          { fontSize: '12px', color: '#88ccff', fontFamily: 'monospace' },
-        ).setInteractive());
-        row.on('pointerover',  () => row.setColor('#ffffff'));
-        row.on('pointerout',   () => row.setColor('#88ccff'));
-        row.on('pointerdown',  () => {
-          raiderToStash(id).then(r => { if (r.ok) this._onPackChanged(); else console.warn('[HubScene] raiderToStash failed:', r.error); });
-        });
-        y += 16;
-      }
-
-      y += 4;
-      const dumpBtn = this._r(this.add.text(x + 8, y, '[ Dump All to Stash ]', {
-        fontSize: '11px', color: '#aabbdd', fontFamily: 'monospace',
-      }).setInteractive());
-      dumpBtn.on('pointerover', () => dumpBtn.setColor('#ffffff'));
-      dumpBtn.on('pointerout',  () => dumpBtn.setColor('#aabbdd'));
-      dumpBtn.on('pointerdown', () => {
-        dumpRaiderPackToStash().then(r => { if (r.ok) this._onPackChanged(); else console.warn('[HubScene] dumpRaiderPackToStash failed:', r.error); });
-      });
-    }
-
-    const active = !!this._selectedClass;
-    const btnY   = RP.y + RP.h - 36;
-    const enterBtn = this._r(this.add.text(RP.x + RP.w / 2, btnY, '[ Enter Dungeon ]', {
-      fontSize: '18px', color: active ? '#ffcc44' : '#334455', fontFamily: 'monospace',
-    }).setOrigin(0.5).setInteractive());
-    enterBtn.on('pointerover',  () => { if (active) enterBtn.setColor('#ffffff'); });
-    enterBtn.on('pointerout',   () => { enterBtn.setColor(active ? '#ffcc44' : '#334455'); });
-    enterBtn.on('pointerdown',  () => {
-      if (!active) return;
-      const scores = this._abilityScores ?? { ...CLASS_DISPLAY[this._selectedClass].defaultScores };
-      // Pre-submit assert against the same rule the server enforces. The UI's
-      // incremental gating should already prevent invalid scores; this is a
-      // defensive check so a UI bug can't ship invalid data to the room.
-      const check = validateAbilityScores(scores);
-      if (!check.ok) {
-        console.warn('[HubScene] refusing to enter with invalid abilityScores:', check.error);
-        return;
-      }
-      this.scene.start('DungeonScene', { class: this._selectedClass, abilityScores: scores });
-    });
+    refreshCraftPanel(this);
   }
 
   _onPackChanged() {
     if (this._leftView === 'stash') {
       for (const obj of this._leftObjs) obj.destroy();
       this._leftObjs = [];
-      this._showStashScreen();
+      renderStashPanel(this);
     }
-    this._buildRaiderPanel();
+    renderRaiderPanel(this);
   }
 
   _onSold() {
@@ -1197,11 +236,11 @@ export class HubScene extends Phaser.Scene {
     if (this._leftView === 'stash') {
       for (const obj of this._leftObjs) obj.destroy();
       this._leftObjs = [];
-      this._showStashScreen();
+      renderStashPanel(this);
     }
   }
 
-  // ── Utilities ─────────────────────────────────────────────────────────────────
+  // ── Utilities ────────────────────────────────────────────────────────────────
 
   _l(obj) { this._leftObjs.push(obj);  return obj; }
   _r(obj) { this._rightObjs.push(obj); return obj; }
