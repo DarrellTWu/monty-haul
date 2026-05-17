@@ -5,6 +5,33 @@ Entries are newest-first within each session.
 
 ---
 
+## Session 6 — 2026-05-16
+
+### Completed
+
+#### Conditions refactor → `shared/logic/conditions.js`
+
+Extracted the hand-rolled condition-timer code from `DungeonRoom` into a pure module. The mapping `conditionId → mirror *RemainingMs field` is now defined once in `CONDITION_DEFS` instead of being re-encoded in `_useConsumable`, `_activateRage`, `_tickConditions`, and `_longRest`.
+
+- `shared/logic/conditions.js` — `CONDITION_DEFS` + `applyCondition` / `tickConditions` / `clearPlayerConditions`. Caller owns the timer Map and broadcasts returned log strings; module is framework-free.
+- `shared/tests/conditions.test.js` — 18 cases covering apply idempotency, tick decrement + expiry, multi-player isolation, false_life exhaustion, and clear semantics.
+- `server/rooms/DungeonRoom.js` — ~40 LOC removed; `_tickConditions` is now a 2-line delegate. `TODO(deferred)` marker gone.
+- Plan archived: `docs/archive/conditions-refactor-plan.md`.
+
+#### Bugfix: bless potion now refreshes on re-use
+
+Pre-refactor, a guard around the bless branch in `_useConsumable` made a second potion silently a no-op while still consuming the inventory item. The other timed potions (longstrider, false_life) already refreshed; this brings bless in line via `applyCondition`'s refresh-not-duplicate contract.
+
+#### Bugfix: false_life condition clears when temp HP drained
+
+Once damage absorbs the granted temp HP, the timer is immaterial — the HUD ring should go away. Added an optional `isExhausted(player)` predicate to `CONDITION_DEFS`; `tickConditions` treats exhaustion the same as timeout. `false_life` uses `p.tempHp <= 0`. Cleared within one server tick. Keeps the absorption sites (`CombatSystem.enemyAttack`, `DungeonRoom._checkTraps`) untouched — no plumbing of the timer Map into combat code.
+
+### Docs
+
+- `CLAUDE.md`, `docs/README.md`, `docs/DOC_PRINCIPLES.md`, `docs/PROJECT_STRUCTURE.md` — dropped the `shared/logic/conditions.js — not built` deferred-item references; added the module + test to the structure tables.
+
+---
+
 ## Session 5 — 2026-04-15
 
 ### Completed
