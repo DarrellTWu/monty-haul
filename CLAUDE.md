@@ -83,8 +83,8 @@ Canonical layout lives in [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.m
 
 Quick orientation:
 - **`server/`** — Colyseus authoritative room (`rooms/DungeonRoom.js`), tick systems (`systems/`), state schemas (`state/`), hub HTTP routes (`routes/hub.js`), persistence (`persistence/`, write-through cache in `store/playerStore.js`).
-- **`client/`** — Phaser scenes (`scenes/HubScene.js`, `DungeonScene.js`, `HUDScene.js`, `InventoryScene.js`), input (`input/`), network (`network/`), server-backed store (`store/stash.js`).
-- **`shared/`** — Pure logic + balance data. `data/` (constants, weapons, items, classes, enemies, floors, loot, crafting, shop), `logic/` (combat, loot, loot-window, geometry — all framework-free, RNG-injected), `tests/` (pure unit tests).
+- **`client/`** — Phaser scenes (`scenes/HubScene.js`, `DungeonScene.js`, `HUDScene.js`, `InventoryScene.js`), hub panel modules (`ui/hub/` — Login/Settings/Class/Stash/Shop/Craft/Raider + `hub-data.js`), gameplay rendering (`rendering/RoomRenderer.js`), input (`input/`), network (`network/`), server-backed store (`store/stash.js`).
+- **`shared/`** — Pure logic + balance data. `data/` (constants, weapons, items, classes, enemies, floors, loot, crafting, shop), `logic/` (combat, equipment, character, loot, loot-window, geometry — all framework-free, RNG-injected), `tests/` (pure unit tests).
 - **`supabase/migrations/`** — versioned schema.
 
 ## Docs Map — read when relevant to your task

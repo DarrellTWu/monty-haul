@@ -1,7 +1,7 @@
 ---
 status: shipped
-updated: 2026-05-14
-purpose: Architecture + documentation review. Findings only — no code/doc changes made by the review itself. Driver for the doc restructure in this commit.
+updated: 2026-05-16
+purpose: Architecture + documentation review. All HIGH + MEDIUM findings closed across commits `9364f09` + `ba01455`. Remaining open items are LOW priority — see §6.
 ---
 # Architecture & Documentation Review — 2026-05-14
 
@@ -179,13 +179,13 @@ Rough estimate: a restructured CLAUDE.md could drop to ~150 LOC (~4500 tokens) w
 ## 6. Prioritized Recommendations
 
 **High (do before next major feature)**
-1. ⏳ Extract equip/unequip + descend handlers out of `DungeonRoom` into shared/server modules.
-2. ⏳ Split `HubScene` into per-panel modules.
-3. ⏳ Add server-side ability-score validation (budget + range) in `shared/logic/character.js`.
+1. ✅ Extract equip/unequip + descend handlers out of `DungeonRoom` into shared/server modules. *(commit `9364f09`)*
+2. ✅ Split `HubScene` into per-panel modules. *(commit `ba01455`)*
+3. ✅ Add server-side ability-score validation (budget + range) in `shared/logic/character.js`. *(commit `9364f09`; pre-existing server check already enforced rules — fix was deduplication)*
 
 **Medium**
-4. ⏳ Extract `RoomRenderer` from `DungeonScene`.
-5. ⏳ Normalize client mutation return shape to `{ ok, error? }`.
+4. ✅ Extract `RoomRenderer` from `DungeonScene`. *(commit `9364f09`)*
+5. ✅ Normalize client mutation return shape to `{ ok, error? }`. *(commit `9364f09`)*
 6. ✅ Consolidate `tech_spec.md` "Files That Exist Today" with CLAUDE.md "Current File Structure" into a single `PROJECT_STRUCTURE.md`; both reference it. *(commit `23c3941`)*
 7. ✅ Move completed sprint plans to `docs/archive/`; add `Status:` header to each plan doc. *(commit `23c3941`)*
 8. ✅ Mark deferred features with explicit `TODO` comments at the code site (kills, `isLineBlocked`, conditions module). *(commit `c785654`)*
@@ -198,35 +198,32 @@ Rough estimate: a restructured CLAUDE.md could drop to ~150 LOC (~4500 tokens) w
 
 ## Pending pickup for future session
 
+All HIGH + MEDIUM items closed (see §6). Remaining:
+
 | # | Item | Severity |
 |---|---|---|
-| 1 | Extract equip/unequip + descend handlers from `DungeonRoom.js` | HIGH |
-| 2 | Split `HubScene.js` into per-panel modules | HIGH |
-| 3 | Server-side ability-score validation in `shared/logic/character.js` | MEDIUM |
-| 4 | Extract `RoomRenderer` from `DungeonScene.js` | MEDIUM |
-| 5 | Normalize client mutation return shape to `{ ok, error? }` | LOW |
 | 10 | Floor data schema validation at server startup | LOW |
 | 11 | Client test harness (HubScene flows) + AISystem unit tests | LOW |
 | 3.3 | Code-level consolidation of the elevation flow (4 scattered call sites) | LOW |
 
 ---
 
-## 7. Summary Scorecard (updated 2026-05-14)
+## 7. Summary Scorecard (updated 2026-05-16)
 
-| Area | Status at review | Status after restructure pass |
+| Area | Status at review | Status now |
 |---|---|---|
 | Shared logic + data | Excellent | Excellent ➖ |
 | Persistence layer (playerStore, withRetry, dead-letter) | Excellent | Excellent ➖ |
-| Test coverage (shared + server) | Good | Good ➖ |
-| `DungeonRoom.js` | **God object — needs split** | ⏳ Pending — unchanged |
-| `HubScene.js` | **Oversized — needs split** | ⏳ Pending — unchanged |
-| `DungeonScene.js` | Borderline; geometry rendering extractable | ⏳ Pending — unchanged |
-| Client mutation API consistency | Inconsistent | ⏳ Pending — unchanged |
-| Server-side ability score validation | **Incomplete — material trust gap** | ⏳ Pending — unchanged |
+| Test coverage (shared + server) | Good | Good ➖ (139 offline tests; client/AI still absent) |
+| `DungeonRoom.js` | **God object — needs split** | ✅ 819 → 719 LOC; equip/descend/death-loot extracted |
+| `HubScene.js` | **Oversized — needs split** | ✅ 1208 → 247 LOC; 8 modules under `client/src/ui/hub/` |
+| `DungeonScene.js` | Borderline; geometry rendering extractable | ✅ 701 → 597 LOC; `RoomRenderer.js` extracted |
+| Client mutation API consistency | Inconsistent | ✅ All stash mutations return `{ ok, error? }` |
+| Server-side ability score validation | **Incomplete — material trust gap** | ✅ `validateAbilityScores` in `shared/logic/character.js` |
 | Client tests / AI tests / integration tests | Absent | ⏳ Pending — unchanged |
 | CLAUDE.md | Comprehensive but token-heavy | ✅ Slimmed to 165 LOC + agent-context split |
 | Docs directory | Useful but redundant w/ CLAUDE.md, no archive boundary | ✅ Restructured: `agent-context/`, `archive/`, `design/`, frontmatter on every doc |
 | Sprint plan docs | Exemplary | ✅ Moved to `archive/`, flagged with frontmatter |
 | Deferred-feature signaling in code | Missing TODOs | ✅ `TODO(deferred)` comments added at 3 sites |
 
-**Summary:** Documentation track fully addressed in this session. All code-refactor recommendations (`DungeonRoom` split, `HubScene` split, `RoomRenderer` extraction, ability-score validation, mutation return shape normalization, floor data validation, client/AI test additions) remain pending — see §6 "Pending pickup for future session" table.
+**Summary:** All HIGH + MEDIUM code-refactor recommendations closed across commits `9364f09` + `ba01455`. Remaining open work is LOW-priority: floor data schema validation, client/AI test coverage, code-level consolidation of the elevation flow.

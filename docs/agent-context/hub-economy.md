@@ -1,6 +1,6 @@
 ---
 status: shipped
-updated: 2026-05-14
+updated: 2026-05-16
 purpose: Shop, crafting, hub gold, stash mutations, Debug Mode toggle. Read when the task touches the hub UI or hub-side state.
 ---
 
@@ -42,10 +42,10 @@ All mutations: `client/src/store/stash.js` → `server/routes/hub.js` → `serve
 - Client sends **ids only**; server resolves canonical prices from `BUYABLE_PRICES` / `sellPrice()` and recipe internals from `RECIPE_REGISTRY`.
 - Per-player mutation lock in `playerStore._withLock` serializes concurrent same-player writes.
 
-Inconsistency to be aware of: the architecture review (§3.1) flags that boolean returns on buy/sell/craft prevent specific error messaging in the UI. Normalize to `{ ok, error? }` if you're touching this layer.
+All client stash mutations return `{ ok, error? }` (normalized in `client/src/store/stash.js`); HubScene panels log the server `error` to the console on failure.
 
 ## Hub Settings: Debug Mode Toggle
-Settings panel in `HubScene.js` (`_renderMenuBody`) shows a DEBUG MODE row with `[ ON ]` (yellow, locked) and `[ OFF ]` (dim, non-interactive).
+Settings panel `renderMenuBody` in `client/src/ui/hub/SettingsPanel.js` shows a DEBUG MODE row with `[ ON ]` (yellow, locked) and `[ OFF ]` (dim, non-interactive).
 
 This toggle is the **routing hook** for which dungeon `[ Enter Dungeon ]` loads:
 

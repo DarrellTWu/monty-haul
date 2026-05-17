@@ -1,6 +1,6 @@
 ---
 status: shipped
-updated: 2026-05-15
+updated: 2026-05-16
 purpose: Combat resolution, class schema, loadout, ability scores. Read when the task touches attacks, classes, or character creation.
 ---
 
@@ -31,8 +31,8 @@ Each class file in `shared/data/classes/` exports a const (see `fighter.js` / `m
 Class default gear extracted at run-end enters the raider pack normally and triggers the non-empty branch on the next run.
 
 ## Ability Scores
-- `PlayerState` carries `str, dex, con, int, wis, cha`. Set on join from client point-buy selection; **validated server-side** via `validateAbilityScores` in `shared/logic/character.js` (enforces all six keys present, range `[SCORE_MIN, SCORE_MAX]`, point cost ≤ `POINT_BUY_BUDGET`). Falls back to `classDef.baseAbilityScores` if invalid. HubScene calls the same validator pre-submit as a defensive check.
-- Point-buy budget: 27 points, scores 8–16, non-linear cost via `POINT_COST` in `shared/data/constants.js`. UI in `HubScene.js` class panel.
+- `PlayerState` carries `str, dex, con, int, wis, cha`. Set on join from client point-buy selection; **validated server-side** via `validateAbilityScores` in `shared/logic/character.js` (enforces all six keys present, range `[SCORE_MIN, SCORE_MAX]`, point cost ≤ `POINT_BUY_BUDGET`). Falls back to `classDef.baseAbilityScores` if invalid. `client/src/ui/hub/RaiderPanel.js` calls the same validator pre-submit as a defensive check.
+- Point-buy budget: 27 points, scores 8–16, non-linear cost via `POINT_COST` in `shared/data/constants.js`. UI in `client/src/ui/hub/ClassPanel.js`.
 - Mutable during run (potions, ASIs). Call `recomputeStats(player)` (from `shared/logic/equipment.js`) after any change to keep derived values (AC, etc.) in sync.
 
 ## Attack Resolution (`shared/logic/combat.js`)
