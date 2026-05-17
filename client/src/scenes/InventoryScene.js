@@ -501,7 +501,7 @@ export class InventoryScene extends Phaser.Scene {
     // Weapon slot.
     // Attack ability: finesse weapons use higher of STR/DEX; monks use higher of STR/DEX
     // on all monk weapons (Martial Arts). Authoritative list: CombatSystem.MONK_WEAPON_IDS
-    // and weapon properties in shared/data/weapons/melee.js.
+    // and weapon properties in shared/data/weapons/{melee,ranged}.js.
     const FINESSE_IDS    = new Set(['shortsword', 'dagger']);
     const MONK_WPNS      = new Set(['shortsword', 'dagger', 'handaxe', 'mace', 'unarmed', '']);
     const weapon = player.equippedWeaponId;

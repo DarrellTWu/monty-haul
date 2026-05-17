@@ -13,6 +13,7 @@
 import { joinDungeon, sendDescend, sendUseHotbar, sendAttack, leave as leaveRoom } from '../network/ColyseusClient.js';
 import { InputHandler } from '../input/InputHandler.js';
 import { CHEST_LOOT_RANGE_PX, TRAP_RADIUS_PX, MELEE_SELECT_RANGE_PX } from '../../../shared/data/constants.js';
+import { WEAPON_REGISTRY } from '../../../shared/data/weapons/index.js';
 import { FLOOR_REGISTRY } from '../../../shared/data/floors/index.js';
 import { getPlayerId } from '../store/stash.js';
 import { drawRoom, drawDoorBand } from '../rendering/RoomRenderer.js';
@@ -148,9 +149,14 @@ export class DungeonScene extends Phaser.Scene {
 
     this._room.onMessage('attack_denied', ({ reason }) => {
       const hud = this.scene.get('HUDScene');
-      const msg = reason === 'out_of_range' ? 'Target out of range.' : 'Invalid target.';
+      let msg = 'Invalid target.';
+      if (reason === 'out_of_range')        msg = 'Target out of range.';
+      else if (reason === 'no_line_of_sight') msg = 'No line of sight.';
+      else if (reason === 'no_target')        msg = 'Select a target before firing.';
       if (hud?.addLog) hud.addLog(msg);
     });
+
+    this._room.onMessage('projectile_fired', (p) => this._renderProjectile(p));
 
     // Pointer-down: hit-test enemies in world space. Hit → select. Miss → clear.
     // Suppressed while inventory/loot overlay is up so its own clicks don't leak.
@@ -536,19 +542,47 @@ export class DungeonScene extends Phaser.Scene {
   _cycleTarget() {
     const me = this._room.state.players.get(this._room.sessionId);
     if (!me || !me.alive) return;
+    // Range scales with equipped weapon: ranged weapons cycle up to long range,
+    // melee/empty use the constant. Reading `kind === 'ranged'` (not "has range")
+    // keeps this future-safe for thrown weapons whose primary mode is still melee.
+    const weapon = WEAPON_REGISTRY[me.equippedWeaponId];
+    const cycleRange = (weapon?.kind === 'ranged' && weapon.range)
+      ? weapon.range.long
+      : MELEE_SELECT_RANGE_PX;
     const candidates = [];
     for (const [id, enemy] of this._room.state.enemies) {
       if (!enemy.alive) continue;
       const dx = me.x - enemy.x;
       const dy = me.y - enemy.y;
       const d  = Math.sqrt(dx * dx + dy * dy);
-      if (d <= MELEE_SELECT_RANGE_PX) candidates.push({ id, d });
+      if (d <= cycleRange) candidates.push({ id, d });
     }
     if (candidates.length === 0) { this._selectedEnemyId = null; return; }
     candidates.sort((a, b) => a.d - b.d);
     const currentIdx = candidates.findIndex(c => c.id === this._selectedEnemyId);
     const nextIdx    = currentIdx === -1 ? 0 : (currentIdx + 1) % candidates.length;
     this._selectedEnemyId = candidates[nextIdx].id;
+  }
+
+  /**
+   * Render a projectile (cosmetic). The server has already resolved the to-hit;
+   * we just tween something visible from from→to. `style` is a future-proof
+   * discriminator — bolts, thrown daggers, firebolts, and magic missiles will
+   * reuse this path with different sprites/colours.
+   */
+  _renderProjectile({ fromX, fromY, toX, toY, hit, style }) {
+    const color = style === 'arrow' ? 0xeeddaa : 0xffffff;
+    // Slight miss overshoot so a miss reads visually as flying past.
+    const endX = hit ? toX : toX + (toX - fromX) * 0.15;
+    const endY = hit ? toY : toY + (toY - fromY) * 0.15;
+    const dot = this.add.circle(fromX, fromY, 3, color).setDepth(5);
+    this.tweens.add({
+      targets: dot,
+      x: endX, y: endY,
+      duration: 250,
+      ease: 'Linear',
+      onComplete: () => dot.destroy(),
+    });
   }
 
   _updateHpBar(gfx, x, y, hp, maxHp) {

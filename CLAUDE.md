@@ -132,7 +132,6 @@ Before any game logic task, read these files:
 Marked as **DEFERRED** in relevant agent-context docs. When you add code that overlaps with one, drop a `// TODO(deferred): <description> — see docs/agent-context/<file>.md` comment.
 
 - Kill attribution — `PlayerState.kills` not implemented; `run_history.kills` always 0. See `agent-context/combat.md`.
-- `isLineBlocked` in `shared/logic/geometry.js` — stub returns false until LoS/ranged combat lands.
 - Debug Mode OFF (production gameplay path) — locked toggle, awaits matchmaking + production loot tuning. See `agent-context/hub-economy.md`.
 
 ## Keeping Docs Current

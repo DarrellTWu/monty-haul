@@ -1,7 +1,7 @@
 ---
 status: shipped
-updated: 2026-05-16
-purpose: Canonical file-layout reference. Source of truth — CLAUDE.md and tech_spec.md link here, do not duplicate. Last bump: target-selection landed.
+updated: 2026-05-17
+purpose: Canonical file-layout reference. Source of truth — CLAUDE.md and tech_spec.md link here, do not duplicate. Last bump: ranged combat + advantage tri-state landed.
 ---
 
 # Project Structure (Actual)
@@ -58,7 +58,8 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `data/constants.js` | Tuning constants (`ENTITY_RADIUS_PX=16`, `STEP_HALF_WIDTH_PX=24`, `PLATFORM_WALL_THICK_PX=2`, attack cooldowns, regen rates, etc). |
 | `data/values.js` | Canonical `ITEM_GOLD_VALUE` map + `sellPrice(id)` helper (¼× value, floor, min 1 gp). Single source of truth. |
 | `data/shop.js` | `VENDOR_CATALOG` (keyed by vendor: potions, armor) + flat `BUYABLE_PRICES` for server gate. |
-| `data/weapons/melee.js`, `data/armor/armor.js` | Weapon + armor definitions. `melee.js` exports the canonical `WEAPON_REGISTRY` (id → def, excluding `UNARMED`); `armor.js` exports `ARMOR_REGISTRY` + `computeAC`. |
+| `data/weapons/{melee,ranged,index}.js` | Weapon definitions. `melee.js` and `ranged.js` export per-weapon consts (all carry `kind: 'melee' \| 'ranged'`). `index.js` is the unified barrel exporting `WEAPON_REGISTRY` (melee ∪ ranged, excluding `UNARMED`). Ranged carries `range: { normal, long }` in px (built via `ft()` helper). |
+| `data/armor/armor.js` | `ARMOR_REGISTRY` + `computeAC`. |
 | `data/items/{consumables,shields,materials}.js` | Item registries. `consumables.js` includes `extraction_scroll` (type `extract`). |
 | `data/enemies/tier1.js` | Goblin, dog, skeleton. Each carries `canClimb: bool` (goblin true, others false). |
 | `data/classes/{fighter,barbarian,monk,index}.js` | `CLASS_REGISTRY`. Each class carries `canClimb: bool` (monk true, fighter/barbarian false). |
@@ -66,10 +67,10 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `data/crafting/benches.js` | `BENCH_REGISTRY` — six benches (forge, binder, artificer, apothecary, scriptorium, refinery). `status: 'open' \| 'planned'`. |
 | `data/crafting/recipes.js` | `RECIPE_REGISTRY` + `recipesForBench(benchId)`. Currently: Tan Hide (forge), Bone Brew (apothecary). |
 | `data/floors/{floor1,floor2,index}.js` | `FLOOR_REGISTRY`. Each floor: `{width, height, playerSpawn, enemies, chests, traps, stairs, walls, doors, platforms, rooms}`. Both floors tuned for combat testing — not final design. |
-| `logic/combat.js` | `resolveAttack(...)` — full attack resolution. Accepts optional `advantage: boolean`; returns `advantageRolls: [a, b]` when active. |
+| `logic/combat.js` | `resolveAttack(...)` — accepts `sources: Array<{kind, reason}>` with SRD cancellation. `resolveRollMode(sources)` is the pure helper. `pickAttackMode(weapon, distance)` returns `'melee' \| 'ranged' \| 'thrown' \| null` — single source of truth for dispatch. Result carries `rollMode`, `rollModeSources`, `advantageRolls: [kept, discarded]`. |
 | `logic/loot.js` | Pure `rollLoot(table, rng?)` → `{gold, items}`; `applyDeathLoot(enemies, rolledSet, registry, onDrop?, rng?)` — idempotent fresh-death loot resolution used by `DungeonRoom._tick`. `@potion_any` pool filters out `type==='extract'`. |
 | `logic/loot-window.js` | Pure container-lock protocol: `tryOpenContainer`, `tryCloseContainer`, `releaseLocksHeldBy`, `tickContainerLocks`, `tryTakeItem`, `tryTakeGold`, `tryDropItem`, `checkLootAccess`, `refreshSourceFlags`. |
-| `logic/geometry.js` | Pure geometry: `resolveWallCollision`, `circleOverlapsAny`, `isLineBlocked` (stub), `tryAutoClimb`, `platformPerimeterRects`, `segmentIntersectsCircle`, `segmentPerimeterCrossing`, `pointInRect`. |
+| `logic/geometry.js` | Pure geometry: `resolveWallCollision`, `circleOverlapsAny`, `isLineBlocked` (Liang-Barsky segment-vs-AABB; caller filters obstacles), `tryAutoClimb`, `platformPerimeterRects`, `segmentIntersectsCircle`, `segmentPerimeterCrossing`, `pointInRect`. |
 | `logic/character.js` | `validateAbilityScores(scores)` → `{ok}` or `{ok:false, error}`. Enforces six keys present, integer in `[SCORE_MIN, SCORE_MAX]`, point cost ≤ `POINT_BUY_BUDGET`. Used by HubScene (pre-submit) + DungeonRoom.onJoin (auth gate). |
 | `logic/equipment.js` | `equipItem(player, {itemId, slot?})`, `unequipItem(player, {slot})`, `recomputeStats(player)`. Owns SRD slot routing (auto-detect armor/shield/weapon, two-handed handling, shield + main-hand interactions) and the derived-stat hook called after any score or equipment change. |
 | `logic/conditions.js` | `CONDITION_DEFS` table (mirror field + optional `onExpire`/`onExpireLog` per condition) + `applyCondition`, `tickConditions`, `clearPlayerConditions`. Pure timer bookkeeping; caller owns the `Map<\`${sessionId}_${conditionId}\`, ms>` and broadcasts the returned log strings. Used by `DungeonRoom._useConsumable`, `_activateRage`, `_tickConditions`, `_longRest`. |
@@ -89,15 +90,16 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 
 | File | Count | Notes |
 |---|---|---|
-| `shared/tests/combat.test.js` | 30 | |
+| `shared/tests/combat.test.js` | 46 | Adds advantage/disadvantage cancellation + `pickAttackMode` dispatch (including forward thrown branch). |
 | `shared/tests/loot.test.js` | 38 | Includes `applyDeathLoot` idempotency + drop-callback coverage. |
-| `shared/tests/geometry.test.js` | 47 | AABB push-out, perimeter primitives, `tryAutoClimb`, `platformPerimeterRects`. |
+| `shared/tests/geometry.test.js` | 55 | AABB push-out, perimeter primitives, `tryAutoClimb`, `platformPerimeterRects`, `isLineBlocked`. |
 | `shared/tests/character.test.js` | 10 | `validateAbilityScores` — shape, range, budget. |
 | `shared/tests/equipment.test.js` | 14 | `equipItem`/`unequipItem`/`recomputeStats` — slot routing, two-handed, AC recompute. |
 | `shared/tests/conditions.test.js` | 18 | `applyCondition`/`tickConditions`/`clearPlayerConditions` — idempotency, mirror sync, expiry side effects, multi-player isolation. |
 | `server/tests/container-lock.test.js` | 21 | |
 | `server/tests/loot-flow.test.js` | 35 | |
 | `server/tests/target-selection.test.js` | 17 | Explicit-target validation in `playerAttack` — fallback, override, out-of-range/invalid denials, cooldown preservation. |
+| `server/tests/ranged-combat.test.js` | 25 | Ranged path: no-target denial, range gates, LoS, long-range + foe-adjacent disadvantage, advantage/disadvantage cancellation, projectile_fired emission, melee regression. |
 | `server/tests/supabase-smoke.js` | 34 | Real dev Supabase. `process.loadEnvFile('server/.env')`. |
 | `server/tests/concurrency-smoke.js` | 7 | N concurrent buys → no duplicate rows. |
 | `server/tests/anti-cheat-smoke.js` | 25 | Buy/sell/craft rejection paths. |

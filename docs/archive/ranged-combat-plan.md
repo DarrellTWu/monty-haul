@@ -1,7 +1,7 @@
 ---
-status: in-progress
-updated: 2026-05-16
-purpose: Sprint plan for ranged combat (shortbow + longbow), LoS, and the advantage/disadvantage tri-state refactor that ships alongside it. Forward-compat revisions for thrown weapons / spells / non-creature targets folded in.
+status: archived
+updated: 2026-05-17
+purpose: Sprint plan for ranged combat (shortbow + longbow), LoS, and the advantage/disadvantage tri-state refactor. Shipped — archived for reference.
 ---
 
 # Ranged Combat Sprint Plan

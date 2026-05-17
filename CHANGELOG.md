@@ -9,6 +9,33 @@ Entries are newest-first within each session.
 
 ### Completed
 
+#### Ranged combat: shortbow + longbow with LoS and SRD disadvantage rules
+
+Shortbow (1d6, range `ft(80)`/`ft(320)`) and longbow (1d8, range `ft(150)`/`ft(600)`) land on floor 1's starting chest. SPACE fires at the selected target through a fresh LoS gate; walls and locked doors block, platforms and unlocked doors don't. Long-range and ranged-into-melee disadvantage compose with high-ground advantage under SRD cancellation. Arrows are cosmetic-only — server resolves to-hit instantly and broadcasts a generic `projectile_fired` event with a `style` discriminator for forward-compat (bolts, thrown daggers, firebolts, magic missiles will all reuse the wire shape).
+
+This ships the advantage/disadvantage tri-state refactor that `docs/advantage-architecture-plan.md` had been waiting on — the long-range disadvantage is exactly the second-source trigger the plan called out. Plan archived.
+
+- `shared/data/constants.js` — `PX_PER_FOOT = 5` + `ft()` helper, `ADJACENT_FOE_PX` alias for the SRD 5-ft adjacency check.
+- `shared/types/weapon.js` — explicit `kind: 'melee' | 'ranged'` discriminator, optional `range`, optional `thrown: { range, ability? }` sub-block for the future thrown-weapons sprint. **Not** `presence of range` — that would have collapsed on thrown weapons (handaxe, dagger already exist with `properties: ['thrown']`).
+- `shared/data/weapons/melee.js` — every weapon gains `kind: 'melee'`. Drops its old `WEAPON_REGISTRY` export.
+- `shared/data/weapons/ranged.js` (new) — `SHORTBOW`, `LONGBOW`. DEX-keyed, two-handed.
+- `shared/data/weapons/index.js` (new) — unified `WEAPON_REGISTRY` barrel (melee ∪ ranged). Importers in `equipment.js`, `CombatSystem.js`, `DungeonRoom.js` migrated.
+- `shared/logic/combat.js` — `resolveAttack` migrated to `sources: Array<{kind, reason}>`. New pure helper `resolveRollMode(sources)` applies the SRD binary cancellation. New `pickAttackMode(weapon, distance)` returns `'melee' | 'ranged' | 'thrown' | null` — single source of truth for the dispatch branch. Disadvantage path added: 2d20 keep lower; nat-1-if-either, nat-20-only-if-both. Result carries `rollMode` + `rollModeSources` so combat-log labels surface why (`d20:N [adv: a, b — high-ground]` or `[dis: a, b — long range, foe adjacent]`).
+- `shared/logic/geometry.js` — `isLineBlocked` is no longer a stub. Liang-Barsky segment-vs-AABB sweep against caller-supplied obstacles. Caller filters (walls + locked-door rects only); platforms never block.
+- `server/systems/CombatSystem.js` — `playerAttack(state, sessionId, enemyDefs, targetId, geometry)`. Dispatches via `pickAttackMode`. Ranged path: explicit target required (`denied: 'no_target'`), range gate, LoS gate (`denied: 'no_line_of_sight'`), source assembly (high-ground / long-range / foe-adjacent), single attack (no offhand, no MA), returns `projectile` descriptor. Rage damage bonus now correctly melee-only.
+- `server/rooms/DungeonRoom.js` — `attack` handler builds the obstacle list once per attack (static walls + currently-locked-door rects), forwards `geometry: { obstacles }` to `playerAttack`, broadcasts `projectile_fired` on success.
+- `shared/data/floors/floor1.js` — `'shortbow'` and `'longbow'` added to the starting chest.
+- `client/src/scenes/DungeonScene.js` — Tab cycle range becomes weapon-aware via `weapon.kind === 'ranged' && weapon.range.long` (not "has range" — future-safe for thrown). `projectile_fired` listener tweens a dot from→to over 250 ms; misses overshoot 15%. `_renderProjectile(p)` switches on `style` for future visuals. New denial reasons surfaced in HUD log.
+- `shared/tests/combat.test.js` — 30 → 46 tests. Existing high-ground cases migrated to `sources: [{ kind: 'advantage', reason: 'high-ground' }]`. New: disadvantage path (keep-lower, nat-1-if-either, nat-20-if-both), cancellation cases (1+1, 2+1, 2+0), `resolveRollMode` unit, `pickAttackMode` dispatch including forward `'thrown'` branch.
+- `shared/tests/geometry.test.js` — 47 → 55 tests. `isLineBlocked` coverage (clear, crosses, misses, endpoint-inside, caller-filtered obstacles).
+- `server/tests/ranged-combat.test.js` (new) — 25 cases. Bow happy path with projectile emission, no-target denial, out-of-range denial, LoS denial, long-range disadvantage label, foe-adjacent disadvantage label, advantage+disadvantage cancellation produces no label, melee regression.
+- Plans archived: `docs/archive/ranged-combat-plan.md`, `docs/archive/advantage-architecture-plan.md`.
+
+**Decisions of note:**
+- **Weapon shape uses explicit `kind`, not "presence of `range`".** Thrown weapons (handaxe, dagger) already exist with `properties: ['thrown']`; adding `range` to them under a presence-check predicate would silently break the melee path. The explicit `kind` field plus optional `thrown: { range }` sub-block keeps the question explicit and reserves the future thrown-weapons sprint to a single new branch in `pickAttackMode`.
+- **`arrow_fired` rejected in favour of `projectile_fired { style }`.** Every other flying thing (bolts, daggers, firebolts, magic missiles) will use this one wire shape. Locking in `arrow_fired` while there's exactly one caller would have meant rename-or-retrofit later.
+- **"Ranged weapons require a target" is phrased per-weapon (on `kind: 'ranged'`), not as a global ranged-combat rule.** Future ranged things that target environment features (destructible barrels, levers), points on the floor (aoe anchors), or the caster itself (self-buffs) will set their own targetability rules on the weapon def — orthogonal to the v1 enemy-id `targetId` shape.
+
 #### Target selection: click + Tab to designate attack targets
 
 SPACE still attacks, but the target is now under player control. Click an enemy or Tab through nearby living enemies to designate which one SPACE hits; with no selection, the existing nearest-enemy fallback runs. Selection is client-side UI state — the server validates `targetId` on every attack and rejects out-of-range / invalid targets without consuming the attack cooldown, so the player keeps their action.

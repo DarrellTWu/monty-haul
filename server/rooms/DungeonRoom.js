@@ -25,7 +25,7 @@ import {
 import { applyCondition, tickConditions, clearPlayerConditions } from '../../shared/logic/conditions.js';
 import { LOOT_TABLE_REGISTRY }       from '../../shared/data/loot/tier1.js';
 import { ARMOR_REGISTRY, computeAC } from '../../shared/data/armor/armor.js';
-import { WEAPON_REGISTRY }           from '../../shared/data/weapons/melee.js';
+import { WEAPON_REGISTRY }           from '../../shared/data/weapons/index.js';
 import { SHIELD_REGISTRY }           from '../../shared/data/items/shields.js';
 import { CONSUMABLE_REGISTRY }       from '../../shared/data/items/consumables.js';
 import {
@@ -81,12 +81,19 @@ export class DungeonRoom extends Room {
     // ── Combat ────────────────────────────────────────────────────────────────────
     this.onMessage('attack', (client, payload = {}) => {
       const targetId = payload.targetId ?? null;
-      const result = playerAttack(this.state, client.sessionId, this._enemyDefs, targetId);
+      // Build the LoS obstacle list once per attack: static walls + currently-locked
+      // doors. Unlocked doors don't block LoS (consistent with movement rules).
+      const obstacles = [...this._floorWalls];
+      for (const [, door] of this.state.doors) {
+        if (door.locked) obstacles.push({ x: door.x, y: door.y, w: door.w, h: door.h });
+      }
+      const result = playerAttack(this.state, client.sessionId, this._enemyDefs, targetId, { obstacles });
       if (result.denied) {
         client.send('attack_denied', { reason: result.denied });
         return;
       }
       for (const msg of result.logs) this.broadcast('combat_log', { message: msg });
+      if (result.projectile) this.broadcast('projectile_fired', result.projectile);
     });
 
     // ── Equip / unequip ───────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 ---
 status: shipped
-updated: 2026-05-16
+updated: 2026-05-17
 purpose: Client↔server WebSocket message protocol + Hub HTTP routes. Read when the task adds, removes, or modifies a message/route.
 ---
 
@@ -15,7 +15,7 @@ All messages handled in `DungeonRoom.js` `onCreate`.
 |---|---|---|
 | `move` | `{ dx, dy }` | Normalized direction (-1..1 each axis) |
 | `stop` | — | Zero player velocity |
-| `attack` | `{ targetId? }` | Attempt melee attack. If `targetId` is provided, server attacks that specific enemy (validated alive + in `MELEE_HIT_RANGE_PX`). Omit/null → server falls back to nearest-living-enemy. Invalid/out-of-range explicit targets reply with `attack_denied` and **do not consume the attack cooldown**. |
+| `attack` | `{ targetId? }` | Attempt an attack with the equipped weapon. Dispatch + gates run server-side via `pickAttackMode(weapon, distance)`. **Melee** weapons: `targetId` optional — omit for nearest-living-enemy fallback. **Ranged** weapons (`kind: 'ranged'`): `targetId` required; server runs range gate (`weapon.range.long`) and LoS gate (walls + locked-door rects). Any denial replies with `attack_denied` to the attacker only and **does not consume the cooldown**. |
 | `equip` | `{ itemId, slot? }` | `slot`: `'weapon' \| 'offhand' \| 'armor'` or omit for auto-detect |
 | `unequip` | `{ slot }` | `slot`: `'weapon' \| 'offhand' \| 'armor'` |
 | `open_container` | `{ sourceKind, sourceId }` | `sourceKind`: `'chest' \| 'corpse'`. Server replies `container_lock_denied` if already locked by another player |
@@ -33,7 +33,8 @@ All messages handled in `DungeonRoom.js` `onCreate`.
 |---|---|---|
 | `combat_log` | `{ message }` | Text line pushed to the HUD combat log |
 | `container_lock_denied` | `{ sourceKind, sourceId, holder }` | Sent when `open_container` is rejected; `InventoryScene` shows a HUD log line and closes |
-| `attack_denied` | `{ reason }` | Sent to the attacker only when an explicit-target `attack` fails validation. `reason`: `'out_of_range' \| 'invalid_target'`. Client shows a HUD log line; cooldown is preserved. |
+| `attack_denied` | `{ reason }` | Sent to the attacker only when an `attack` fails validation. `reason`: `'out_of_range' \| 'invalid_target' \| 'no_target' \| 'no_line_of_sight'`. `'no_target'` and `'no_line_of_sight'` are ranged-only. Client shows a HUD log line; cooldown is preserved. |
+| `projectile_fired` | `{ attackerId, fromX, fromY, toX, toY, hit, style }` | Broadcast for any instant-resolution flying thing. `style: 'arrow'` for bows in v1; future values include `'bolt'`, `'thrown'`, `'firebolt'`, `'magic_missile'`. Server resolves the to-hit instantly at fire time; the message drives a cosmetic client tween. `hit` lets the client distinguish impact from miss-flyby. Area-effect spells will use a different message (not projectiles). |
 
 ### Validation Discipline
 Server validates all inputs. If invalid (item not in bag, two-handed + offhand conflict, locked stair, etc.), the message is processed silently (no error feedback sent to client). Client relies on state sync to detect successful changes; UI reflects server state, **never** client prediction.

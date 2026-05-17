@@ -87,18 +87,69 @@ export function circleOverlapsAny(pos, radius, rects) {
 // ─── Line of sight (stub) ────────────────────────────────────────────────────
 
 /**
- * Returns true if the line segment between two points is blocked by an
- * opaque obstacle (walls + locked doors). Platforms never block LoS.
+ * Returns true if the line segment between (x1,y1) and (x2,y2) is blocked by
+ * any AABB rect in `obstacles`. Caller is responsible for filtering the rect
+ * list — walls always block; locked doors block, unlocked doors do not;
+ * platforms never block.
  *
- * Stub for this sprint — always returns false. LoS/ranged combat system
- * fills the body when it lands. Defined now because the wall/door data
- * shape it will read is being established this sprint.
+ * Implementation: Liang-Barsky 2D slab test against each rect. The segment
+ * intersects a rect iff the entry parameter ≤ exit parameter and the overlap
+ * intersects [0, 1].
  *
+ * @param {number} x1
+ * @param {number} y1
+ * @param {number} x2
+ * @param {number} y2
+ * @param {Iterable<{x:number,y:number,w:number,h:number}>} obstacles
  * @returns {boolean}
  */
-// TODO(deferred): line-of-sight / ranged combat — see docs/agent-context/geometry-elevation.md §Known V1 Limitations.
-export function isLineBlocked(_x1, _y1, _x2, _y2, _walls, _doors) {
+export function isLineBlocked(x1, y1, x2, y2, obstacles) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  for (const r of obstacles) {
+    if (segmentIntersectsRect(x1, y1, dx, dy, r)) return true;
+  }
   return false;
+}
+
+/**
+ * Liang-Barsky segment-vs-AABB. Returns true iff segment (start, start+delta)
+ * with delta = (dx, dy) intersects the rect. Endpoints inside the rect count
+ * as intersecting.
+ */
+function segmentIntersectsRect(x, y, dx, dy, r) {
+  const rx2 = r.x + r.w;
+  const ry2 = r.y + r.h;
+  let tEnter = 0;
+  let tExit  = 1;
+
+  // X slab
+  if (dx === 0) {
+    if (x < r.x || x > rx2) return false;
+  } else {
+    const t1 = (r.x - x) / dx;
+    const t2 = (rx2 - x) / dx;
+    const tMin = Math.min(t1, t2);
+    const tMax = Math.max(t1, t2);
+    if (tMin > tEnter) tEnter = tMin;
+    if (tMax < tExit)  tExit  = tMax;
+    if (tEnter > tExit) return false;
+  }
+
+  // Y slab
+  if (dy === 0) {
+    if (y < r.y || y > ry2) return false;
+  } else {
+    const t1 = (r.y - y) / dy;
+    const t2 = (ry2 - y) / dy;
+    const tMin = Math.min(t1, t2);
+    const tMax = Math.max(t1, t2);
+    if (tMin > tEnter) tEnter = tMin;
+    if (tMax < tExit)  tExit  = tMax;
+    if (tEnter > tExit) return false;
+  }
+
+  return true;
 }
 
 // ─── Platform perimeter walls (with step gaps) ───────────────────────────────

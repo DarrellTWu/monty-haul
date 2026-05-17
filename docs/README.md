@@ -1,6 +1,6 @@
 ---
 status: shipped
-updated: 2026-05-14
+updated: 2026-05-17
 purpose: Docs index. First stop for "which doc do I need?"
 ---
 
@@ -42,6 +42,10 @@ purpose: Docs index. First stop for "which doc do I need?"
 - [`archive/loot-system-plan.md`](archive/loot-system-plan.md) — Loot tables + container protocol (shipped)
 - [`archive/floor-2-plan.md`](archive/floor-2-plan.md) — Floor system + Scroll of Extraction (shipped)
 - [`archive/character-creation-plan.md`](archive/character-creation-plan.md) — Point-buy + ability scores (shipped)
+- [`archive/conditions-refactor-plan.md`](archive/conditions-refactor-plan.md) — `shared/logic/conditions.js` extraction (shipped)
+- [`archive/target-selection-plan.md`](archive/target-selection-plan.md) — Click + Tab target selection (shipped)
+- [`archive/ranged-combat-plan.md`](archive/ranged-combat-plan.md) — Shortbow + longbow + LoS + advantage tri-state (shipped)
+- [`archive/advantage-architecture-plan.md`](archive/advantage-architecture-plan.md) — Advantage/disadvantage tri-state design (executed in ranged-combat sprint)
 - [`archive/2026_05_10_proposed_work.md`](archive/2026_05_10_proposed_work.md) — Superseded work proposal
 
 ## Conventions
@@ -61,4 +65,4 @@ Features that are described in docs but not built should be marked **DEFERRED** 
 ```js
 // TODO(deferred): <short description> — see docs/agent-context/<file>.md
 ```
-Current deferred items: kill attribution, `isLineBlocked` / LoS, Debug Mode OFF (production gameplay path), server-side ability score budget validation.
+Current deferred items: kill attribution, Debug Mode OFF (production gameplay path).

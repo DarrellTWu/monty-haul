@@ -8,7 +8,8 @@
 // never called in these tests.
 
 import assert from 'node:assert/strict';
-import { resolveAttack, applyDamage, rollDice, getModifier, getProficiencyBonus } from '../logic/combat.js';
+import { resolveAttack, applyDamage, rollDice, getModifier, getProficiencyBonus, resolveRollMode, pickAttackMode } from '../logic/combat.js';
+import { ft } from '../data/constants.js';
 
 // ─── Deterministic RNG helpers ────────────────────────────────────────────────
 
@@ -274,10 +275,12 @@ test('advantage rolls 2d20 and keeps the higher', () => {
     attacker: makePlayer(),
     target: makeTarget({ ac: 10 }),
     weapon: longsword,
-    advantage: true,
+    sources: [{ kind: 'advantage', reason: 'high-ground' }],
     rng,
   });
-  assert.deepEqual(result.advantageRolls, [5, 17]);
+  // advantageRolls is [kept, discarded] regardless of dice order; for adv,
+  // kept is the higher of the two rolls.
+  assert.deepEqual(result.advantageRolls, [17, 5]);
   assert.equal(result.rawD20, 17, 'kept die should be the higher of [5, 17]');
   assert.equal(result.hit, true);
 });
@@ -288,11 +291,11 @@ test('advantage with both dice equal — keeps that value', () => {
     attacker: makePlayer(),
     target: makeTarget({ ac: 10 }),
     weapon: longsword,
-    advantage: true,
+    sources: [{ kind: 'advantage', reason: 'high-ground' }],
     rng,
   });
   assert.equal(result.rawD20, 12);
-  assert.deepEqual(result.advantageRolls, [12, 12]);
+  assert.deepEqual(result.advantageRolls, [12, 12]); // [kept, discarded] both 12
 });
 
 test('advantage + bless: bless 1d4 added on top of kept d20', () => {
@@ -303,10 +306,10 @@ test('advantage + bless: bless 1d4 added on top of kept d20', () => {
     target: makeTarget({ ac: 15 }),
     weapon: longsword,
     conditions: ['bless'],
-    advantage: true,
+    sources: [{ kind: 'advantage', reason: 'high-ground' }],
     rng,
   });
-  assert.deepEqual(result.advantageRolls, [4, 14]);
+  assert.deepEqual(result.advantageRolls, [14, 4]); // [kept, discarded]
   assert.equal(result.rawD20, 14);
   assert.equal(result.conditionBonus, 3, 'bless added to the kept d20, not consumed by it');
   assert.equal(result.roll, 22, 'total = d20(14) + str(3) + prof(2) + bless(3)');
@@ -319,13 +322,13 @@ test('advantage natural-1: BOTH dice must roll 1', () => {
     attacker: makePlayer(),
     target: makeTarget({ ac: 1 }), // would hit anything > nat 1
     weapon: longsword,
-    advantage: true,
+    sources: [{ kind: 'advantage', reason: 'high-ground' }],
     rng,
   });
   assert.equal(result.hit, false);
   assert.equal(result.crit, false);
   assert.equal(result.rawD20, 1);
-  assert.deepEqual(result.advantageRolls, [1, 1]);
+  assert.deepEqual(result.advantageRolls, [1, 1]); // both rolls 1; kept = discarded = 1
 });
 
 test('advantage natural-1 is escaped if the other die is higher', () => {
@@ -335,7 +338,7 @@ test('advantage natural-1 is escaped if the other die is higher', () => {
     attacker: makePlayer(),
     target: makeTarget({ ac: 10 }),
     weapon: longsword,
-    advantage: true,
+    sources: [{ kind: 'advantage', reason: 'high-ground' }],
     rng,
   });
   assert.equal(result.rawD20, 15);
@@ -349,7 +352,7 @@ test('advantage natural-20 fires on the kept die', () => {
     attacker: makePlayer(),
     target: makeTarget({ ac: 30 }), // unhittable without nat 20
     weapon: longsword,
-    advantage: true,
+    sources: [{ kind: 'advantage', reason: 'high-ground' }],
     rng,
   });
   assert.equal(result.hit, true);
@@ -357,7 +360,207 @@ test('advantage natural-20 fires on the kept die', () => {
   assert.equal(result.rawD20, 20);
 });
 
-test('advantage omitted (default false) — single d20, behavior unchanged', () => {
+// ─── Disadvantage path ────────────────────────────────────────────────────────
+
+test('disadvantage rolls 2d20 and keeps the lower', () => {
+  // rng yields 17 then 5 → kept die = 5.
+  const rng = seq(die(17, 20), die(5, 20));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 20 }), // 5 + str(3) + prof(2) = 10 < 20, miss expected
+    weapon: longsword,
+    sources: [{ kind: 'disadvantage', reason: 'long range' }],
+    rng,
+  });
+  assert.equal(result.rollMode, 'disadvantage');
+  assert.deepEqual(result.advantageRolls, [5, 17]); // [kept, discarded]
+  assert.equal(result.rawD20, 5);
+  assert.equal(result.hit, false);
+});
+
+test('disadvantage natural-1 fires if either die is 1', () => {
+  // d20s = [1, 18]. Kept = 1 (min) → natural 1 auto-miss.
+  const rng = seq(die(1, 20), die(18, 20));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 1 }),
+    weapon: longsword,
+    sources: [{ kind: 'disadvantage', reason: 'long range' }],
+    rng,
+  });
+  assert.equal(result.hit, false);
+  assert.equal(result.rawD20, 1);
+});
+
+test('disadvantage natural-20 fires only if BOTH dice are 20', () => {
+  // Both 20s → kept = 20 → crit hit even against unhittable AC.
+  const rng = seq(die(20, 20), die(20, 20), die(4, 8));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 30 }),
+    weapon: longsword,
+    sources: [{ kind: 'disadvantage', reason: 'long range' }],
+    rng,
+  });
+  assert.equal(result.crit, true);
+  assert.equal(result.hit, true);
+});
+
+test('disadvantage with single 20 (other die lower) is NOT a crit', () => {
+  // d20s = [20, 5]. Kept = 5 → not a crit.
+  const rng = seq(die(20, 20), die(5, 20));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 25 }),
+    weapon: longsword,
+    sources: [{ kind: 'disadvantage', reason: 'long range' }],
+    rng,
+  });
+  assert.equal(result.crit, false);
+  assert.equal(result.rawD20, 5);
+});
+
+// ─── Cancellation rule ────────────────────────────────────────────────────────
+
+test('advantage + disadvantage → normal roll (one each)', () => {
+  // Single d20 should be consumed — if cancellation didn't apply, this would
+  // exhaust the rng (only one value provided).
+  const rng = seq(die(12, 20), die(4, 8));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 10 }),
+    weapon: longsword,
+    sources: [
+      { kind: 'advantage', reason: 'high-ground' },
+      { kind: 'disadvantage', reason: 'long range' },
+    ],
+    rng,
+  });
+  assert.equal(result.rollMode, 'normal');
+  assert.equal(result.advantageRolls, undefined);
+  assert.equal(result.rawD20, 12);
+  assert.deepEqual(result.rollModeSources, []);
+});
+
+test('two advantage + one disadvantage → still normal (cancellation is binary)', () => {
+  const rng = seq(die(12, 20), die(4, 8));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 10 }),
+    weapon: longsword,
+    sources: [
+      { kind: 'advantage', reason: 'high-ground' },
+      { kind: 'advantage', reason: 'reckless attack' },
+      { kind: 'disadvantage', reason: 'long range' },
+    ],
+    rng,
+  });
+  assert.equal(result.rollMode, 'normal');
+});
+
+test('two advantage, zero disadvantage → advantage', () => {
+  const rng = seq(die(5, 20), die(15, 20), die(4, 8));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 10 }),
+    weapon: longsword,
+    sources: [
+      { kind: 'advantage', reason: 'high-ground' },
+      { kind: 'advantage', reason: 'reckless attack' },
+    ],
+    rng,
+  });
+  assert.equal(result.rollMode, 'advantage');
+  // Both advantage sources surface in rollModeSources (for log labels).
+  assert.equal(result.rollModeSources.length, 2);
+});
+
+test('resolveRollMode unit', () => {
+  assert.equal(resolveRollMode([]), 'normal');
+  assert.equal(resolveRollMode([{ kind: 'advantage', reason: 'x' }]), 'advantage');
+  assert.equal(resolveRollMode([{ kind: 'disadvantage', reason: 'y' }]), 'disadvantage');
+  assert.equal(resolveRollMode([
+    { kind: 'advantage', reason: 'x' },
+    { kind: 'disadvantage', reason: 'y' },
+  ]), 'normal');
+});
+
+// ─── pickAttackMode ───────────────────────────────────────────────────────────
+
+console.log('\npickAttackMode');
+
+test('melee weapon at melee distance → melee', () => {
+  assert.equal(pickAttackMode(longsword, 30), 'melee');
+});
+
+test('melee weapon beyond melee distance → null', () => {
+  // No thrown sub-block.
+  assert.equal(pickAttackMode(longsword, 500), null);
+});
+
+test('ranged weapon within normal range → ranged', () => {
+  const shortbow = {
+    id: 'shortbow', kind: 'ranged',
+    damageDice: { count: 1, sides: 6 }, damageBonus: 0,
+    damageType: 'piercing', enhancement: 0, attackAbility: 'dex',
+    properties: ['two-handed'],
+    range: { normal: ft(80), long: ft(320) },
+  };
+  assert.equal(pickAttackMode(shortbow, 200), 'ranged');
+});
+
+test('ranged weapon in long-range band → ranged (caller adds disadvantage)', () => {
+  const shortbow = {
+    id: 'shortbow', kind: 'ranged',
+    damageDice: { count: 1, sides: 6 }, damageBonus: 0,
+    damageType: 'piercing', enhancement: 0, attackAbility: 'dex',
+    properties: ['two-handed'],
+    range: { normal: ft(80), long: ft(320) },
+  };
+  assert.equal(pickAttackMode(shortbow, ft(200)), 'ranged');
+});
+
+test('ranged weapon beyond long range → null', () => {
+  const shortbow = {
+    id: 'shortbow', kind: 'ranged',
+    damageDice: { count: 1, sides: 6 }, damageBonus: 0,
+    damageType: 'piercing', enhancement: 0, attackAbility: 'dex',
+    properties: ['two-handed'],
+    range: { normal: ft(80), long: ft(320) },
+  };
+  assert.equal(pickAttackMode(shortbow, ft(400)), null);
+});
+
+test('melee weapon with thrown sub-block, target beyond melee but within thrown.long → thrown', () => {
+  const handaxe = {
+    id: 'handaxe', kind: 'melee',
+    damageDice: { count: 1, sides: 6 }, damageBonus: 0,
+    damageType: 'slashing', enhancement: 0, attackAbility: 'str',
+    properties: ['light', 'thrown'],
+    thrown: { range: { normal: ft(20), long: ft(60) } },
+  };
+  // Distance 200 px > MELEE_HIT_RANGE_PX (64), ≤ ft(60)=300 → thrown.
+  assert.equal(pickAttackMode(handaxe, 200), 'thrown');
+});
+
+test('melee weapon with thrown sub-block, target beyond thrown.long → null', () => {
+  const handaxe = {
+    id: 'handaxe', kind: 'melee',
+    damageDice: { count: 1, sides: 6 }, damageBonus: 0,
+    damageType: 'slashing', enhancement: 0, attackAbility: 'str',
+    properties: ['light', 'thrown'],
+    thrown: { range: { normal: ft(20), long: ft(60) } },
+  };
+  assert.equal(pickAttackMode(handaxe, ft(80)), null);
+});
+
+test('null weapon (unarmed empty) at melee distance → melee', () => {
+  assert.equal(pickAttackMode(null, 30), 'melee');
+});
+
+console.log('\nresolveAttack (regression)');
+
+test('advantage omitted (default sources [] = normal) — single d20, behavior unchanged', () => {
   // Confirm the existing tests' single-d20 flow is unaffected when advantage is false.
   const rng = seq(die(15, 20), die(4, 8));
   const result = resolveAttack({

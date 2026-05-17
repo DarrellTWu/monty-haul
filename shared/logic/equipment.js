@@ -7,7 +7,7 @@
 
 import { ARMOR_REGISTRY, computeAC } from '../data/armor/armor.js';
 import { SHIELD_REGISTRY }           from '../data/items/shields.js';
-import { WEAPON_REGISTRY }           from '../data/weapons/melee.js';
+import { WEAPON_REGISTRY }           from '../data/weapons/index.js';
 import { CLASS_REGISTRY, DEFAULT_CLASS } from '../data/classes/index.js';
 import { getModifier }               from './combat.js';
 

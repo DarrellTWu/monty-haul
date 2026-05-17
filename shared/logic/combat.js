@@ -19,7 +19,7 @@
 //   and pass the enemy as attacker. resolveAttack detects the absence of
 //   abilityScores and falls back to attacker.attackBonus automatically.
 
-import { CRIT_MULTIPLIER } from '../data/constants.js';
+import { CRIT_MULTIPLIER, MELEE_HIT_RANGE_PX } from '../data/constants.js';
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 
@@ -58,6 +58,29 @@ export function getProficiencyBonus(level) {
   return Math.floor((level - 1) / 4) + 2;
 }
 
+// ─── Roll mode resolution (advantage / disadvantage cancellation) ────────────
+
+/**
+ * SRD 5e rule: any number of advantage sources + any number of disadvantage
+ * sources cancel to a normal roll. Otherwise the side that has entries wins.
+ * Cancellation is binary — counts don't matter.
+ *
+ * @param {Array<{ kind: 'advantage' | 'disadvantage', reason: string }>} sources
+ * @returns {'normal' | 'advantage' | 'disadvantage'}
+ */
+export function resolveRollMode(sources) {
+  let hasAdv = false;
+  let hasDis = false;
+  for (const s of sources ?? []) {
+    if (s.kind === 'advantage')    hasAdv = true;
+    else if (s.kind === 'disadvantage') hasDis = true;
+  }
+  if (hasAdv && hasDis) return 'normal';
+  if (hasAdv) return 'advantage';
+  if (hasDis) return 'disadvantage';
+  return 'normal';
+}
+
 // ─── Attack Resolution ────────────────────────────────────────────────────────
 
 /**
@@ -67,10 +90,12 @@ export function getProficiencyBonus(level) {
  * Natural 20 → automatic hit and critical hit.
  * Otherwise  → compare (d20 + attack bonus + condition modifiers) against target.ac.
  *
- * With `advantage: true`, two d20s are rolled and the higher is kept. All
- * subsequent logic (natural 1 / natural 20 / hit threshold) operates on the
- * kept die. Both rolls are returned in `advantageRolls` so the caller can
- * surface them in the combat log.
+ * `sources` carries the advantage/disadvantage sources for this attack
+ * (high-ground, long range, foe adjacent, etc.). Cancellation is applied via
+ * resolveRollMode: any advantage + any disadvantage → normal roll.
+ *   - advantage: 2d20 keep higher; natural-1 if BOTH dice are 1; natural-20 if EITHER is 20.
+ *   - disadvantage: 2d20 keep lower; natural-1 if EITHER die is 1; natural-20 only if BOTH are 20.
+ *   - normal: single d20.
  *
  * On a hit, weapon damage dice are rolled and flat bonuses added.
  * On a crit, the weapon dice are rolled CRIT_MULTIPLIER times total (e.g. 2× = double dice).
@@ -82,32 +107,49 @@ export function getProficiencyBonus(level) {
  *   target: import('../types/player.js').Player | import('../types/enemy.js').Enemy,
  *   weapon: import('../types/weapon.js').Weapon | null,
  *   conditions?: string[],
- *   advantage?: boolean,
+ *   sources?: Array<{ kind: 'advantage' | 'disadvantage', reason: string }>,
  *   rng?: () => number
  * }} params
  *
  * @returns {{
  *   hit: boolean, crit: boolean, damage: number, roll: number,
  *   rawD20: number, conditionBonus: number,
+ *   rollMode: 'normal' | 'advantage' | 'disadvantage',
+ *   rollModeSources: Array<{ kind: 'advantage' | 'disadvantage', reason: string }>,
  *   advantageRolls?: [number, number]
  * }}
  */
-export function resolveAttack({ attacker, target, weapon, conditions, advantage = false, rng = Math.random }) {
+export function resolveAttack({ attacker, target, weapon, conditions, sources = [], rng = Math.random }) {
+  const rollMode = resolveRollMode(sources);
+  // Sources that "won" — the side whose kind matches the resolved mode, surfaced
+  // for combat log labels. Empty when rollMode === 'normal' (even if mixed sources
+  // cancelled into normal — the log shows no advantage/disadvantage label in that case).
+  const rollModeSources = rollMode === 'normal'
+    ? []
+    : sources.filter(s => s.kind === rollMode);
+
   let d20;
   let advantageRolls;
-  if (advantage) {
+  if (rollMode === 'advantage') {
     const a = rollDice(1, 20, rng);
     const b = rollDice(1, 20, rng);
-    advantageRolls = [a, b];
-    d20 = Math.max(a, b);
+    advantageRolls = [Math.max(a, b), Math.min(a, b)]; // [kept, discarded]
+    d20 = advantageRolls[0];
+  } else if (rollMode === 'disadvantage') {
+    const a = rollDice(1, 20, rng);
+    const b = rollDice(1, 20, rng);
+    advantageRolls = [Math.min(a, b), Math.max(a, b)]; // [kept, discarded]
+    d20 = advantageRolls[0];
   } else {
     d20 = rollDice(1, 20, rng);
   }
 
-  // Natural 1 — automatic miss. With advantage, this only fires if BOTH dice
-  // rolled 1 (because we kept the higher). Same rule, applied to the kept die.
+  // Natural 1 — automatic miss. The kept die governs:
+  //   - advantage:    fires only if both dice were 1 (kept = max = 1).
+  //   - disadvantage: fires if either die was 1   (kept = min = 1).
+  //   - normal:       fires if the single die was 1.
   if (d20 === 1) {
-    return { hit: false, crit: false, damage: 0, roll: d20, rawD20: d20, conditionBonus: 0, advantageRolls };
+    return { hit: false, crit: false, damage: 0, roll: d20, rawD20: d20, conditionBonus: 0, rollMode, rollModeSources, advantageRolls };
   }
 
   const isCrit = d20 === 20;
@@ -152,7 +194,7 @@ export function resolveAttack({ attacker, target, weapon, conditions, advantage 
   const hit = isCrit || totalRoll >= target.ac;
 
   if (!hit) {
-    return { hit: false, crit: false, damage: 0, roll: totalRoll, rawD20: d20, conditionBonus, advantageRolls };
+    return { hit: false, crit: false, damage: 0, roll: totalRoll, rawD20: d20, conditionBonus, rollMode, rollModeSources, advantageRolls };
   }
 
   // ── Damage ────────────────────────────────────────────────────────────────
@@ -174,7 +216,40 @@ export function resolveAttack({ attacker, target, weapon, conditions, advantage 
   // receives the raw value and can distinguish "low roll" from "resisted to 0".
   const damage = (diceDamage + flatBonus) * (isCrit ? CRIT_MULTIPLIER : 1);
 
-  return { hit: true, crit: isCrit, damage, roll: totalRoll, rawD20: d20, conditionBonus, advantageRolls };
+  return { hit: true, crit: isCrit, damage, roll: totalRoll, rawD20: d20, conditionBonus, rollMode, rollModeSources, advantageRolls };
+}
+
+// ─── Attack-mode dispatch ────────────────────────────────────────────────────
+
+/**
+ * Pick the attack mode for `weapon` against a target at `distance` pixels.
+ * Single source of truth for the melee-vs-ranged-vs-thrown branch; CombatSystem
+ * calls this once per attack and routes accordingly.
+ *
+ *   - 'melee':  weapon.kind === 'melee' AND distance ≤ MELEE_HIT_RANGE_PX.
+ *   - 'ranged': weapon.kind === 'ranged' AND distance ≤ weapon.range.long.
+ *   - 'thrown': weapon.kind === 'melee' AND weapon.thrown is set AND
+ *               distance > MELEE_HIT_RANGE_PX AND distance ≤ weapon.thrown.range.long.
+ *   - null:     target is beyond every viable mode for this weapon.
+ *
+ * Thrown is a forward-compat branch; no weapon currently carries `thrown`.
+ * The dispatch is in shared/logic/ so it stays framework-free and shared with
+ * any future client-side preview.
+ *
+ * @param {import('../types/weapon.js').Weapon | null} weapon
+ * @param {number} distance — pixels between attacker and target centers
+ * @returns {'melee' | 'ranged' | 'thrown' | null}
+ */
+export function pickAttackMode(weapon, distance) {
+  if (!weapon) return distance <= MELEE_HIT_RANGE_PX ? 'melee' : null;
+  if (weapon.kind === 'ranged') {
+    if (!weapon.range) return null;
+    return distance <= weapon.range.long ? 'ranged' : null;
+  }
+  // kind === 'melee'
+  if (distance <= MELEE_HIT_RANGE_PX) return 'melee';
+  if (weapon.thrown && distance <= weapon.thrown.range.long) return 'thrown';
+  return null;
 }
 
 // ─── Saving Throws ────────────────────────────────────────────────────────────

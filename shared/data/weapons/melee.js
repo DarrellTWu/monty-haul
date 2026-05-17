@@ -1,10 +1,14 @@
 // shared/data/weapons/melee.js
 // All melee weapon definitions. Each entry matches the Weapon typedef.
+// Every entry carries `kind: 'melee'` — the canonical attack-mode discriminator.
+// Future thrown weapons (handaxe, dagger, javelin) gain an optional `thrown: { range }`
+// sub-block but stay `kind: 'melee'` since their primary mode is still melee.
 // Enhancement defaults to 0 — magic variants are created at the item layer.
 
 /** @type {import('../../types/weapon.js').Weapon} */
 export const LONGSWORD = {
   id: 'longsword',
+  kind: 'melee',
   damageDice: { count: 1, sides: 8 },
   damageBonus: 0,
   damageType: 'slashing',
@@ -16,6 +20,7 @@ export const LONGSWORD = {
 /** @type {import('../../types/weapon.js').Weapon} */
 export const SHORTSWORD = {
   id: 'shortsword',
+  kind: 'melee',
   damageDice: { count: 1, sides: 6 },
   damageBonus: 0,
   damageType: 'piercing',
@@ -27,6 +32,7 @@ export const SHORTSWORD = {
 /** @type {import('../../types/weapon.js').Weapon} */
 export const HANDAXE = {
   id: 'handaxe',
+  kind: 'melee',
   damageDice: { count: 1, sides: 6 },
   damageBonus: 0,
   damageType: 'slashing',
@@ -38,6 +44,7 @@ export const HANDAXE = {
 /** @type {import('../../types/weapon.js').Weapon} */
 export const GREATAXE = {
   id: 'greataxe',
+  kind: 'melee',
   damageDice: { count: 1, sides: 12 },
   damageBonus: 0,
   damageType: 'slashing',
@@ -49,6 +56,7 @@ export const GREATAXE = {
 /** @type {import('../../types/weapon.js').Weapon} */
 export const DAGGER = {
   id: 'dagger',
+  kind: 'melee',
   damageDice: { count: 1, sides: 4 },
   damageBonus: 0,
   damageType: 'piercing',
@@ -60,6 +68,7 @@ export const DAGGER = {
 /** @type {import('../../types/weapon.js').Weapon} */
 export const MACE = {
   id: 'mace',
+  kind: 'melee',
   damageDice: { count: 1, sides: 6 },
   damageBonus: 0,
   damageType: 'bludgeoning',
@@ -71,6 +80,7 @@ export const MACE = {
 /** @type {import('../../types/weapon.js').Weapon} */
 export const GREATSWORD = {
   id: 'greatsword',
+  kind: 'melee',
   damageDice: { count: 2, sides: 6 },
   damageBonus: 0,
   damageType: 'slashing',
@@ -82,6 +92,7 @@ export const GREATSWORD = {
 /** @type {import('../../types/weapon.js').Weapon} */
 export const UNARMED = {
   id: 'unarmed',
+  kind: 'melee',
   damageDice: { count: 1, sides: 4 }, // TODO: derive from class/level (Monk martial arts die)
   damageBonus: 0,
   damageType: 'bludgeoning',
@@ -90,15 +101,6 @@ export const UNARMED = {
   properties: [],
 };
 
-// Canonical id → weapon-def map. Single source of truth; previously duplicated
-// in DungeonRoom and CombatSystem. UNARMED is intentionally excluded — it's the
-// fallback for the empty weapon slot, not an equippable item.
-export const WEAPON_REGISTRY = {
-  longsword:  LONGSWORD,
-  shortsword: SHORTSWORD,
-  handaxe:    HANDAXE,
-  greataxe:   GREATAXE,
-  greatsword: GREATSWORD,
-  dagger:     DAGGER,
-  mace:       MACE,
-};
+// Per-weapon exports above are consumed by the unified registry in
+// shared/data/weapons/index.js. UNARMED is intentionally not in the registry —
+// it's the fallback for the empty weapon slot, not an equippable item.

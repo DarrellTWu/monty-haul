@@ -22,6 +22,7 @@ export const FLOOR_1 = {
     x: 880, y: 600,
     items: [
       'shield', 'dagger', 'greataxe', 'mace',
+      'shortbow', 'longbow',
       'half_plate',
       'healing_potion', 'bless_potion', 'longstrider_potion', 'false_life_potion',
     ],

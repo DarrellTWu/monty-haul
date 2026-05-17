@@ -32,7 +32,15 @@ export const MELEE_HIT_RANGE_PX = 64;   // Center-to-center distance for melee h
                                           // sprite collision radii are known.
 export const MELEE_SELECT_RANGE_PX = 160; // Tab-cycle radius for melee weapons — wider than hit
                                            // range so a target can be designated before stepping in.
-                                           // When ranged weapons land, this becomes per-weapon.
+                                           // Ranged weapons read their own range off the weapon def.
+export const ADJACENT_FOE_PX = MELEE_HIT_RANGE_PX; // SRD "5 ft" adjacency for ranged-into-melee
+                                                    // disadvantage. Aliased so a future melee-reach
+                                                    // tune doesn't silently change SRD semantics.
+
+// Feet → pixels. Project canon is 5 px/ft (BASE_SPEED_PX_PER_SEC = 150 = 30 ft).
+// Helper `ft()` lets weapon defs read as SRD: `range: { normal: ft(80), long: ft(320) }`.
+export const PX_PER_FOOT = 5;
+export const ft = (n) => n * PX_PER_FOOT;
 export const CRIT_MULTIPLIER = 2;        // Total damage multiplier on a natural 20
 
 // MOVEMENT

@@ -1,7 +1,7 @@
 ---
 status: shipped
-updated: 2026-05-14
-purpose: Walls, doors, platforms, rooms, steps, elevation, high-ground advantage. Read when the task touches collision, navigation, or terrain.
+updated: 2026-05-17
+purpose: Walls, doors, platforms, rooms, steps, elevation, high-ground advantage, line of sight. Read when the task touches collision, navigation, terrain, or LoS.
 ---
 
 # Dungeon Geometry & Elevation
@@ -57,12 +57,18 @@ Placeholders, no tiles yet.
 - Unlocked doors `0x4a4a5a` band; locked doors render identical to walls
 - Entity render depth: elev 0 = 2, elev 1 = 4
 
+## Line of Sight
+`isLineBlocked(x1, y1, x2, y2, obstacles)` in `shared/logic/geometry.js` uses a Liang-Barsky segment-vs-AABB sweep against every rect in `obstacles`. Returns true on the first hit.
+
+**Caller filters the rect list.** `DungeonRoom.attack` builds it as static walls + currently-locked-door rects. Unlocked doors and platform perimeters never block LoS — passing them in `obstacles` would block, but no current caller does.
+
+Used by `CombatSystem.playerAttack` on the ranged branch (denial reason `'no_line_of_sight'`). See `agent-context/combat.md` for the ranged path.
+
 ## Known V1 Limitations
 - No fall damage on walk-off
 - No door interaction UX (all doors unlocked this sprint)
 - Locked-door branch in collision/render is untested
 - AI gets stuck on concave corners
-- `isLineBlocked` is a stub (returns false; awaits LoS/ranged system)
 - Multi-level stacking (>1) out of scope
 - `canClimb` is a class flag, not yet a skill
 

@@ -1,6 +1,6 @@
 ---
 status: shipped
-updated: 2026-05-15
+updated: 2026-05-17
 purpose: Inventory, hotbar, containers (chests + corpses), loot tables. Read when the task touches items, drops, or container interaction.
 ---
 
@@ -42,7 +42,7 @@ Launched by `DungeonScene` with `{ lootSource: { kind, id } }`. Replaces the lef
 - `_lootHandshakeSeen` prevents premature auto-close before the server confirms the lock.
 
 ## Item Registries
-- Weapons: `shared/data/weapons/melee.js` (ranged not yet built).
+- Weapons: `shared/data/weapons/{melee,ranged,index}.js`. `index.js` is the unified `WEAPON_REGISTRY` barrel; everything else imports from there.
 - Armor: `shared/data/armor/armor.js`.
 - Consumables / shields / materials: `shared/data/items/{consumables,shields,materials}.js`.
 - `consumables.js` includes `extraction_scroll` (`type: 'extract'`).

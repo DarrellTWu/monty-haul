@@ -1,7 +1,7 @@
 ---
-status: design-only
-updated: 2026-05-16
-purpose: Plan for evolving advantage/disadvantage from a single boolean into a multi-source resolver — to be executed when the second source lands, not before.
+status: archived
+updated: 2026-05-17
+purpose: Plan for evolving advantage/disadvantage from a single boolean into a multi-source resolver. Executed in the ranged-combat sprint when long-range and foe-adjacent disadvantage became the trigger. Archived for design history.
 ---
 
 # Advantage / Disadvantage Architecture Plan

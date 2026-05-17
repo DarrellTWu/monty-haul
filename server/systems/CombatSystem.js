@@ -3,10 +3,11 @@
 
 import {
   resolveAttack, applyDamage, rollDice,
-  getModifier, getProficiencyBonus,
+  getModifier, getProficiencyBonus, pickAttackMode,
 } from '../../shared/logic/combat.js';
-import { ATTACK_COOLDOWN_MS, MELEE_HIT_RANGE_PX, RAGE_DAMAGE_BONUS } from '../../shared/data/constants.js';
-import { WEAPON_REGISTRY, UNARMED } from '../../shared/data/weapons/melee.js';
+import { isLineBlocked } from '../../shared/logic/geometry.js';
+import { ATTACK_COOLDOWN_MS, MELEE_HIT_RANGE_PX, ADJACENT_FOE_PX, RAGE_DAMAGE_BONUS } from '../../shared/data/constants.js';
+import { WEAPON_REGISTRY, UNARMED } from '../../shared/data/weapons/index.js';
 import { SHIELD_REGISTRY } from '../../shared/data/items/shields.js';
 import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.js';
 
@@ -47,11 +48,20 @@ function applyDueling(weapon, player, fightingStyle) {
 /**
  * Build a short "d20:14 +2p +3str = 19" roll string.
  * Shows proficiency and ability mod separately so players can verify the math.
+ * Surfaces the resolved roll mode + winning sources ("adv: 14, 5 — high-ground"
+ * or "dis: 5, 14 — long range, foe adjacent") so players see why.
  */
 function rollStr(result, profBonus, abilityMod, abilityKey) {
-  const dieLabel = result.advantageRolls
-    ? `d20:${result.rawD20} [adv: ${result.advantageRolls[0]}, ${result.advantageRolls[1]}]`
-    : `d20:${result.rawD20}`;
+  let dieLabel;
+  if (result.rollMode === 'advantage' && result.advantageRolls) {
+    const reasons = result.rollModeSources?.map(s => s.reason).join(', ');
+    dieLabel = `d20:${result.rawD20} [adv: ${result.advantageRolls[0]}, ${result.advantageRolls[1]}${reasons ? ` — ${reasons}` : ''}]`;
+  } else if (result.rollMode === 'disadvantage' && result.advantageRolls) {
+    const reasons = result.rollModeSources?.map(s => s.reason).join(', ');
+    dieLabel = `d20:${result.rawD20} [dis: ${result.advantageRolls[0]}, ${result.advantageRolls[1]}${reasons ? ` — ${reasons}` : ''}]`;
+  } else {
+    dieLabel = `d20:${result.rawD20}`;
+  }
   const parts = [dieLabel];
   if (profBonus !== 0) parts.push(`${profBonus >= 0 ? '+' : ''}${profBonus}p`);
   if (abilityMod !== 0) parts.push(`${abilityMod >= 0 ? '+' : ''}${abilityMod}${abilityKey}`);
@@ -70,26 +80,50 @@ function rollStr(result, profBonus, abilityMod, abilityKey) {
  *
  * @param {Map} [enemyDefs] - Map of enemyId → enemy definition (for resistances)
  */
-export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId = null) {
+export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId = null, geometry = null) {
   const player = state.players.get(sessionId);
   if (!player || !player.alive) return { hit: false, crit: false, damage: 0, targetId: null, logs: [] };
   if (player.attackCooldownMs > 0) return { hit: false, crit: false, damage: 0, targetId: null, logs: [] };
 
-  // Explicit target: validate exists, alive, in range. Failures return `denied`
-  // without consuming the attack cooldown — the player keeps their action.
+  // Equipped weapon dictates whether a target is required and how dispatch works.
+  const equippedWeapon = getWeapon(player.equippedWeaponId);
+  const isRangedWeapon = equippedWeapon.kind === 'ranged';
+
+  // Target resolution. Explicit targetId always validated. Missing targetId is
+  // only legal for melee weapons (nearest-enemy fallback); ranged refuses.
   let target;
   if (targetId) {
     const enemy = state.enemies.get(String(targetId));
     if (!enemy || !enemy.alive) {
       return { hit: false, crit: false, damage: 0, targetId: null, logs: [], denied: 'invalid_target' };
     }
-    if (dist2d(player.x, player.y, enemy.x, enemy.y) > MELEE_HIT_RANGE_PX) {
-      return { hit: false, crit: false, damage: 0, targetId: null, logs: [], denied: 'out_of_range' };
-    }
     target = { id: String(targetId), state: enemy };
+  } else if (isRangedWeapon) {
+    return { hit: false, crit: false, damage: 0, targetId: null, logs: [], denied: 'no_target' };
   } else {
     target = nearestLivingEnemy(state, player);
     if (!target) return { hit: false, crit: false, damage: 0, targetId: null, logs: [] };
+  }
+
+  // Dispatch: melee vs ranged vs thrown vs out-of-range.
+  const distance = dist2d(player.x, player.y, target.state.x, target.state.y);
+  const mode = pickAttackMode(equippedWeapon, distance);
+  if (mode === null) {
+    return { hit: false, crit: false, damage: 0, targetId: null, logs: [], denied: 'out_of_range' };
+  }
+  if (mode === 'thrown') {
+    // TODO(deferred): thrown weapons sprint — reach this branch when a melee
+    // weapon with a `thrown` sub-block is equipped and the target is beyond
+    // melee range. No weapon ships with `thrown` today.
+    return { hit: false, crit: false, damage: 0, targetId: null, logs: [], denied: 'invalid_target' };
+  }
+
+  // LoS gate (ranged only). Caller passes pre-filtered obstacle rects:
+  // walls + locked-door rects only. Platforms never block.
+  if (mode === 'ranged' && geometry?.obstacles) {
+    if (isLineBlocked(player.x, player.y, target.state.x, target.state.y, geometry.obstacles)) {
+      return { hit: false, crit: false, damage: 0, targetId: null, logs: [], denied: 'no_line_of_sight' };
+    }
   }
 
   const logs      = [];
@@ -106,22 +140,49 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
   const classDef = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
   const pLabel   = player.class ? player.class[0].toUpperCase() + player.class.slice(1) : 'Player';
 
-  let baseWeapon = getWeapon(player.equippedWeaponId);
-  if (player.conditions.includes('rage')) {
+  let baseWeapon = equippedWeapon;
+  if (player.conditions.includes('rage') && mode === 'melee') {
+    // Rage damage bonus is melee-only per SRD.
     baseWeapon = { ...baseWeapon, damageBonus: (baseWeapon.damageBonus ?? 0) + RAGE_DAMAGE_BONUS };
   }
-  const weapon = applyDueling(getEffectiveWeapon(baseWeapon, player), player, classDef.fightingStyle);
+  // Dueling and versatile two-handed apply to melee only.
+  const weapon = mode === 'melee'
+    ? applyDueling(getEffectiveWeapon(baseWeapon, player), player, classDef.fightingStyle)
+    : baseWeapon;
 
   const isFinesse   = weapon.properties?.includes('finesse');
   const strMod      = getModifier(attacker.abilityScores.str);
   const dexMod      = getModifier(attacker.abilityScores.dex);
-  const mainAbilMod = isFinesse && dexMod > strMod ? dexMod : strMod;
-  const mainAbilKey = isFinesse && dexMod > strMod ? 'dex' : 'str';
+  // Ranged weapons use their declared attackAbility (DEX for bows).
+  // Melee weapons: finesse picks higher of STR/DEX; else attackAbility.
+  let mainAbilMod, mainAbilKey;
+  if (mode === 'ranged') {
+    mainAbilKey = weapon.attackAbility;
+    mainAbilMod = getModifier(attacker.abilityScores[mainAbilKey]);
+  } else if (isFinesse && dexMod > strMod) {
+    mainAbilMod = dexMod;
+    mainAbilKey = 'dex';
+  } else {
+    mainAbilMod = strMod;
+    mainAbilKey = 'str';
+  }
 
-  // High-ground advantage: attacker on a platform vs target on the ground rolls 2d20 keep higher.
-  const advantage = player.elevation === 1 && target.state.elevation === 0;
+  // Source assembly: high-ground advantage (any mode), long-range and
+  // foe-adjacent disadvantage (ranged only).
+  const sources = [];
+  if (player.elevation === 1 && target.state.elevation === 0) {
+    sources.push({ kind: 'advantage', reason: 'high-ground' });
+  }
+  if (mode === 'ranged') {
+    if (weapon.range && distance > weapon.range.normal) {
+      sources.push({ kind: 'disadvantage', reason: 'long range' });
+    }
+    if (_anyOtherEnemyAdjacent(state, player, target.id)) {
+      sources.push({ kind: 'disadvantage', reason: 'foe adjacent' });
+    }
+  }
 
-  const result = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon, advantage });
+  const result = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon, sources });
 
   if (result.hit) {
     const applied = applyDamage({
@@ -143,18 +204,19 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
   }
 
   // ── Offhand attack (Two-Weapon Fighting) ────────────────────────────────────
-  // Triggered when offhand holds a weapon (not a shield). The offhand attack
-  // does NOT add the ability modifier to damage unless the modifier is negative
-  // (standard SRD Two-Weapon Fighting rule). No Dueling bonus either.
+  // Melee-only. Two-handed bows can't have an offhand weapon equipped anyway,
+  // but the mode gate keeps the path explicit.
+  // Offhand attack does NOT add the ability modifier to damage unless the
+  // modifier is negative (standard SRD Two-Weapon Fighting rule). No Dueling.
   const offhandId = player.offhandId;
-  if (offhandId && WEAPON_REGISTRY[offhandId] && target.state.alive) {
+  if (mode === 'melee' && offhandId && WEAPON_REGISTRY[offhandId] && target.state.alive) {
     const offWeapon = WEAPON_REGISTRY[offhandId];
 
     const offIsFinesse = offWeapon.properties?.includes('finesse');
     const offAbilMod   = offIsFinesse && dexMod > strMod ? dexMod : strMod;
     const offAbilKey   = offIsFinesse && dexMod > strMod ? 'dex' : 'str';
 
-    const offResult = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon: offWeapon, advantage });
+    const offResult = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon: offWeapon, sources });
 
     // TWF: remove positive ability mod from damage (SRD rule).
     let offRawDamage = offResult.damage;
@@ -186,6 +248,7 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
   // Triggers when monk attacks unarmored, no shield, with a monk weapon.
   const hasShieldEquipped = !!SHIELD_REGISTRY[player.offhandId];
   if (
+    mode === 'melee' &&
     player.class === 'monk' &&
     !player.equippedArmorId &&
     !hasShieldEquipped &&
@@ -196,7 +259,7 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
     const maAbilMod = dexMod > strMod ? dexMod : strMod;
     const maAbilKey = dexMod > strMod ? 'dex' : 'str';
 
-    const maResult = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon: maWeapon, advantage });
+    const maResult = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon: maWeapon, sources });
 
     if (maResult.hit) {
       const applied = applyDamage({
@@ -218,8 +281,34 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
     }
   }
 
+  // For ranged attacks, return a projectile-fire descriptor that the room
+  // handler broadcasts as `projectile_fired`. Style is per-weapon; bows = arrow.
+  // Future ranged weapons / spells set their own style ('bolt', 'firebolt', ...).
+  let projectile = null;
+  if (mode === 'ranged') {
+    projectile = {
+      attackerId: sessionId,
+      fromX: player.x, fromY: player.y,
+      toX: target.state.x, toY: target.state.y,
+      hit:  result.hit,
+      style: 'arrow', // shortbow + longbow both use the arrow visual
+    };
+  }
+
   player.attackCooldownMs = ATTACK_COOLDOWN_MS;
-  return { hit: result.hit, crit: result.crit, damage: result.damage, targetId: target.id, logs };
+  return { hit: result.hit, crit: result.crit, damage: result.damage, targetId: target.id, logs, projectile };
+}
+
+/**
+ * Helper: is any enemy other than the named target within ADJACENT_FOE_PX of
+ * the player? Used for the SRD ranged-into-melee disadvantage rule.
+ */
+function _anyOtherEnemyAdjacent(state, player, excludeTargetId) {
+  for (const [id, enemy] of state.enemies) {
+    if (!enemy.alive || id === excludeTargetId) continue;
+    if (dist2d(player.x, player.y, enemy.x, enemy.y) <= ADJACENT_FOE_PX) return true;
+  }
+  return false;
 }
 
 /**
@@ -237,9 +326,12 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
   };
 
   // High-ground advantage: enemy on a platform vs player on the ground.
-  const advantage = enemyState.elevation === 1 && targetPlayer.elevation === 0;
+  const sources = [];
+  if (enemyState.elevation === 1 && targetPlayer.elevation === 0) {
+    sources.push({ kind: 'advantage', reason: 'high-ground' });
+  }
 
-  const result = resolveAttack({ attacker, target: playerToTarget(targetPlayer), weapon: null, advantage });
+  const result = resolveAttack({ attacker, target: playerToTarget(targetPlayer), weapon: null, sources });
 
   if (result.hit) {
     const applied = applyDamage({
@@ -267,9 +359,16 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
 
   const tLabel = enemyState.type || 'enemy';
   const pLabel = targetPlayer.class ? targetPlayer.class[0].toUpperCase() + targetPlayer.class.slice(1) : 'Player';
-  const dieLabel = result.advantageRolls
-    ? `d20:${result.rawD20} [adv: ${result.advantageRolls[0]}, ${result.advantageRolls[1]}]`
-    : `d20:${result.rawD20}`;
+  let dieLabel;
+  if (result.rollMode === 'advantage' && result.advantageRolls) {
+    const reasons = result.rollModeSources?.map(s => s.reason).join(', ');
+    dieLabel = `d20:${result.rawD20} [adv: ${result.advantageRolls[0]}, ${result.advantageRolls[1]}${reasons ? ` — ${reasons}` : ''}]`;
+  } else if (result.rollMode === 'disadvantage' && result.advantageRolls) {
+    const reasons = result.rollModeSources?.map(s => s.reason).join(', ');
+    dieLabel = `d20:${result.rawD20} [dis: ${result.advantageRolls[0]}, ${result.advantageRolls[1]}${reasons ? ` — ${reasons}` : ''}]`;
+  } else {
+    dieLabel = `d20:${result.rawD20}`;
+  }
   const log = result.hit
     ? `${tLabel} → ${pLabel}: hit (${dieLabel}+${enemyDef.attackBonus}atk = ${result.roll} vs AC ${targetPlayer.ac}), ${result.damage} ${enemyDef.damageType}`
     : `${tLabel} → ${pLabel}: miss (${dieLabel}+${enemyDef.attackBonus}atk = ${result.roll} vs AC ${targetPlayer.ac})`;

@@ -152,15 +152,6 @@ group('circleOverlapsAny', () => {
   });
 });
 
-// ─── isLineBlocked stub ──────────────────────────────────────────────────────
-
-group('isLineBlocked', () => {
-  test('always returns false (stub)', () => {
-    assert.equal(isLineBlocked(0, 0, 100, 100, [], []), false);
-    assert.equal(isLineBlocked(0, 0, 100, 100, [wall(50, 50, 10, 10)], []), false);
-  });
-});
-
 // ─── segmentIntersectsCircle ─────────────────────────────────────────────────
 
 group('segmentIntersectsCircle', () => {
@@ -408,6 +399,51 @@ group('platformPerimeterRects', () => {
   test('platform with no steps array → 4 full-edge wall rects (no gaps)', () => {
     const noSteps = platformPerimeterRects({ x: 0, y: 0, w: 100, h: 100 });
     assert.equal(noSteps.length, 4);
+  });
+});
+
+// ─── isLineBlocked ───────────────────────────────────────────────────────────
+
+group('isLineBlocked', () => {
+  const losWall = { x: 100, y: 100, w: 50, h: 50 };
+
+  test('clear segment through empty space → false', () => {
+    assert.equal(isLineBlocked(0, 0, 1000, 1000, []), false);
+  });
+
+  test('segment crosses a wall rect → true', () => {
+    assert.equal(isLineBlocked(0, 0, 200, 200, [losWall]), true);
+  });
+
+  test('segment that misses the wall → false', () => {
+    assert.equal(isLineBlocked(0, 0, 90, 90, [losWall]), false);
+  });
+
+  test('horizontal segment crosses wall → true', () => {
+    assert.equal(isLineBlocked(50, 125, 200, 125, [losWall]), true);
+  });
+
+  test('vertical segment crosses wall → true', () => {
+    assert.equal(isLineBlocked(125, 50, 125, 200, [losWall]), true);
+  });
+
+  test('endpoint inside the wall → true', () => {
+    assert.equal(isLineBlocked(0, 0, 125, 125, [losWall]), true);
+  });
+
+  test('segment passes above the wall → false', () => {
+    assert.equal(isLineBlocked(0, 50, 200, 50, [losWall]), false);
+  });
+
+  test('caller-filtered obstacles: empty list = no blocking', () => {
+    // Demonstrates that the helper trusts its input list. If the caller passes
+    // only walls + LOCKED doors, unlocked doors are excluded and don't block.
+    assert.equal(isLineBlocked(0, 0, 1000, 1000, []), false);
+  });
+
+  test('multiple obstacles: first miss, second hit → true', () => {
+    const miss = { x: 1000, y: 1000, w: 10, h: 10 };
+    assert.equal(isLineBlocked(0, 0, 200, 200, [miss, losWall]), true);
   });
 });
 
