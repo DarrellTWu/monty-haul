@@ -22,6 +22,7 @@ import {
   tryOpenContainer, tryCloseContainer, releaseLocksHeldBy, tickContainerLocks,
   tryTakeItem, tryTakeGold, tryDropItem,
 } from '../../shared/logic/loot-window.js';
+import { applyCondition, tickConditions, clearPlayerConditions } from '../../shared/logic/conditions.js';
 import { LOOT_TABLE_REGISTRY }       from '../../shared/data/loot/tier1.js';
 import { ARMOR_REGISTRY, computeAC } from '../../shared/data/armor/armor.js';
 import { WEAPON_REGISTRY }           from '../../shared/data/weapons/melee.js';
@@ -478,16 +479,7 @@ export class DungeonRoom extends Room {
     const classDef = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
     player.rageUsesRemaining = classDef.rageUses ?? 0;
 
-    player.rageRemainingMs        = 0;
-    player.blessRemainingMs       = 0;
-    player.longstriderRemainingMs = 0;
-    player.falseLifeRemainingMs   = 0;
-    while (player.conditions.length > 0) player.conditions.pop();
-
-    const prefix = `${sessionId}_`;
-    for (const key of [...this._conditionTimers.keys()]) {
-      if (key.startsWith(prefix)) this._conditionTimers.delete(key);
-    }
+    clearPlayerConditions(player, this._conditionTimers, sessionId);
   }
 
   // ── Per-tick logic ────────────────────────────────────────────────────────────
@@ -575,34 +567,9 @@ export class DungeonRoom extends Room {
     }
   }
 
-  // TODO(deferred): extract to shared/logic/conditions.js — see CLAUDE.md §"Deferred Features".
-  // Timer code is hand-rolled here until the module lands.
   _tickConditions(dt) {
-    for (const [sessionId, player] of this.state.players) {
-      for (const condition of [...player.conditions]) {
-        const key       = `${sessionId}_${condition}`;
-        const remaining = (this._conditionTimers.get(key) ?? 0) - dt;
-        if (remaining <= 0) {
-          this._conditionTimers.delete(key);
-          const idx = player.conditions.indexOf(condition);
-          if (idx !== -1) player.conditions.splice(idx, 1);
-          if (condition === 'bless')       player.blessRemainingMs = 0;
-          if (condition === 'longstrider') player.longstriderRemainingMs = 0;
-          if (condition === 'false_life')  { player.falseLifeRemainingMs = 0; player.tempHp = 0; }
-          if (condition === 'rage') {
-            player.rageRemainingMs = 0;
-            const cn = player.class[0].toUpperCase() + player.class.slice(1);
-            this.broadcast('combat_log', { message: `${cn}'s Rage ends.` });
-          }
-        } else {
-          this._conditionTimers.set(key, remaining);
-          if (condition === 'bless')       player.blessRemainingMs = remaining;
-          if (condition === 'longstrider') player.longstriderRemainingMs = remaining;
-          if (condition === 'false_life')  player.falseLifeRemainingMs = remaining;
-          if (condition === 'rage')        player.rageRemainingMs = remaining;
-        }
-      }
-    }
+    const logs = tickConditions(this.state.players, this._conditionTimers, dt);
+    for (const msg of logs) this.broadcast('combat_log', { message: msg });
   }
 
   // ── Item / ability helpers ────────────────────────────────────────────────────
@@ -618,31 +585,22 @@ export class DungeonRoom extends Room {
       player.hp  = Math.min(player.maxHp, player.hp + heal);
       this.broadcast('combat_log', { message: `${c.label}: ${className} recovers ${heal} HP` });
     } else if (c.type === 'bless') {
+      // Bless does not refresh while already active — match original behavior.
       if (!player.conditions.includes('bless')) {
-        player.conditions.push('bless');
-        player.blessRemainingMs = c.conditionDurationMs;
-        this._conditionTimers.set(`${sessionId}_bless`, c.conditionDurationMs);
+        applyCondition(player, 'bless', c.conditionDurationMs, this._conditionTimers, sessionId);
         this.broadcast('combat_log', {
           message: `${c.label}: ${className} gains Bless (+1d4 to attacks, ${c.conditionDurationMs / 1000}s)`,
         });
       }
     } else if (c.type === 'longstrider') {
-      if (!player.conditions.includes('longstrider')) {
-        player.conditions.push('longstrider');
-      }
-      player.longstriderRemainingMs = c.conditionDurationMs;
-      this._conditionTimers.set(`${sessionId}_longstrider`, c.conditionDurationMs);
+      applyCondition(player, 'longstrider', c.conditionDurationMs, this._conditionTimers, sessionId);
       this.broadcast('combat_log', {
         message: `${c.label}: ${className}'s speed +${c.speedBonusFt}ft (${c.conditionDurationMs / 1000}s)`,
       });
     } else if (c.type === 'false_life') {
       const tempHp = rollDice(c.damageDice.count, c.damageDice.sides) + c.diceBonus;
       player.tempHp = tempHp;
-      if (!player.conditions.includes('false_life')) {
-        player.conditions.push('false_life');
-      }
-      player.falseLifeRemainingMs = c.conditionDurationMs;
-      this._conditionTimers.set(`${sessionId}_false_life`, c.conditionDurationMs);
+      applyCondition(player, 'false_life', c.conditionDurationMs, this._conditionTimers, sessionId);
       this.broadcast('combat_log', {
         message: `${c.label}: ${className} gains ${tempHp} temp HP (${c.conditionDurationMs / 1000}s)`,
       });
@@ -707,9 +665,7 @@ export class DungeonRoom extends Room {
   _activateRage(player, sessionId) {
     if (player.rageUsesRemaining <= 0 || player.rageRemainingMs > 0) return;
     player.rageUsesRemaining -= 1;
-    player.rageRemainingMs = RAGE_DURATION_MS;
-    if (!player.conditions.includes('rage')) player.conditions.push('rage');
-    this._conditionTimers.set(`${sessionId}_rage`, RAGE_DURATION_MS);
+    applyCondition(player, 'rage', RAGE_DURATION_MS, this._conditionTimers, sessionId);
     const cn = player.class[0].toUpperCase() + player.class.slice(1);
     this.broadcast('combat_log', {
       message: `💢 ${cn} enters a Rage! (+${RAGE_DAMAGE_BONUS} dmg, resist physical, 30s)`,

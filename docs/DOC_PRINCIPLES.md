@@ -108,9 +108,8 @@ Stubs, placeholders, and "always returns 0" fields should be tagged in code with
 
 **Why:** without this, an agent reading the code cannot distinguish "this is finished" from "this is a placeholder awaiting a future system." The TODO + doc link makes the gap explicit and routes the reader to the deferred-feature inventory in CLAUDE.md or the relevant agent-context section.
 
-**Current sites (as of 2026-05-14):**
+**Current sites (as of 2026-05-16):**
 - `server/rooms/DungeonRoom.js:_buildRunMeta` — kill attribution
-- `server/rooms/DungeonRoom.js:_tickConditions` — awaiting `shared/logic/conditions.js`
 - `shared/logic/geometry.js:isLineBlocked` — awaiting LoS/ranged combat
 
 CLAUDE.md §"Deferred Features" maintains the full inventory.

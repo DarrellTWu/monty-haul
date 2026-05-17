@@ -72,10 +72,11 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `logic/geometry.js` | Pure geometry: `resolveWallCollision`, `circleOverlapsAny`, `isLineBlocked` (stub), `tryAutoClimb`, `platformPerimeterRects`, `segmentIntersectsCircle`, `segmentPerimeterCrossing`, `pointInRect`. |
 | `logic/character.js` | `validateAbilityScores(scores)` → `{ok}` or `{ok:false, error}`. Enforces six keys present, integer in `[SCORE_MIN, SCORE_MAX]`, point cost ≤ `POINT_BUY_BUDGET`. Used by HubScene (pre-submit) + DungeonRoom.onJoin (auth gate). |
 | `logic/equipment.js` | `equipItem(player, {itemId, slot?})`, `unequipItem(player, {slot})`, `recomputeStats(player)`. Owns SRD slot routing (auto-detect armor/shield/weapon, two-handed handling, shield + main-hand interactions) and the derived-stat hook called after any score or equipment change. |
+| `logic/conditions.js` | `CONDITION_DEFS` table (mirror field + optional `onExpire`/`onExpireLog` per condition) + `applyCondition`, `tickConditions`, `clearPlayerConditions`. Pure timer bookkeeping; caller owns the `Map<\`${sessionId}_${conditionId}\`, ms>` and broadcasts the returned log strings. Used by `DungeonRoom._useConsumable`, `_activateRage`, `_tickConditions`, `_longRest`. |
 | `types/{player,enemy,weapon}.js` | JSDoc `@typedef` shapes. |
-| `tests/{combat,loot,geometry,character,equipment}.test.js` | Pure-logic unit tests. |
+| `tests/{combat,loot,geometry,character,equipment,conditions}.test.js` | Pure-logic unit tests. |
 
-**Not yet built:** `shared/data/subclasses/`, `shared/data/gear/`, `shared/logic/conditions.js` (timer code hand-rolled in DungeonRoom), `shared/logic/ai.js` (still in `server/systems/AISystem.js`), `shared/logic/floor-generator.js`, `shared/logic/items.js`, `shared/logic/extraction.js`.
+**Not yet built:** `shared/data/subclasses/`, `shared/data/gear/`, `shared/logic/ai.js` (still in `server/systems/AISystem.js`), `shared/logic/floor-generator.js`, `shared/logic/items.js`, `shared/logic/extraction.js`.
 
 ## Supabase (`supabase/migrations/`)
 
@@ -93,6 +94,7 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `shared/tests/geometry.test.js` | 47 | AABB push-out, perimeter primitives, `tryAutoClimb`, `platformPerimeterRects`. |
 | `shared/tests/character.test.js` | 10 | `validateAbilityScores` — shape, range, budget. |
 | `shared/tests/equipment.test.js` | 14 | `equipItem`/`unequipItem`/`recomputeStats` — slot routing, two-handed, AC recompute. |
+| `shared/tests/conditions.test.js` | 15 | `applyCondition`/`tickConditions`/`clearPlayerConditions` — idempotency, mirror sync, expiry side effects, multi-player isolation. |
 | `server/tests/container-lock.test.js` | 21 | |
 | `server/tests/loot-flow.test.js` | 35 | |
 | `server/tests/supabase-smoke.js` | 34 | Real dev Supabase. `process.loadEnvFile('server/.env')`. |
@@ -109,4 +111,3 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 - **Username login is trust-on-first-use.** Anyone with a username can become that player. Real auth is future work.
 - **`run_history.kills` always 0.** Column exists; attribution deferred. See `agent-context/combat.md`.
 - **`isLineBlocked` is a stub.** Returns false until LoS/ranged combat lands.
-- **`shared/logic/conditions.js` not built.** Timer code hand-rolled in `DungeonRoom`.

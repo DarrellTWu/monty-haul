@@ -61,4 +61,4 @@ Features that are described in docs but not built should be marked **DEFERRED** 
 ```js
 // TODO(deferred): <short description> — see docs/agent-context/<file>.md
 ```
-Current deferred items: kill attribution, `isLineBlocked` / LoS, `shared/logic/conditions.js`, Debug Mode OFF (production gameplay path), server-side ability score budget validation.
+Current deferred items: kill attribution, `isLineBlocked` / LoS, Debug Mode OFF (production gameplay path), server-side ability score budget validation.
