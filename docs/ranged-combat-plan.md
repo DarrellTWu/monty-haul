@@ -1,7 +1,7 @@
 ---
 status: in-progress
 updated: 2026-05-16
-purpose: Sprint plan for ranged combat (shortbow + longbow), LoS, and the advantage/disadvantage tri-state refactor that ships alongside it.
+purpose: Sprint plan for ranged combat (shortbow + longbow), LoS, and the advantage/disadvantage tri-state refactor that ships alongside it. Forward-compat revisions for thrown weapons / spells / non-creature targets folded in.
 ---
 
 # Ranged Combat Sprint Plan
@@ -17,7 +17,8 @@ This sprint also lands the advantage/disadvantage tri-state refactor described i
 - **Advantage refactor lands now, in this sprint.** Plus both SRD ranged disadvantage sources (long-range, ranged-into-melee). High-ground advantage and these disadvantages cancel per SRD.
 - **Locked doors block LoS, unlocked doors do not.** Mirrors movement: locked door = wall, unlocked door = passage.
 - **Tab cycles enemies within the equipped weapon's long range; LoS is not checked at selection time.** Selection ring may sit on a target you can't currently hit; `attack_denied` at fire time supplies the feedback. Avoids ring flicker as enemies move behind cover.
-- **Arrows are cosmetic.** Server resolves the to-hit instantly at fire time and broadcasts an `arrow_fired` event; clients tween a sprite from attacker → target for flavour. No state-schema projectile entities.
+- **Arrows are cosmetic.** Server resolves the to-hit instantly at fire time and broadcasts a generic `projectile_fired` event (with a `style` discriminator so future bolts / thrown daggers / firebolts / magic missiles share the same wire shape); clients tween a sprite from attacker → target for flavour. No state-schema projectile entities.
+- **Ranged weapons require an explicit target reference.** For v1 that target is always an enemy id (`targetId`), but the rule is phrased per-weapon — not as a global "ranged combat" invariant — so future ranged things can target environmental features (destructible barrels, levers, breakable doors), points on the floor (aoe spell anchors), or the caster itself (Shield, self-buffs). The `attack` payload's target field stays a single string id for now; broadening to `{ kind, id? | x?, y? }` is the cleanest forward path when non-creature targeting lands.
 
 Infinite arrows assumed for v1. No ammunition item, no quiver slot.
 
@@ -25,21 +26,24 @@ Infinite arrows assumed for v1. No ammunition item, no quiver slot.
 
 - Ammunition / arrow items.
 - Cover (half / three-quarters / full beyond LoS yes-no).
-- Other ranged weapon types (crossbows, slings, thrown daggers/handaxes/javelins). The `range` property is shaped so they slot in later.
+- Other ranged weapon types (crossbows, slings, thrown daggers/handaxes/javelins). The weapon shape introduced here (explicit `kind` + optional `thrown` sub-block, see §4) is designed so they slot in without further refactor.
 - Archery fighting style (+2 attack rolls). Not in any class def today.
 - Ranged sneak attack / extra dice on ranged hits.
 - Friendly-fire / arc / aoe.
+- Non-creature target references (environment objects, points, self). The `kind: 'ranged'` constraint is "requires a target", not "requires a creature" — future target kinds drop in at the message layer without touching combat logic.
 
 ## SRD baseline → engine values
 
-Project converts feet to pixels at 5 px/ft (`BASE_SPEED_PX_PER_SEC = 150` for 30 ft).
+Project converts feet to pixels at 5 px/ft (`BASE_SPEED_PX_PER_SEC = 150` for 30 ft). Add a `PX_PER_FOOT = 5` constant and `ft(n) => n * PX_PER_FOOT` helper to `shared/data/constants.js` so weapon defs read as SRD (`range: { normal: ft(80), long: ft(320) }`) and can't be silently fat-fingered.
 
 | Weapon | Damage | Type | Properties | Normal range | Long range |
 |---|---|---|---|---|---|
-| Shortbow | 1d6 | piercing | ammunition, two-handed | 80 ft → **400 px** | 320 ft → **1600 px** |
-| Longbow | 1d8 | piercing | ammunition, two-handed, heavy | 150 ft → **750 px** | 600 ft → **3000 px** |
+| Shortbow | 1d6 | piercing | two-handed | `ft(80)` → 400 px | `ft(320)` → 1600 px |
+| Longbow | 1d8 | piercing | two-handed, heavy | `ft(150)` → 750 px | `ft(600)` → 3000 px |
 
 Attack/damage ability: **DEX**. Longbow's long range exceeds floor 1's width (1600); that's fine — the long-range gate is per-shot, and the player rarely has that line on floor 1 anyway.
+
+Also add `ADJACENT_FOE_PX = MELEE_HIT_RANGE_PX` constant — the SRD "5 ft" adjacency check for ranged-into-melee disadvantage. Aliased rather than duplicated so it tracks if melee reach is tuned, but renamed so a future sprite-radius tune doesn't silently change SRD semantics.
 
 Cooldown: same `ATTACK_COOLDOWN_MS` (3000 ms) as melee for v1. Tune later if bows feel oppressive.
 
@@ -75,11 +79,36 @@ Each call site that currently computes `advantage = ...` builds a local `sources
 ### 4. Weapons & registry
 
 - New file `shared/data/weapons/ranged.js` exporting `SHORTBOW`, `LONGBOW`.
-- Each carries `range: { normal: number, long: number }` (px) and `attackAbility: 'dex'`. Properties include `'two-handed'`; longbow also `'heavy'`. **No `'ammunition'` property string** — we don't model arrows.
-- `shared/types/weapon.js`: extend the typedef with `range?: { normal: number, long: number }`. Presence of `range` is the canonical "this is ranged" check.
+- **Weapon typedef gains an explicit `kind`** (`shared/types/weapon.js`):
+  ```js
+  /** @typedef {{
+   *   id: string,
+   *   kind: 'melee' | 'ranged',           // the canonical attack-mode discriminator
+   *   damageDice: DiceDef,
+   *   damageBonus: number,
+   *   damageType: string,
+   *   enhancement: number,
+   *   attackAbility: 'str' | 'dex',
+   *   properties: string[],
+   *   range?: { normal: number, long: number },   // required when kind === 'ranged'
+   *   thrown?: { range: { normal: number, long: number }, ability?: 'str' | 'dex' }
+   *     // optional — present on melee weapons that can also be thrown (handaxe, dagger,
+   *     // javelin). Damage dice + damageType reuse the melee top-level values; only
+   *     // the range gate and (optionally) the ability override differ.
+   * }} Weapon
+   */
+  ```
+- **Why `kind` instead of `presence of range`:** the next ranged-adjacent feature is almost certainly thrown weapons. `HANDAXE` and `DAGGER` already exist with `properties: ['thrown']`; they're melee weapons that *also* have a ranged mode. If "has `range`" meant "is ranged", adding the thrown range would silently break their melee path. The `kind` field keeps the question explicit.
+- **Existing melee weapons** in `shared/data/weapons/melee.js` get `kind: 'melee'` added. No other shape change.
+- **`SHORTBOW` / `LONGBOW`** carry `kind: 'ranged'`, `attackAbility: 'dex'`, `range: { normal: ft(N), long: ft(M) }`. Properties: `['two-handed']` (plus `'heavy'` for longbow). **No `'ammunition'` property** — we don't model arrows.
+- **`pickAttackMode(weapon, distance)` helper** (in `shared/logic/combat.js` next to `resolveAttack`): given a weapon and the attacker→target distance, returns `'melee' | 'ranged' | 'thrown' | null`. Today only `'melee'` and `'ranged'` ever return; the `'thrown'` branch is wired for the thrown-weapon sprint. Returns `null` if the distance is beyond every mode's reach (caller treats as out-of-range). `CombatSystem.playerAttack` calls this once at the top and branches on the result.
 - New barrel `shared/data/weapons/index.js` exporting a unified `WEAPON_REGISTRY` (melee ∪ ranged) and re-exporting `UNARMED`. Existing imports from `shared/data/weapons/melee.js` (`equipment.js`, `CombatSystem.js`, `DungeonRoom.js`) migrate to the barrel. `melee.js` keeps the per-weapon exports but drops its own `WEAPON_REGISTRY` export.
 
 `equipItem` keeps working unchanged — bows are two-handed weapons, the existing path auto-unequips offhand on equip.
+
+### 4a. Forward note — ranged enemies
+
+`CombatSystem.enemyAttack` currently builds a weapon-shaped object inline from `enemyDef.damageDice/damageBonus/damageType`. When the first ranged enemy lands, the same `pickAttackMode` branch in §6 needs to apply on the enemy path too — meaning enemies will need either a ref into `WEAPON_REGISTRY` or an inline `kind: 'ranged'` weapon shape on their stat block. This sprint doesn't ship that, but the seam is one helper call (`pickAttackMode` is symmetric across player/enemy). One paragraph in `agent-context/combat.md` after this ships, calling out the seam.
 
 ### 5. Line of sight (`shared/logic/geometry.js`)
 
@@ -93,20 +122,21 @@ Caller passes `state.doors` (a MapSchema) or an array; helper iterates whatever 
 
 ### 6. Ranged attack path in `CombatSystem.js`
 
-Add a `weaponIsRanged(weapon)` predicate (presence of `range`). In `playerAttack`:
+In `playerAttack`, call `pickAttackMode(weapon, distance)` once at the top (after target resolution). Branch on the result:
 
-- Branch early on `weaponIsRanged(weapon)`. For ranged:
-  - **Target validation upgrade**: even with `targetId` set (selection requires it for ranged — see §7), check distance against `weapon.range.long`. Beyond → `denied: 'out_of_range'`.
-  - **LoS gate**: `isLineBlocked(player.x, player.y, target.x, target.y, walls, doors)` → `denied: 'no_line_of_sight'`.
+- **`mode === 'ranged'`:**
+  - **Target reference required.** Without a `targetId`, bows refuse to fire — `{ denied: 'no_target' }`. (Rule lives on the weapon's `kind: 'ranged'`, not on "ranged combat" generally. A future weapon with `kind: 'ranged'` that legally targets the floor would need to flip a `targetKind` allow-list on the weapon def. For all v1 ranged weapons, target is an enemy id.)
+  - **Distance gate**: > `weapon.range.long` → `denied: 'out_of_range'`. (Note that `pickAttackMode` returning `'ranged'` already implies the target is within `weapon.range.long`; this re-check is defensive against state drift between selection and fire.)
+  - **LoS gate**: `isLineBlocked(player.x, player.y, target.x, target.y, walls, lockedDoors)` → `denied: 'no_line_of_sight'`.
   - **Source assembly** per §3.
   - Single attack (no offhand, no monk MA).
-  - Broadcast `arrow_fired` (see §8).
-- For melee: existing behaviour, just migrated to the `sources` array form.
+  - Broadcast `projectile_fired` (see §8).
+- **`mode === 'melee'`:** existing behaviour. Migrated to the `sources` array form.
+- **`mode === null`:** target is beyond every viable mode → `denied: 'out_of_range'`.
+- **`mode === 'thrown'`:** unreachable in this sprint; reserved branch (returns `denied: 'invalid_target'` defensively if it somehow fires, with a TODO comment pointing to the future thrown-weapons sprint).
 
-`DungeonRoom._tick`-time data (`_floorWalls`, `state.doors`) is passed into `playerAttack` so the LoS check can see them. New signature:
-`playerAttack(state, sessionId, enemyDefs, targetId, geometry)` where `geometry = { walls, doors }`.
-
-**Ranged requires an explicit target.** Without a `targetId`, bows refuse to fire — `{ denied: 'no_target' }`. The "fire at nearest" nearest-enemy fallback only makes sense for melee. Combat log line: "Select a target before firing."
+`DungeonRoom._tick`-time data (`_floorWalls`, `state.doors` filtered to locked) is passed into `playerAttack` so the LoS check can see them. New signature:
+`playerAttack(state, sessionId, enemyDefs, targetId, geometry)` where `geometry = { walls, lockedDoors }`. (The handler does the locked-door filter once per attack rather than the shared helper iterating a MapSchema — keeps `isLineBlocked` framework-agnostic with a plain rect-array contract.)
 
 ### 7. Protocol additions
 
@@ -123,16 +153,16 @@ Add a `weaponIsRanged(weapon)` predicate (presence of `range`). In `playerAttack
 | Message | Payload | Notes |
 |---|---|---|
 | `attack_denied` | `{ reason }` | New reasons: `'no_line_of_sight'`, `'no_target'`. Existing: `'out_of_range'`, `'invalid_target'`. |
-| `arrow_fired` | `{ attackerId, fromX, fromY, toX, toY, hit }` | Broadcast to room. Client tweens an arrow sprite over a short fixed duration. `hit` lets the client play different end animations (impact vs miss-flyby). |
+| `projectile_fired` | `{ attackerId, fromX, fromY, toX, toY, hit, style }` | Broadcast to room for any instant-resolution flying thing. `style`: `'arrow'` for bows in this sprint; future values include `'bolt'`, `'thrown'`, `'firebolt'`, `'magic_missile'`, etc. Client switches on `style` for sprite/colour/tween shape. `hit` lets the client play impact vs miss-flyby. (Area-effect spells will use a *different* message — area effects aren't projectiles.) |
 
 ### 8. Client
 
-`client/src/network/ColyseusClient.js`: no API changes (`sendAttack(targetId)` already covers ranged). Add an `onArrowFired(fn)` subscription helper or just route the message in `DungeonScene`.
+`client/src/network/ColyseusClient.js`: no API changes (`sendAttack(targetId)` already covers ranged). Route `projectile_fired` in `DungeonScene`.
 
 `client/src/scenes/DungeonScene.js`:
 
-- **Tab range becomes weapon-aware**. `_cycleTarget` reads the local player's `equippedWeaponId` → looks up `WEAPON_REGISTRY`. Ranged weapon → use `weapon.range.long`. Melee/empty → use `MELEE_SELECT_RANGE_PX` (unchanged).
-- **`arrow_fired` listener**: spawn a small arrow Graphics (a thin line or simple triangle) at `from`, tween position to `to` over ~250 ms, destroy at end. On `hit === false`, overshoot the target by a small amount so a miss reads visually. No physics; purely cosmetic.
+- **Tab range becomes weapon-aware**. `_cycleTarget` reads the local player's `equippedWeaponId` → looks up `WEAPON_REGISTRY`. If `weapon.kind === 'ranged'` → use `weapon.range.long`. Else → `MELEE_SELECT_RANGE_PX` (unchanged). Reading the `kind` field rather than checking for `range` presence is what makes this future-safe for thrown weapons.
+- **`projectile_fired` listener**: switch on `style`. For `'arrow'`: spawn a thin Graphics line/triangle at `from`, tween to `to` over ~250 ms, destroy at end. On `hit === false`, overshoot slightly so a miss reads visually. No physics. A `_renderProjectile(style, from, to, hit)` helper keeps the switch shallow as more styles land.
 - **New denial reasons**: `'no_line_of_sight'` → "No line of sight." `'no_target'` → "Select a target before firing." Plumbed through the existing `attack_denied` handler.
 
 `MELEE_SELECT_RANGE_PX` stays in `shared/data/constants.js`; range-by-weapon is read off the weapon def at the call site.
@@ -163,6 +193,13 @@ Add a `weaponIsRanged(weapon)` predicate (presence of `range`). In `playerAttack
 
 ### Server-side tests
 
+Extend `shared/tests/combat.test.js` for `pickAttackMode`:
+- Melee weapon at any distance → `'melee'`.
+- Ranged weapon within normal range → `'ranged'`.
+- Ranged weapon within long-range band → `'ranged'` (caller adds the disadvantage source).
+- Ranged weapon beyond long range → `null`.
+- Melee weapon with `thrown` sub-block, target out of melee but within thrown range → `'thrown'` (forward test; only need to assert the dispatch — `'thrown'` resolution itself is a future-sprint test).
+
 New `server/tests/ranged-combat.test.js`:
 
 1. Bow equipped, target in range, LoS clear → attack resolves; cooldown consumed.
@@ -173,6 +210,7 @@ New `server/tests/ranged-combat.test.js`:
 6. Bow equipped, target in normal range with adjacent enemy → result includes `'foe adjacent'` disadvantage source.
 7. High-ground (advantage) + long range (disadvantage) → cancels → normal roll (verified via deterministic rng injection: kept die === first roll).
 8. Melee regression: longsword path still works after migration to `sources` array.
+9. `projectile_fired` broadcast: on successful ranged attack, the test harness's broadcast spy captures one `projectile_fired` event with `style: 'arrow'` and matching coords.
 
 Existing `server/tests/target-selection.test.js` keeps passing — `targetId` semantics for melee are unchanged.
 
@@ -196,8 +234,8 @@ Run `npm start`, fighter class, loot the chest, equip a bow.
 
 Flag to user; don't update unprompted.
 
-- `docs/agent-context/protocol.md` — new `attack_denied` reasons (`'no_line_of_sight'`, `'no_target'`), new `arrow_fired` message.
-- `docs/agent-context/combat.md` — Ranged Combat section; update Target Selection note that ranged requires explicit target; migrate the Attack Resolution section to describe the tri-state resolver.
+- `docs/agent-context/protocol.md` — new `attack_denied` reasons (`'no_line_of_sight'`, `'no_target'`), new `projectile_fired` message.
+- `docs/agent-context/combat.md` — Ranged Combat section; update Target Selection note that `kind: 'ranged'` weapons require an explicit target reference (broadened from "creature"); migrate the Attack Resolution section to describe the tri-state resolver; one paragraph on the ranged-enemy seam (§4a).
 - `docs/agent-context/geometry-elevation.md` — remove `isLineBlocked` from V1 Known Limitations; add a paragraph on the LoS rule (walls + locked doors, not platforms).
 - `docs/PROJECT_STRUCTURE.md` — `shared/data/weapons/ranged.js`, `shared/data/weapons/index.js` (new), test files, drop the `isLineBlocked` stub note.
 - `docs/advantage-architecture-plan.md` — flip `status: design-only` → `archived`; this sprint executed it.
