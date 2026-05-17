@@ -70,13 +70,27 @@ function rollStr(result, profBonus, abilityMod, abilityKey) {
  *
  * @param {Map} [enemyDefs] - Map of enemyId → enemy definition (for resistances)
  */
-export function playerAttack(state, sessionId, enemyDefs = new Map()) {
+export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId = null) {
   const player = state.players.get(sessionId);
   if (!player || !player.alive) return { hit: false, crit: false, damage: 0, targetId: null, logs: [] };
   if (player.attackCooldownMs > 0) return { hit: false, crit: false, damage: 0, targetId: null, logs: [] };
 
-  const target = nearestLivingEnemy(state, player);
-  if (!target) return { hit: false, crit: false, damage: 0, targetId: null, logs: [] };
+  // Explicit target: validate exists, alive, in range. Failures return `denied`
+  // without consuming the attack cooldown — the player keeps their action.
+  let target;
+  if (targetId) {
+    const enemy = state.enemies.get(String(targetId));
+    if (!enemy || !enemy.alive) {
+      return { hit: false, crit: false, damage: 0, targetId: null, logs: [], denied: 'invalid_target' };
+    }
+    if (dist2d(player.x, player.y, enemy.x, enemy.y) > MELEE_HIT_RANGE_PX) {
+      return { hit: false, crit: false, damage: 0, targetId: null, logs: [], denied: 'out_of_range' };
+    }
+    target = { id: String(targetId), state: enemy };
+  } else {
+    target = nearestLivingEnemy(state, player);
+    if (!target) return { hit: false, crit: false, damage: 0, targetId: null, logs: [] };
+  }
 
   const logs      = [];
   const tLabel    = target.state.type || 'enemy';

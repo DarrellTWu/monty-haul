@@ -79,8 +79,13 @@ export class DungeonRoom extends Room {
     });
 
     // ── Combat ────────────────────────────────────────────────────────────────────
-    this.onMessage('attack', (client) => {
-      const result = playerAttack(this.state, client.sessionId, this._enemyDefs);
+    this.onMessage('attack', (client, payload = {}) => {
+      const targetId = payload.targetId ?? null;
+      const result = playerAttack(this.state, client.sessionId, this._enemyDefs, targetId);
+      if (result.denied) {
+        client.send('attack_denied', { reason: result.denied });
+        return;
+      }
       for (const msg of result.logs) this.broadcast('combat_log', { message: msg });
     });
 

@@ -2,7 +2,8 @@
 // Translates keyboard state into server messages.
 //
 // WASD / arrow keys → move (held)
-// Space             → attack (keydown only)
+// Space             → attack (keydown only — routes through onAttack callback so scene supplies targetId)
+// Tab               → cycle selected target (onTabCycle callback)
 // I                 → inventory toggle (onInventoryDown callback)
 // F                 → world interaction / chest loot (onInteract callback)
 // 1-9, 0           → use hotbar slot 0-9 (onHotbar(slot) callback)
@@ -10,7 +11,7 @@
 // Set handler.enabled = false to suppress movement, attack, interact, and
 // hotbar input. I still fires when disabled so the player can close inventory.
 
-import { sendMove, sendStop, sendAttack } from '../network/ColyseusClient.js';
+import { sendMove, sendStop } from '../network/ColyseusClient.js';
 
 const HOTBAR_CODES = [
   Phaser.Input.Keyboard.KeyCodes.ONE,
@@ -39,6 +40,12 @@ export class InputHandler {
     /** Called with slot index 0-9 when a hotbar key is pressed while enabled. */
     this.onHotbar = null;
 
+    /** Called when Space is pressed while enabled. Scene supplies targetId to sendAttack. */
+    this.onAttack = null;
+
+    /** Called when Tab is pressed while enabled. Scene advances target selection. */
+    this.onTabCycle = null;
+
     this._keys = scene.input.keyboard.addKeys({
       up:        Phaser.Input.Keyboard.KeyCodes.W,
       down:      Phaser.Input.Keyboard.KeyCodes.S,
@@ -51,7 +58,11 @@ export class InputHandler {
       attack:    Phaser.Input.Keyboard.KeyCodes.SPACE,
       inventory: Phaser.Input.Keyboard.KeyCodes.I,
       interact:  Phaser.Input.Keyboard.KeyCodes.F,
+      tab:       Phaser.Input.Keyboard.KeyCodes.TAB,
     });
+
+    // Stop the browser from moving focus off the canvas on Tab.
+    scene.input.keyboard.addCapture('TAB');
 
     // Hotbar keys registered separately so we can iterate them.
     this._hotbarKeys = HOTBAR_CODES.map((code, i) => {
@@ -63,7 +74,11 @@ export class InputHandler {
     this._wasMoving = false;
 
     this._keys.attack.on('down', () => {
-      if (this.enabled) sendAttack();
+      if (this.enabled) this.onAttack?.();
+    });
+
+    this._keys.tab.on('down', () => {
+      if (this.enabled) this.onTabCycle?.();
     });
 
     // I fires regardless of enabled so player can close inventory from inside scene.
@@ -111,6 +126,7 @@ export class InputHandler {
     this._keys.attack.removeAllListeners();
     this._keys.inventory.removeAllListeners();
     this._keys.interact.removeAllListeners();
+    this._keys.tab.removeAllListeners();
     for (const key of this._hotbarKeys) key.removeAllListeners();
   }
 }

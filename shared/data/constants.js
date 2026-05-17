@@ -30,6 +30,9 @@ export const MELEE_ATTACK_RANGE_PX = 25; // Weapon reach in pixels (from attacke
 export const MELEE_HIT_RANGE_PX = 64;   // Center-to-center distance for melee hit check.
                                           // Generous for placeholder graphics; tune when real
                                           // sprite collision radii are known.
+export const MELEE_SELECT_RANGE_PX = 160; // Tab-cycle radius for melee weapons — wider than hit
+                                           // range so a target can be designated before stepping in.
+                                           // When ranged weapons land, this becomes per-weapon.
 export const CRIT_MULTIPLIER = 2;        // Total damage multiplier on a natural 20
 
 // MOVEMENT

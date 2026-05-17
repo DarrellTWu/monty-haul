@@ -10,9 +10,9 @@
 // PLACEHOLDER ROOM: the room boundary is a simple rectangle.
 // When tilemaps arrive, replace drawRoom() in client/src/rendering/RoomRenderer.js with a Tilemap layer.
 
-import { joinDungeon, sendDescend, sendUseHotbar, leave as leaveRoom } from '../network/ColyseusClient.js';
+import { joinDungeon, sendDescend, sendUseHotbar, sendAttack, leave as leaveRoom } from '../network/ColyseusClient.js';
 import { InputHandler } from '../input/InputHandler.js';
-import { CHEST_LOOT_RANGE_PX, TRAP_RADIUS_PX } from '../../../shared/data/constants.js';
+import { CHEST_LOOT_RANGE_PX, TRAP_RADIUS_PX, MELEE_SELECT_RANGE_PX } from '../../../shared/data/constants.js';
 import { FLOOR_REGISTRY } from '../../../shared/data/floors/index.js';
 import { getPlayerId } from '../store/stash.js';
 import { drawRoom, drawDoorBand } from '../rendering/RoomRenderer.js';
@@ -65,6 +65,7 @@ export class DungeonScene extends Phaser.Scene {
     this._input       = null;
     this._runEnded    = false;
     this._lastHitBy   = 'an enemy';
+    this._selectedEnemyId = null;
 
     // Connecting overlay sits in screen space until join resolves and we know
     // the floor (room dimensions / camera bounds depend on it).
@@ -102,6 +103,7 @@ export class DungeonScene extends Phaser.Scene {
     });
     this._room.state.enemies.onRemove((enemy, id) => {
       this._destroyEntityGfx(id, this._enemyGfx);
+      if (this._selectedEnemyId === id) this._selectedEnemyId = null;
     });
 
     this._room.state.chests.onAdd((chest, id) => {
@@ -144,11 +146,37 @@ export class DungeonScene extends Phaser.Scene {
       }
     });
 
+    this._room.onMessage('attack_denied', ({ reason }) => {
+      const hud = this.scene.get('HUDScene');
+      const msg = reason === 'out_of_range' ? 'Target out of range.' : 'Invalid target.';
+      if (hud?.addLog) hud.addLog(msg);
+    });
+
+    // Pointer-down: hit-test enemies in world space. Hit → select. Miss → clear.
+    // Suppressed while inventory/loot overlay is up so its own clicks don't leak.
+    this.input.on('pointerdown', (pointer) => {
+      if (this.scene.isActive('InventoryScene')) return;
+      const wx = pointer.worldX;
+      const wy = pointer.worldY;
+      let bestId = null;
+      let bestDist = Infinity;
+      for (const [id, enemy] of this._room.state.enemies) {
+        if (!enemy.alive) continue;
+        const dx = wx - enemy.x;
+        const dy = wy - enemy.y;
+        const d  = Math.sqrt(dx * dx + dy * dy);
+        if (d <= ENEMY_RADIUS && d < bestDist) { bestDist = d; bestId = id; }
+      }
+      this._selectedEnemyId = bestId;
+    });
+
     // Input.
     this._input = new InputHandler(this);
     this._input.onInventoryDown = () => this._toggleInventory();
     this._input.onInteract      = () => this._tryInteractNearby();
     this._input.onHotbar        = (slot) => sendUseHotbar(slot);
+    this._input.onAttack        = () => sendAttack(this._selectedEnemyId);
+    this._input.onTabCycle      = () => this._cycleTarget();
 
     this.scene.launch('HUDScene');
 
@@ -233,11 +261,19 @@ export class DungeonScene extends Phaser.Scene {
       }
     }
 
+    // Auto-clear selection if the selected enemy is dead (onRemove handles
+    // missing-id case for floor swaps).
+    if (this._selectedEnemyId) {
+      const sel = state.enemies.get(this._selectedEnemyId);
+      if (!sel || !sel.alive) this._selectedEnemyId = null;
+    }
+
     // Enemy visuals.
     for (const [id, enemy] of state.enemies) {
       const gfx = this._enemyGfx.get(id);
       if (!gfx) continue;
       gfx.circle.setPosition(enemy.x, enemy.y);
+      this._updateSelectionRing(gfx, enemy, id === this._selectedEnemyId);
       if (!enemy.alive) {
         gfx.hpBar.setVisible(false);
         const hasLoot = !enemy.looted && (enemy.lootGold > 0 || enemy.lootItems.length > 0);
@@ -460,7 +496,8 @@ export class DungeonScene extends Phaser.Scene {
       const lootHint = this.add.text(entityState.x, entityState.y + 22, 'F: Loot', {
         fontSize: '11px', color: '#ffdd88', fontFamily: 'monospace',
       }).setOrigin(0.5).setDepth(1).setVisible(false);
-      this._enemyGfx.set(id, { circle, hpBar, lootHint });
+      const selectionRing = this.add.graphics().setVisible(false);
+      this._enemyGfx.set(id, { circle, hpBar, lootHint, selectionRing });
     } else {
       this._playerGfx.set(id, { circle, hpBar });
     }
@@ -472,8 +509,46 @@ export class DungeonScene extends Phaser.Scene {
       gfx.circle.destroy();
       gfx.hpBar.destroy();
       gfx.lootHint?.destroy();
+      gfx.selectionRing?.destroy();
       store.delete(id);
     }
+  }
+
+  _updateSelectionRing(gfx, enemy, selected) {
+    if (!gfx.selectionRing) return;
+    if (!selected) {
+      gfx.selectionRing.setVisible(false);
+      return;
+    }
+    const ring = gfx.selectionRing;
+    ring.clear();
+    ring.lineStyle(2, 0xffff44, 1);
+    ring.strokeCircle(enemy.x, enemy.y, ENEMY_RADIUS + 4);
+    ring.setDepth(enemy.elevation === 1 ? DEPTH_ELEVATED_ENTITY + 1 : DEPTH_GROUND_ENTITY + 1);
+    ring.setVisible(true);
+  }
+
+  /**
+   * Advance _selectedEnemyId to the next living enemy within MELEE_SELECT_RANGE_PX
+   * of the local player, sorted by distance ascending. Wraps. No-op if no enemies
+   * are in range.
+   */
+  _cycleTarget() {
+    const me = this._room.state.players.get(this._room.sessionId);
+    if (!me || !me.alive) return;
+    const candidates = [];
+    for (const [id, enemy] of this._room.state.enemies) {
+      if (!enemy.alive) continue;
+      const dx = me.x - enemy.x;
+      const dy = me.y - enemy.y;
+      const d  = Math.sqrt(dx * dx + dy * dy);
+      if (d <= MELEE_SELECT_RANGE_PX) candidates.push({ id, d });
+    }
+    if (candidates.length === 0) { this._selectedEnemyId = null; return; }
+    candidates.sort((a, b) => a.d - b.d);
+    const currentIdx = candidates.findIndex(c => c.id === this._selectedEnemyId);
+    const nextIdx    = currentIdx === -1 ? 0 : (currentIdx + 1) % candidates.length;
+    this._selectedEnemyId = candidates[nextIdx].id;
   }
 
   _updateHpBar(gfx, x, y, hp, maxHp) {

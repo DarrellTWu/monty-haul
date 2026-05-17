@@ -43,9 +43,12 @@ export function sendStop() {
   _room?.send('stop');
 }
 
-/** Tell the server the player is attacking. */
-export function sendAttack() {
-  _room?.send('attack');
+/**
+ * Tell the server the player is attacking.
+ * @param {string|null} [targetId] - explicit target enemy id, or null/omitted for nearest-enemy fallback
+ */
+export function sendAttack(targetId = null) {
+  _room?.send('attack', { targetId });
 }
 
 /**
