@@ -11,9 +11,10 @@
 
 /**
  * @typedef {Object} ConditionDef
- * @property {string}              mirrorField  PlayerState field synced to client (e.g. 'blessRemainingMs')
- * @property {(player) => string} [onExpireLog] Optional log string emitted when the condition expires
- * @property {(player) => void}   [onExpire]    Optional side effect on the player when the condition expires
+ * @property {string}              mirrorField   PlayerState field synced to client (e.g. 'blessRemainingMs')
+ * @property {(player) => boolean} [isExhausted] Optional invariant: if true the condition expires this tick regardless of timer (e.g. false_life with no temp HP left)
+ * @property {(player) => string}  [onExpireLog] Optional log string emitted when the condition expires
+ * @property {(player) => void}    [onExpire]    Optional side effect on the player when the condition expires
  */
 
 const cap = (s) => (s && s.length > 0) ? s[0].toUpperCase() + s.slice(1) : s;
@@ -32,7 +33,10 @@ export const CONDITION_DEFS = {
   },
   false_life: {
     mirrorField: 'falseLifeRemainingMs',
-    onExpire: (p) => { p.tempHp = 0; },
+    // Temp HP is the substance of the condition — once drained by damage the
+    // timer is immaterial; clear the ring immediately on next tick.
+    isExhausted: (p) => p.tempHp <= 0,
+    onExpire:    (p) => { p.tempHp = 0; },
   },
 };
 
@@ -83,8 +87,9 @@ export function tickConditions(players, timers, dt) {
       const def = CONDITION_DEFS[conditionId];
       if (!def) continue;
       const key       = timerKey(sessionId, conditionId);
+      const exhausted = def.isExhausted ? def.isExhausted(player) : false;
       const remaining = (timers.get(key) ?? 0) - dt;
-      if (remaining <= 0) {
+      if (exhausted || remaining <= 0) {
         timers.delete(key);
         const idx = player.conditions.indexOf(conditionId);
         if (idx !== -1) player.conditions.splice(idx, 1);

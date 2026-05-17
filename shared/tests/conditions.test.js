@@ -144,6 +144,46 @@ test('two players: ticking one does not touch the other\'s timers', () => {
   assert.equal(timers.get('sB_bless'), 600);
 });
 
+test('false_life expires immediately when tempHp drained, even with timer remaining', () => {
+  const p = makePlayer();
+  const timers = new Map();
+  applyCondition(p, 'false_life', 60000, timers, 's1');
+  p.tempHp = 5;
+  // Simulate damage absorbing all temp HP between ticks.
+  p.tempHp = 0;
+  tickConditions(new Map([['s1', p]]), timers, 16);
+  assert.deepEqual([...p.conditions], []);
+  assert.equal(p.falseLifeRemainingMs, 0);
+  assert.equal(timers.has('s1_false_life'), false);
+});
+
+test('false_life with tempHp still > 0 continues ticking normally', () => {
+  const p = makePlayer();
+  const timers = new Map();
+  applyCondition(p, 'false_life', 1000, timers, 's1');
+  p.tempHp = 3;
+  tickConditions(new Map([['s1', p]]), timers, 200);
+  assert.deepEqual([...p.conditions], ['false_life']);
+  assert.equal(p.falseLifeRemainingMs, 800);
+  assert.equal(p.tempHp, 3);
+});
+
+test('refreshing false_life after exhaustion grants new temp HP + timer', () => {
+  const p = makePlayer();
+  const timers = new Map();
+  applyCondition(p, 'false_life', 60000, timers, 's1');
+  p.tempHp = 5;
+  p.tempHp = 0; // drained
+  tickConditions(new Map([['s1', p]]), timers, 16); // condition cleared
+  assert.deepEqual([...p.conditions], []);
+  // New potion: caller sets tempHp THEN applies the condition.
+  p.tempHp = 7;
+  applyCondition(p, 'false_life', 60000, timers, 's1');
+  assert.deepEqual([...p.conditions], ['false_life']);
+  assert.equal(p.tempHp, 7);
+  assert.equal(p.falseLifeRemainingMs, 60000);
+});
+
 test('orphan condition with no timer entry expires immediately on next tick', () => {
   // Defensive: if conditions[] and timers ever desync (shouldn't happen via
   // applyCondition), the tick should clean up rather than loop forever.
