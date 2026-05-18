@@ -502,7 +502,10 @@ export class DungeonRoom extends Room {
       this._longRest(p, sid);
       // Force a level-up choice before the player can act on the new floor.
       // Cleared by the `choose_level_up` handler; dead players don't level up.
-      if (p.alive) p.pendingLevelUp = true;
+      if (p.alive) {
+        p.pendingLevelUp = true;
+        console.log(`[DungeonRoom] ${sid} pendingLevelUp=true on descend to floor ${toFloor} (alive=${p.alive}, level=${p.level})`);
+      }
       const prev = this._maxFloor.get(sid) ?? 1;
       if (toFloor > prev) this._maxFloor.set(sid, toFloor);
     }
