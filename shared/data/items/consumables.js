@@ -22,7 +22,7 @@ export const BLESS_POTION = {
   id: 'bless_potion',
   category: 'consumable',
   type: 'bless',
-  label: 'Potion of Bless',
+  label: 'Bless Potion',
   conditionDurationMs: 60000,  // grants 'bless' condition for 60 seconds
   goldValue: 250,
   sortKey: 410,
@@ -34,7 +34,7 @@ export const LONGSTRIDER_POTION = {
   id: 'longstrider_potion',
   category: 'consumable',
   type: 'longstrider',
-  label: 'Potion of Longstrider',
+  label: 'Longstrider Potion',
   conditionDurationMs: 120000,  // grants 'longstrider' condition for 2 minutes
   speedBonusFt: 10,             // displayed in log; engine uses LONGSTRIDER_SPEED_BONUS_PX
   goldValue: 75,
@@ -47,7 +47,7 @@ export const FALSE_LIFE_POTION = {
   id: 'false_life_potion',
   category: 'consumable',
   type: 'false_life',
-  label: 'Potion of False Life',
+  label: 'False Life Potion',
   conditionDurationMs: 120000,  // temp HP expires after 2 minutes
   damageDice: { count: 1, sides: 4 },
   diceBonus: 4,                 // 1d4+4 temp HP (SRD base level)
@@ -62,7 +62,7 @@ export const EXTRACTION_SCROLL = {
   id: 'extraction_scroll',
   category: 'consumable',
   type: 'extract',
-  label: 'Scroll of Extraction',
+  label: 'Extraction Scroll',
   goldValue: 100,
   sortKey: 440,
   hotbarShort: 'Extract',
