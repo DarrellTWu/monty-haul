@@ -357,7 +357,7 @@ export class DungeonRoom extends Room {
     this.state.players.set(client.sessionId, player);
     this._runStartedAt.set(client.sessionId, Date.now());
     this._maxFloor.set(client.sessionId, this.state.floor);
-    console.log(`[DungeonRoom] ${client.sessionId} joined as ${classDef.id} — HP ${maxHp} AC ${player.ac} STR ${player.str} DEX ${player.dex} CON ${player.con}`);
+    console.log(`[DungeonRoom] ${client.sessionId} joined as ${classDef.id} — HP ${player.maxHp} AC ${player.ac} STR ${player.str} DEX ${player.dex} CON ${player.con}`);
   }
 
   onLeave(client) {
