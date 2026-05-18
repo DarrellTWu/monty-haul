@@ -1,7 +1,7 @@
 ---
 status: shipped
-updated: 2026-05-14
-purpose: Floor data, descend flow, long rest, Scroll of Extraction. Read when the task touches floor progression or run termination.
+updated: 2026-05-18
+purpose: Floor data, descend flow, long rest, level-up gate, Scroll of Extraction. Read when the task touches floor progression or run termination.
 ---
 
 # Floor System
@@ -30,10 +30,18 @@ Stairs with `lockedUntilAllEnemiesDead: true` start `locked = true`. Flip to unl
 - HP → maxHp
 - tempHp → 0
 - Second Wind refreshed
-- Rage uses reset to class default
+- Rage uses reset to class default (only if the player has any Barbarian level)
 - All timed conditions dropped (rage, bless, longstrider, false_life)
 
-Broadcasts a long-rest combat-log line.
+Then, for every **alive** player, `_descendTo` sets `pendingLevelUp = true`. While that flag is true:
+
+- Server drops `move` and `attack` messages from that player.
+- Client locks input and opens `LevelUpModal` after the new floor finishes rendering (`DungeonScene._maybeOpenLevelUpModal`).
+- Player picks a class → client sends `choose_level_up { classId }` → server validates, calls `applyClassLevel`, refills HP to new max, recomputes AC, clears the flag, seeds new features onto the hotbar, broadcasts the build summary.
+
+Dead players keep `pendingLevelUp = false` and skip the modal. See `agent-context/combat.md` (Level-Up + Multiclass) for the data flow.
+
+Broadcasts a long-rest combat-log line at the start of descent.
 
 ## Client Reaction to Floor Change
 - `DungeonScene` detects `state.floor` change in `state.onChange` → `_applyFloorLayout` redraws the room background and resets camera bounds.

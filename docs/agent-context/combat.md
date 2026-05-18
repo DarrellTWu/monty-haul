@@ -1,26 +1,48 @@
 ---
 status: shipped
-updated: 2026-05-17
-purpose: Combat resolution (melee + ranged + advantage/disadvantage tri-state), target selection, class schema, loadout, ability scores. Read when the task touches attacks, classes, or character creation.
+updated: 2026-05-18
+purpose: Combat resolution (melee + ranged + advantage/disadvantage tri-state), target selection, class schema, loadout, ability scores, level-up / multiclass. Read when the task touches attacks, classes, or character creation.
 ---
 
 # Combat, Classes, Loadout
 
 ## Class Definition Schema
-Each class file in `shared/data/classes/` exports a const (see `fighter.js` / `monk.js`):
+Each class file in `shared/data/classes/` exports a const (see `fighter.js` / `monk.js` / `barbarian.js`):
 
 - `id` — string key matching `CLASS_REGISTRY` entry
+- `name` — display label (e.g. `'Fighter'`); used in combat-log build summaries
 - `hitDie` — e.g. 10 for fighter, 8 for monk
 - `baseAbilityScores` — `{ str, dex, con, int, wis, cha }`. Used for attack rolls, saves, AC
-- `getStartingHp(conMod)` — function returning starting HP
+- `getStartingHp(conMod)` — returns the **level-1 max-die** HP value: `(hitDie + conMod) * HP_MULTIPLIER`. Subsequent levels use the SRD-average formula in `class-progression.computeHpGainForLevel`; the two coexist by design.
 - `startingWeaponId`, `startingArmorId` — item ids (`''` = none)
-- `unarmoredDefense` — optional string key (e.g. `'wis'` for monk). When set, no armor and no shield, AC = 10 + DEX mod + [stat] mod. Handled in `DungeonRoom.onJoin` and `recomputeStats` (`shared/logic/equipment.js`)
-- `saveProficiencies` — array of ability keys
-- `fightingStyle` — string or null; passed to `CombatSystem` for Dueling bonus etc.
-- `classFeatures` — array of ability ids seeded into hotbar slots 0–N on join (e.g. `['rage']`)
-- `rageUses` — optional, Barbarian only for now
-- `feat` — starting feat id string
-- `canClimb: bool` — Monk true; Fighter/Barbarian false. Read at call time by `MovementSystem`/`AISystem`. **Not synced.** Long-term: replace with a per-character skill/feat. See `agent-context/geometry-elevation.md`.
+- `unarmoredDefense` — optional string key (e.g. `'wis'` for monk). AC = 10 + DEX mod + [stat] mod when no armor and no shield. **Activates if any taken class grants it** (see `getDerivedClassFeatures`); applied inside `recomputeStats`.
+- `saveProficiencies` — array of ability keys. **First-class only post-multiclass** (SRD rule); reads off `player.class` (the primary class).
+- `levels: { [n]: { features, grants } }` — per-level progression table. `features` is the list of ability ids granted at level `n` (seeded onto the hotbar by `applyClassLevel` on the **first** time a player takes any level in that class). `grants` carries passive metadata (`fightingStyle`, `feat`). MVP only fills level 1; 2 and 3 are explicit stubs.
+- `rageUses` — Barbarian per-class resource pool. Top-level (not per-level). `applyClassLevel` seeds `rageUsesRemaining` from this on the first Barbarian level; `_longRest` refills it on descend.
+- `gearlessLevelCap` — `3` for every MVP class. Read by `class-progression.getMaxLevelForClass`. Will become gear-dependent later.
+- `canClimb: bool` — Monk true; Fighter/Barbarian false. **OR across all taken classes** via `getDerivedClassFeatures`. Read at call time by `MovementSystem`/`AISystem`. **Not synced.**
+
+## Level-Up + Multiclass (`shared/logic/class-progression.js`)
+
+Pure module — no framework or RNG deps. Owns the single mutation path for character level.
+
+- `PlayerState.classLevels: MapSchema<string, number>` — per-class totals; source of truth for build state.
+- `PlayerState.levelUpHistory: ArraySchema<string>` — ordered class ids; index `i` = class chosen at level `i+1`. `levelUpHistory[0]` is the **primary class** (used for starting equipment + save proficiencies only).
+- `PlayerState.pendingLevelUp: boolean` — true between descend and `choose_level_up`. While set, server drops `move` / `attack` messages and client locks input + opens `LevelUpModal`.
+- `PlayerState.level` — cached `sum(classLevels.values)`. Invariant: only `applyClassLevel` mutates this trio.
+
+Flow:
+1. `DungeonRoom.onJoin` calls `applyClassLevel(player, classId)` to seed level 1 — this initializes `classLevels`, `levelUpHistory`, `level`, and (on first-in-class) seeds the per-class resource pool (`rageUsesRemaining`, `secondWindAvailable`). HP for the join seed is then patched to `classDef.getStartingHp(conMod)` (max-die formula, level-1 only).
+2. `_descendTo` runs `_longRest` on every alive player, then sets `pendingLevelUp = true`.
+3. `choose_level_up { classId }` validates eligibility via `getEligibleClassChoicesForLevelUp` (MVP: untaken classes only), calls `applyClassLevel`, calls `recomputeStats`, clears the flag, seeds new features onto the first empty hotbar slot (or emits a `combat_log` notice if none), and broadcasts the build summary.
+
+Derived features (`getDerivedClassFeatures(player)`) — consult instead of `CLASS_REGISTRY[player.class].X` for any passive that should activate after multiclass:
+
+| Field | Rule | Callsite |
+|---|---|---|
+| `fightingStyle` | First non-null `levels[n].grants.fightingStyle` across taken classes | `CombatSystem.playerAttack` (Dueling) |
+| `unarmoredDefense` | First non-null `def.unarmoredDefense` across taken classes | `equipment.recomputeStats` (AC) |
+| `canClimb` | OR across all taken classes | `MovementSystem.update` |
 
 ## Loadout Model
 `DungeonRoom.onJoin` branches on the raider pack loaded from `playerStore`:

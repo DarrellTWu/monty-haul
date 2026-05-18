@@ -1,7 +1,8 @@
 ---
-status: design-only
-updated: 2026-05-17
+status: in-progress
+updated: 2026-05-18
 purpose: Sprint plan — wire character level-up to each dungeon descent, with multiclass-only level choices as the MVP gameplay surface. Architecture is built to absorb subclasses, ASIs, and per-level class features later without rework.
+note: Code shipped 2026-05-18 (commit 4ed4ce9). Status stays `in-progress` until manual two-player playtest confirms the modal flow; flip to `shipped` and archive the file after.
 ---
 
 # Level-Up-on-Descent + Multiclass MVP

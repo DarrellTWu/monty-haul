@@ -1,6 +1,6 @@
 ---
 status: shipped
-updated: 2026-05-17
+updated: 2026-05-18
 purpose: Client↔server WebSocket message protocol + Hub HTTP routes. Read when the task adds, removes, or modifies a message/route.
 ---
 
@@ -26,6 +26,7 @@ All messages handled in `DungeonRoom.js` `onCreate`.
 | `descend` | `{ stairId }` | Validates exists, !locked, in range. Swaps floor for everyone in the room |
 | `assign_hotbar` | `{ itemId, slot }` | Bind ability/consumable id to hotbar index 0–9 |
 | `use_hotbar` | `{ slot }` | Activate hotbar slot 0–9. Consumable types: `healing`, `bless`, `longstrider`, `false_life`, `extract` (run terminator) |
+| `choose_level_up` | `{ classId }` | Resolve a pending descend-triggered level-up. Only honored while `player.pendingLevelUp`; `classId` must be in `getEligibleClassChoicesForLevelUp(player)`. Silently dropped otherwise. See `agent-context/combat.md` (Level-Up + Multiclass). |
 
 ### Server → Client
 
@@ -60,4 +61,4 @@ Each route is wrapped in an `asyncRoute` helper that catches throws (e.g. Supaba
 
 ## Client API Wrappers
 - `client/src/network/HubAPI.js` — thin async fetch wrapper for `/hub`. Used exclusively by `store/stash.js`.
-- `client/src/network/ColyseusClient.js` — `joinDungeon(opts)` forwards `{ class, playerId, abilityScores }`; container protocol senders; `sendDescend`.
+- `client/src/network/ColyseusClient.js` — `joinDungeon(opts)` forwards `{ class, playerId, abilityScores }`; container protocol senders; `sendDescend`; `sendChooseLevelUp(classId)`.
