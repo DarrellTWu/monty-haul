@@ -511,7 +511,26 @@ export class InventoryScene extends Phaser.Scene {
     if (this._nameText) {
       const cn = player.class ? player.class[0].toUpperCase() + player.class.slice(1) : 'Fighter';
       this._nameText.setText(cn);
-      if (this._classDescText) this._classDescText.setText(`Level ${player.level}  Human ${cn}`);
+      if (this._classDescText) {
+        // Build summary from levelUpHistory: "Fighter 1 / Barbarian 1".
+        // Falls back to "Level N <Primary>" if history isn't populated yet.
+        const counts = new Map();
+        for (const cid of (player.levelUpHistory ?? [])) {
+          counts.set(cid, (counts.get(cid) ?? 0) + 1);
+        }
+        let buildSummary;
+        if (counts.size > 0) {
+          const parts = [];
+          for (const [cid, n] of counts) {
+            const label = CLASS_REGISTRY[cid]?.name ?? cid;
+            parts.push(`${label} ${n}`);
+          }
+          buildSummary = parts.join(' / ');
+        } else {
+          buildSummary = `Level ${player.level} ${cn}`;
+        }
+        this._classDescText.setText(`Human  ·  ${buildSummary}`);
+      }
     }
 
     // Bag — rebuild only when inventory changes.
