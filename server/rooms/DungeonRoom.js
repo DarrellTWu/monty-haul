@@ -635,8 +635,16 @@ export class DungeonRoom extends Room {
       this._extracted.add(sessionId);
       const playerId = this._playerIds.get(sessionId);
       if (playerId) {
+        // Survivors = bag + equipped weapon/offhand/armor. Empty slots are '';
+        // 'unarmed' is the empty-weapon fallback id and not an equippable item.
+        const survivingItems = Array.from(player.inventory);
+        if (player.equippedWeaponId && player.equippedWeaponId !== 'unarmed') {
+          survivingItems.push(player.equippedWeaponId);
+        }
+        if (player.offhandId)       survivingItems.push(player.offhandId);
+        if (player.equippedArmorId) survivingItems.push(player.equippedArmorId);
         commitExtract(playerId, {
-          survivingItems: Array.from(player.inventory),
+          survivingItems,
           goldEarned:     player.gold,
           ...this._buildRunMeta(sessionId, player),
         }).catch(err => {
