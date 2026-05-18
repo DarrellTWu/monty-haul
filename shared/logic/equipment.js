@@ -8,7 +8,7 @@
 import { ARMOR_REGISTRY, computeAC } from '../data/armor/armor.js';
 import { SHIELD_REGISTRY }           from '../data/items/shields.js';
 import { WEAPON_REGISTRY }           from '../data/weapons/index.js';
-import { CLASS_REGISTRY, DEFAULT_CLASS } from '../data/classes/index.js';
+import { getDerivedClassFeatures }   from './class-progression.js';
 import { getModifier }               from './combat.js';
 
 /**
@@ -18,11 +18,11 @@ import { getModifier }               from './combat.js';
  * @param {object} player - mutated in place; reads class/equippedArmorId/offhandId/dex
  */
 export function recomputeStats(player) {
-  const classDef  = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
   const dexMod    = getModifier(player.dex);
   const hasShield = !!SHIELD_REGISTRY[player.offhandId];
-  if (!player.equippedArmorId && !hasShield && classDef.unarmoredDefense) {
-    const udMod = getModifier(player[classDef.unarmoredDefense]);
+  const ud        = getDerivedClassFeatures(player).unarmoredDefense;
+  if (!player.equippedArmorId && !hasShield && ud) {
+    const udMod = getModifier(player[ud]);
     player.ac = 10 + dexMod + udMod;
   } else {
     player.ac = computeAC(ARMOR_REGISTRY[player.equippedArmorId] ?? null, dexMod, hasShield);

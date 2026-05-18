@@ -115,6 +115,11 @@ export function sendUseHotbar(slot) {
   _room?.send('use_hotbar', { slot });
 }
 
+/** Take a level in `classId` to resolve a pending level-up. */
+export function sendChooseLevelUp(classId) {
+  _room?.send('choose_level_up', { classId });
+}
+
 /** Cleanly leave the current room. */
 export async function leave() {
   if (_room) {

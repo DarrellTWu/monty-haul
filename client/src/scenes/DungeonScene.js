@@ -17,6 +17,8 @@ import { WEAPON_REGISTRY } from '../../../shared/data/weapons/index.js';
 import { FLOOR_REGISTRY } from '../../../shared/data/floors/index.js';
 import { getPlayerId } from '../store/stash.js';
 import { drawRoom, drawDoorBand } from '../rendering/RoomRenderer.js';
+import { openLevelUpModal } from '../ui/level-up/LevelUpModal.js';
+import { getEligibleClassChoicesForLevelUp } from '../../../shared/logic/class-progression.js';
 
 // Visual config — swap these out when sprites land.
 const PLAYER_RADIUS   = 16;
@@ -67,6 +69,11 @@ export class DungeonScene extends Phaser.Scene {
     this._runEnded    = false;
     this._lastHitBy   = 'an enemy';
     this._selectedEnemyId = null;
+    // Level-up modal: opened while pendingLevelUp is true AND the floor-load
+    // has rendered. _pendingLevelUpQueued covers the case where the schema
+    // delta arrives before the floor swap completes (queue → open on apply).
+    this._levelUpModal       = null;
+    this._pendingLevelUpQueued = false;
 
     // Connecting overlay sits in screen space until join resolves and we know
     // the floor (room dimensions / camera bounds depend on it).
@@ -193,8 +200,42 @@ export class DungeonScene extends Phaser.Scene {
       }
       if (this._room.state.floor !== this._currentFloor) {
         this._applyFloorLayout(this._room.state.floor);
+        // Floor swap may have arrived after a pendingLevelUp delta — try to
+        // open any queued modal now that the new floor is rendered.
+        this._maybeOpenLevelUpModal();
       }
     });
+
+    // Re-check the modal every frame against my own player's flag. Cheaper
+    // than wiring onChange listeners across the players MapSchema, and the
+    // modal open/close check is two flag reads.
+  }
+
+  _maybeOpenLevelUpModal() {
+    if (!this._room) return;
+    const me = this._room.state.players.get(this._room.sessionId);
+    if (!me) return;
+    const flagSet = me.pendingLevelUp && me.alive;
+    const floorReady = this._currentFloor === this._room.state.floor;
+
+    if (!flagSet) {
+      if (this._levelUpModal) {
+        this._levelUpModal.destroy();
+        this._levelUpModal = null;
+      }
+      return;
+    }
+    if (this._levelUpModal) return;
+    if (!floorReady) { this._pendingLevelUpQueued = true; return; }
+
+    // Compute eligibility client-side for preview; server is authoritative.
+    const eligible = getEligibleClassChoicesForLevelUp(me);
+    this._levelUpModal = openLevelUpModal(this, {
+      player: me,
+      eligibleClassIds: eligible,
+      newTotalLevel: me.level + 1,
+    });
+    this._pendingLevelUpQueued = false;
   }
 
   update() {
@@ -203,11 +244,16 @@ export class DungeonScene extends Phaser.Scene {
     // Input is suppressed whenever an overlay scene (inventory or loot) is up,
     // and re-enabled the moment it closes — covers Esc / I / range-auto-close
     // paths uniformly without each path needing to call back here.
-    if (this._input) this._input.enabled = !this.scene.isActive('InventoryScene');
-    this._input?.update();
+    // Check level-up modal lifecycle once per frame (cheap flag read).
+    this._maybeOpenLevelUpModal();
 
     const state    = this._room.state;
     const myPlayer = state.players.get(this._room.sessionId);
+
+    const inventoryUp = this.scene.isActive('InventoryScene');
+    const levelUpUp   = !!this._levelUpModal;
+    if (this._input) this._input.enabled = !inventoryUp && !levelUpUp;
+    this._input?.update();
 
     if (myPlayer && !myPlayer.alive && !this._runEnded) {
       this._runEnded = true;

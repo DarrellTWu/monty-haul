@@ -1,19 +1,20 @@
 // shared/data/classes/monk.js
 // Monk base stats. Level 1: Unarmored Defense + Martial Arts (both passive).
-// Ki and related active abilities (Flurry of Blows, etc.) start at level 2.
+// Ki and related active abilities start at level 2 (deferred).
 
 import { HP_MULTIPLIER } from '../constants.js';
 
 export const MONK = {
   id: 'monk',
+  name: 'Monk',
   hitDie: 8,
 
   baseAbilityScores: {
     str: 10,
-    dex: 16, // +3 mod — primary attack stat (Martial Arts)
-    con: 14, // +2 mod
+    dex: 16,
+    con: 14,
     int: 10,
-    wis: 16, // +3 mod — AC via Unarmored Defense
+    wis: 16,
     cha: 10,
   },
 
@@ -22,20 +23,21 @@ export const MONK = {
   },
 
   startingWeaponId: 'shortsword',
-  startingArmorId:  '',           // monks start unarmored; AC from Unarmored Defense
+  startingArmorId:  '',
 
-  // Unarmored Defense: AC = 10 + DEX mod + [this stat] mod, when no armor and no shield.
+  // Unarmored Defense AC stat: AC = 10 + DEX mod + this stat's mod (no armor, no shield).
   unarmoredDefense: 'wis',
 
   saveProficiencies: ['str', 'dex'],
 
-  fightingStyle: null,  // monks don't get a fighting style
+  levels: {
+    1: { features: [], grants: { feat: 'alert' } },
+    2: { features: [] },
+    3: { features: [] },
+  },
 
-  classFeatures: [],    // no hotbar abilities at level 1; Ki starts at level 2
+  gearlessLevelCap: 3,
 
-  feat: 'alert',
-
-  // Geometry: monks can scale platform perimeters without using a step.
-  // Stub for the future climbing-skill system; see docs/agent-context/geometry-elevation.md.
+  // Geometry: monks can scale platform perimeters without a step.
   canClimb: true,
 };

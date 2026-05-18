@@ -24,7 +24,7 @@ import {
 import {
   resolveWallCollision, tryAutoClimb, platformPerimeterRects,
 } from '../../shared/logic/geometry.js';
-import { CLASS_REGISTRY } from '../../shared/data/classes/index.js';
+import { getDerivedClassFeatures } from '../../shared/logic/class-progression.js';
 
 /**
  * @param {import('../state/GameState.js').GameState} state
@@ -76,7 +76,7 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
       player.y = player.y + player.vy * speed * dtSec;
     }
 
-    const canClimb = CLASS_REGISTRY[player.class]?.canClimb ?? false;
+    const canClimb = getDerivedClassFeatures(player).canClimb;
     const rects = buildObstacleRects(walls, lockedDoors, platformPerimeters, player.elevation, canClimb);
     const resolved = resolveWallCollision({ x: player.x, y: player.y }, rects);
     player.x = resolved.x;

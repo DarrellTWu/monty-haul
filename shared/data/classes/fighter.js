@@ -6,10 +6,10 @@ import { HP_MULTIPLIER } from '../constants.js';
 
 export const FIGHTER = {
   id: 'fighter',
+  name: 'Fighter',
   hitDie: 10,
 
   // Base ability scores for a default fighter (no gear, no customization yet).
-  // TODO: replace with player-chosen stat array when character creation exists.
   baseAbilityScores: {
     str: 16, // +3 mod — primary attack stat
     dex: 14, // +2 mod — AC contribution with medium armor
@@ -20,33 +20,25 @@ export const FIGHTER = {
   },
 
   // HP at level 1: max hit die + CON modifier, then × HP_MULTIPLIER.
-  // getStartingHp(conMod) = (hitDie + conMod) * HP_MULTIPLIER
   getStartingHp(conMod) {
     return Math.floor((this.hitDie + conMod) * HP_MULTIPLIER);
   },
 
-  // Starting equipment.
   startingWeaponId: 'longsword',
-  // Chain Mail is heavy (baseAC 16, no DEX bonus, STR 13 req).
-  // AC is computed via computeAC() in shared/data/armor/armor.js — not stored here.
   startingArmorId: 'chain_mail',
 
-  // Saving throw proficiencies (SRD Fighter: STR and CON).
+  // SRD Fighter: STR and CON. First-class only post-multiclass.
   saveProficiencies: ['str', 'con'],
 
-  // Fighting style chosen at level 1.
-  // Dueling: +2 damage when wielding a melee weapon in one hand with no weapon in offhand
-  // (a shield in offhand is permitted — SRD rule).
-  fightingStyle: 'dueling',
+  // Per-level progression. MVP fills only level 1; 2/3 are explicit stubs.
+  levels: {
+    1: { features: ['second_wind'], grants: { fightingStyle: 'dueling', feat: 'alert' } },
+    2: { features: [] },
+    3: { features: [] }, // subclass slot — deferred
+  },
 
-  // Level 1 class features.
-  classFeatures: ['second_wind'],
-
-  // Human variant feat.
-  feat: 'alert', // +5 to initiative, can't be surprised
-
-  // Proficiency bonus at level 1 is computed by getProficiencyBonus(level)
-  // in combat.js — not stored here.
+  // Gearless cap per class (GDD §3). Will become gear-dependent later.
+  gearlessLevelCap: 3,
 
   // Geometry: fighters can't scale platform perimeters — they must use a step.
   canClimb: false,

@@ -126,7 +126,10 @@ test('unarmored fighter: AC = 10 + DEX', () => {
   assertEq(p.ac, 12);
 });
 test('monk unarmored defense uses WIS', () => {
-  const p = mkPlayer({ class: 'monk', dex: 14, wis: 16 });
+  const p = mkPlayer({
+    class: 'monk', dex: 14, wis: 16,
+    classLevels: new Map([['monk', 1]]),
+  });
   recomputeStats(p);
   // 10 + dexMod(+2) + wisMod(+3) = 15
   assertEq(p.ac, 15);

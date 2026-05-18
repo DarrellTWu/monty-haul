@@ -1,6 +1,6 @@
 // server/state/PlayerState.js
 import { createRequire } from 'module';
-const { Schema, ArraySchema, defineTypes } = createRequire(import.meta.url)('@colyseus/schema');
+const { Schema, ArraySchema, MapSchema, defineTypes } = createRequire(import.meta.url)('@colyseus/schema');
 
 export class PlayerState extends Schema {
   constructor() {
@@ -10,7 +10,13 @@ export class PlayerState extends Schema {
     this.hp = 0;
     this.maxHp = 0;
     this.ac = 0;
-    this.level = 1;
+    // `level` is a cached total across all classes. Mutated ONLY by
+    // applyClassLevel in shared/logic/class-progression.js so the invariant
+    // level === sum(classLevels.values) holds.
+    this.level = 0;
+    this.classLevels    = new MapSchema();   // classId → level (e.g. fighter:1, monk:1)
+    this.levelUpHistory = new ArraySchema(); // ordered class ids; index i = level i+1
+    this.pendingLevelUp = false;             // true between descend and choose_level_up
     this.vx = 0;
     this.vy = 0;
     this.attackCooldownMs = 0;
@@ -77,5 +83,8 @@ defineTypes(PlayerState, {
   inventory:  { array: 'string' },
   conditions: { array: 'string' },
   hotbar:     { array: 'string' },
+  classLevels:    { map: 'number' },
+  levelUpHistory: { array: 'string' },
+  pendingLevelUp: 'boolean',
   elevation:  'number',
 });

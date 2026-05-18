@@ -10,6 +10,7 @@ import { ATTACK_COOLDOWN_MS, MELEE_HIT_RANGE_PX, ADJACENT_FOE_PX, RAGE_DAMAGE_BO
 import { WEAPON_REGISTRY, UNARMED } from '../../shared/data/weapons/index.js';
 import { SHIELD_REGISTRY } from '../../shared/data/items/shields.js';
 import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.js';
+import { getDerivedClassFeatures } from '../../shared/logic/class-progression.js';
 
 // Monk weapons: unarmed strikes and light/simple melee weapons per SRD.
 const MONK_WEAPON_IDS = new Set(['shortsword', 'dagger', 'handaxe', 'mace', 'unarmed', '']);
@@ -146,8 +147,9 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
     baseWeapon = { ...baseWeapon, damageBonus: (baseWeapon.damageBonus ?? 0) + RAGE_DAMAGE_BONUS };
   }
   // Dueling and versatile two-handed apply to melee only.
+  const derived = getDerivedClassFeatures(player);
   const weapon = mode === 'melee'
-    ? applyDueling(getEffectiveWeapon(baseWeapon, player), player, classDef.fightingStyle)
+    ? applyDueling(getEffectiveWeapon(baseWeapon, player), player, derived.fightingStyle)
     : baseWeapon;
 
   const isFinesse   = weapon.properties?.includes('finesse');

@@ -1,10 +1,11 @@
 // shared/data/classes/barbarian.js
-// Barbarian base stats. Stub — abilities (Rage, Unarmored Defense, etc.) not yet implemented.
+// Barbarian base stats and level table.
 
 import { HP_MULTIPLIER } from '../constants.js';
 
 export const BARBARIAN = {
   id: 'barbarian',
+  name: 'Barbarian',
   hitDie: 10,
 
   baseAbilityScores: {
@@ -25,13 +26,16 @@ export const BARBARIAN = {
 
   saveProficiencies: ['str', 'con'],
 
-  fightingStyle: 'dueling',
+  levels: {
+    1: { features: ['rage'], grants: { feat: 'alert' } },
+    2: { features: [] },
+    3: { features: [] },
+  },
 
-  classFeatures: ['rage'],
-  rageUses: 2, // activations per run; restored on long rest
+  // Per-class resource pool; not a per-level grant. Init'd on first Barbarian level.
+  rageUses: 2,
 
-  feat: 'alert',
+  gearlessLevelCap: 3,
 
-  // Geometry: barbarians can't scale platform perimeters — they must use a step.
   canClimb: false,
 };

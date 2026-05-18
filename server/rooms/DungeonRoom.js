@@ -18,13 +18,14 @@ import { applyDeathLoot }            from '../../shared/logic/loot.js';
 import { pointInRect }               from '../../shared/logic/geometry.js';
 import { validateAbilityScores }     from '../../shared/logic/character.js';
 import { equipItem, unequipItem, recomputeStats } from '../../shared/logic/equipment.js';
+import { applyClassLevel, getEligibleClassChoicesForLevelUp, computeHpGainForLevel } from '../../shared/logic/class-progression.js';
 import {
   tryOpenContainer, tryCloseContainer, releaseLocksHeldBy, tickContainerLocks,
   tryTakeItem, tryTakeGold, tryDropItem,
 } from '../../shared/logic/loot-window.js';
 import { applyCondition, tickConditions, clearPlayerConditions } from '../../shared/logic/conditions.js';
 import { LOOT_TABLE_REGISTRY }       from '../../shared/data/loot/tier1.js';
-import { ARMOR_REGISTRY, computeAC } from '../../shared/data/armor/armor.js';
+import { ARMOR_REGISTRY }            from '../../shared/data/armor/armor.js';
 import { WEAPON_REGISTRY }           from '../../shared/data/weapons/index.js';
 import { SHIELD_REGISTRY }           from '../../shared/data/items/shields.js';
 import { CONSUMABLE_REGISTRY }       from '../../shared/data/items/consumables.js';
@@ -68,6 +69,7 @@ export class DungeonRoom extends Room {
     this.onMessage('move', (client, { dx, dy }) => {
       const player = this.state.players.get(client.sessionId);
       if (!player || !player.alive) return;
+      if (player.pendingLevelUp) { player.vx = 0; player.vy = 0; return; }
       const len = Math.sqrt(dx * dx + dy * dy);
       if (len === 0) { player.vx = 0; player.vy = 0; }
       else           { player.vx = dx / len; player.vy = dy / len; }
@@ -80,6 +82,8 @@ export class DungeonRoom extends Room {
 
     // ── Combat ────────────────────────────────────────────────────────────────────
     this.onMessage('attack', (client, payload = {}) => {
+      const p = this.state.players.get(client.sessionId);
+      if (p?.pendingLevelUp) return;
       const targetId = payload.targetId ?? null;
       // Build the LoS obstacle list once per attack: static walls + currently-locked
       // doors. Unlocked doors don't block LoS (consistent with movement rules).
@@ -164,6 +168,56 @@ export class DungeonRoom extends Room {
       this._descendTo(stair.toFloor);
     });
 
+    // ── Level-up on descend ───────────────────────────────────────────────────────
+    // While `pendingLevelUp` is true, the player can't move or attack. The
+    // choice resolves synchronously here; eligibility comes from the
+    // progression module (MVP: untaken classes only).
+    this.onMessage('choose_level_up', (client, payload = {}) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player || !player.pendingLevelUp) return;
+      const classId = String(payload.classId ?? '');
+      const eligible = getEligibleClassChoicesForLevelUp(player);
+      if (!eligible.includes(classId)) return;
+
+      const result = applyClassLevel(player, classId);
+      if (!result.ok) return;
+      // applyClassLevel handles HP bump + per-class resource init; recompute
+      // AC in case a derived feature flipped (Unarmored Defense after Monk
+      // multiclass, etc.).
+      recomputeStats(player);
+      player.pendingLevelUp = false;
+
+      // Seed newly-granted features onto the first empty hotbar slot, if any.
+      const newFeatures = result.features ?? [];
+      for (const feat of newFeatures) {
+        let placed = false;
+        for (let i = 0; i < player.hotbar.length; i++) {
+          if (player.hotbar[i] === '') { player.hotbar[i] = feat; placed = true; break; }
+        }
+        if (!placed) {
+          this.broadcast('combat_log', {
+            message: `${feat} learned — drag to hotbar to use.`,
+          });
+        }
+      }
+
+      // Build summary: "Fighter 1 / Barbarian 1".
+      const counts = new Map();
+      for (const cid of player.levelUpHistory) {
+        counts.set(cid, (counts.get(cid) ?? 0) + 1);
+      }
+      const parts = [];
+      for (const [cid, n] of counts) {
+        const name = CLASS_REGISTRY[cid]?.name ?? cid;
+        parts.push(`${name} ${n}`);
+      }
+      const className = CLASS_REGISTRY[classId]?.name ?? classId;
+      const pLabel    = player.class ? (player.class[0].toUpperCase() + player.class.slice(1)) : 'Player';
+      this.broadcast('combat_log', {
+        message: `${pLabel} took a level in ${className} (now ${parts.join(' / ')}).`,
+      });
+    });
+
     // ── Hotbar management ─────────────────────────────────────────────────────────
     this.onMessage('assign_hotbar', (client, { itemId, slot }) => {
       const player = this.state.players.get(client.sessionId);
@@ -224,37 +278,17 @@ export class DungeonRoom extends Room {
     const scores = check.ok ? options.abilityScores : classDef.baseAbilityScores;
 
     const conMod = getModifier(scores.con);
-    const dexMod = getModifier(scores.dex);
-    const maxHp  = classDef.getStartingHp(conMod);
 
     // Empty pack → class defaults equipped (free starter loadout).
     // Non-empty pack → raider enters unequipped; all items go to bag.
-    let startingWeapon, startingArmor, ac;
-    if (raiderItems.length === 0) {
-      startingWeapon = classDef.startingWeaponId;
-      startingArmor  = classDef.startingArmorId;
-      if (!startingArmor && classDef.unarmoredDefense) {
-        ac = 10 + dexMod + getModifier(scores[classDef.unarmoredDefense]);
-      } else {
-        ac = computeAC(ARMOR_REGISTRY[startingArmor], dexMod, false);
-      }
-    } else {
-      startingWeapon = '';
-      startingArmor  = '';
-      ac = classDef.unarmoredDefense
-        ? 10 + dexMod + getModifier(scores[classDef.unarmoredDefense])
-        : computeAC(null, dexMod, false);
-    }
+    const startingWeapon = raiderItems.length === 0 ? classDef.startingWeaponId : '';
+    const startingArmor  = raiderItems.length === 0 ? classDef.startingArmorId  : '';
 
     const spawn = FLOOR_REGISTRY[this.state.floor]?.playerSpawn ?? { x: 0, y: 0 };
     const player = new PlayerState();
     player.x     = spawn.x;
     player.y     = spawn.y;
     player.elevation = this._spawnElevation(spawn.x, spawn.y);
-    player.hp    = maxHp;
-    player.maxHp = maxHp;
-    player.ac    = ac;
-    player.level = 1;
     player.alive = true;
     player.class            = classDef.id;
     player.equippedWeaponId = startingWeapon;
@@ -267,9 +301,20 @@ export class DungeonRoom extends Room {
     player.int = scores.int;
     player.wis = scores.wis;
     player.cha = scores.cha;
-    for (const feature of classDef.classFeatures) player.hotbar.push(feature);
-    for (let i = classDef.classFeatures.length; i < 10; i++) player.hotbar.push('');
-    player.rageUsesRemaining = classDef.rageUses ?? 0;
+
+    // Seed level 1 via the progression module: sets classLevels/levelUpHistory/
+    // level + initializes per-class resource pools (rage uses, secondWindAvailable).
+    // HP for the join seed uses getStartingHp (max die) — overwrites the 0 the
+    // module would leave at level 1 (which intentionally doesn't compute HP).
+    const seedResult = applyClassLevel(player, classDef.id);
+    const startingHp = classDef.getStartingHp(conMod);
+    player.maxHp = startingHp;
+    player.hp    = startingHp;
+
+    // Seed hotbar with level-1 features, padded to 10 slots.
+    for (const f of seedResult.features) player.hotbar.push(f);
+    for (let i = seedResult.features.length; i < 10; i++) player.hotbar.push('');
+
     for (const id of raiderItems) player.inventory.push(id);
 
     if (raiderItems.length > 0) {
@@ -289,8 +334,9 @@ export class DungeonRoom extends Room {
           }
         }
       }
-      recomputeStats(player);
     }
+    // Always compute AC from current equip state + derived class features.
+    recomputeStats(player);
 
     // Auto-assign consumables to the first available hotbar slots.
     for (const id of [...player.inventory]) {
@@ -454,6 +500,9 @@ export class DungeonRoom extends Room {
       p.vx = 0; p.vy = 0;
       p.elevation = this._spawnElevation(p.x, p.y);
       this._longRest(p, sid);
+      // Force a level-up choice before the player can act on the new floor.
+      // Cleared by the `choose_level_up` handler; dead players don't level up.
+      if (p.alive) p.pendingLevelUp = true;
       const prev = this._maxFloor.get(sid) ?? 1;
       if (toFloor > prev) this._maxFloor.set(sid, toFloor);
     }
@@ -488,8 +537,13 @@ export class DungeonRoom extends Room {
     player.tempHp = 0;
     player.secondWindAvailable = true;
 
-    const classDef = CLASS_REGISTRY[player.class] ?? DEFAULT_CLASS;
-    player.rageUsesRemaining = classDef.rageUses ?? 0;
+    // Refill rage if the player has taken any level in Barbarian.
+    // Reads the rageUses pool off the Barbarian class def directly — it's a
+    // per-class resource, not a derived feature.
+    const barbLvl = player.classLevels?.get?.('barbarian') ?? 0;
+    if (barbLvl > 0) {
+      player.rageUsesRemaining = CLASS_REGISTRY.barbarian.rageUses ?? 0;
+    }
 
     clearPlayerConditions(player, this._conditionTimers, sessionId);
   }
