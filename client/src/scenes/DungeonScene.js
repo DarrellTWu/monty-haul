@@ -543,10 +543,10 @@ export class DungeonScene extends Phaser.Scene {
     const me = this._room.state.players.get(this._room.sessionId);
     if (!me || !me.alive) return;
     // Range scales with equipped weapon: ranged weapons cycle up to long range,
-    // melee/empty use the constant. Reading `kind === 'ranged'` (not "has range")
+    // melee/empty use the constant. Reading `type === 'ranged'` (not "has range")
     // keeps this future-safe for thrown weapons whose primary mode is still melee.
     const weapon = WEAPON_REGISTRY[me.equippedWeaponId];
-    const cycleRange = (weapon?.kind === 'ranged' && weapon.range)
+    const cycleRange = (weapon?.type === 'ranged' && weapon.range)
       ? weapon.range.long
       : MELEE_SELECT_RANGE_PX;
     const candidates = [];

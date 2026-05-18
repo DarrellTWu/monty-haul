@@ -500,7 +500,7 @@ test('melee weapon beyond melee distance → null', () => {
 
 test('ranged weapon within normal range → ranged', () => {
   const shortbow = {
-    id: 'shortbow', kind: 'ranged',
+    id: 'shortbow', type: 'ranged',
     damageDice: { count: 1, sides: 6 }, damageBonus: 0,
     damageType: 'piercing', enhancement: 0, attackAbility: 'dex',
     properties: ['two-handed'],
@@ -511,7 +511,7 @@ test('ranged weapon within normal range → ranged', () => {
 
 test('ranged weapon in long-range band → ranged (caller adds disadvantage)', () => {
   const shortbow = {
-    id: 'shortbow', kind: 'ranged',
+    id: 'shortbow', type: 'ranged',
     damageDice: { count: 1, sides: 6 }, damageBonus: 0,
     damageType: 'piercing', enhancement: 0, attackAbility: 'dex',
     properties: ['two-handed'],
@@ -522,7 +522,7 @@ test('ranged weapon in long-range band → ranged (caller adds disadvantage)', (
 
 test('ranged weapon beyond long range → null', () => {
   const shortbow = {
-    id: 'shortbow', kind: 'ranged',
+    id: 'shortbow', type: 'ranged',
     damageDice: { count: 1, sides: 6 }, damageBonus: 0,
     damageType: 'piercing', enhancement: 0, attackAbility: 'dex',
     properties: ['two-handed'],
@@ -533,7 +533,7 @@ test('ranged weapon beyond long range → null', () => {
 
 test('melee weapon with thrown sub-block, target beyond melee but within thrown.long → thrown', () => {
   const handaxe = {
-    id: 'handaxe', kind: 'melee',
+    id: 'handaxe', type: 'melee',
     damageDice: { count: 1, sides: 6 }, damageBonus: 0,
     damageType: 'slashing', enhancement: 0, attackAbility: 'str',
     properties: ['light', 'thrown'],
@@ -545,7 +545,7 @@ test('melee weapon with thrown sub-block, target beyond melee but within thrown.
 
 test('melee weapon with thrown sub-block, target beyond thrown.long → null', () => {
   const handaxe = {
-    id: 'handaxe', kind: 'melee',
+    id: 'handaxe', type: 'melee',
     damageDice: { count: 1, sides: 6 }, damageBonus: 0,
     damageType: 'slashing', enhancement: 0, attackAbility: 'str',
     properties: ['light', 'thrown'],

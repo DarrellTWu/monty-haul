@@ -42,10 +42,7 @@ Launched by `DungeonScene` with `{ lootSource: { kind, id } }`. Replaces the lef
 - `_lootHandshakeSeen` prevents premature auto-close before the server confirms the lock.
 
 ## Item Registries
-- Weapons: `shared/data/weapons/{melee,ranged,index}.js`. `index.js` is the unified `WEAPON_REGISTRY` barrel; everything else imports from there.
-- Armor: `shared/data/armor/armor.js`.
-- Consumables / shields / materials: `shared/data/items/{consumables,shields,materials}.js`.
-- `consumables.js` includes `extraction_scroll` (`type: 'extract'`).
+See `agent-context/itemization.md` for the full layout: how the type-specific registries roll up into `ITEM_REGISTRY`, the `category` + `type` two-axis taxonomy, the three-step add-an-item procedure, and the derived display formatters. Anything reading item ids (loot tables, vendors, recipes) is validated against `ITEM_REGISTRY` by `shared/tests/items.test.js`.
 
 ## See also — historical context
 - `archive/inventory-system-plan.md` — original build plan for inventory + hotbar + equipment slots. Read only if you need: the original data-model decisions (flat ArraySchema vs. stacked qty), the future server-side migration notes, or why the bag stacks displays-only rather than at the server schema. Frozen at sprint completion.

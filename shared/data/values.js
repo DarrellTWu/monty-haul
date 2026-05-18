@@ -1,48 +1,16 @@
 // shared/data/values.js
-// Canonical gold value for every item in the game. SRD prices for
-// weapons/armor/potions; nominal values for crafting materials.
-// Single source of truth — both the shop's buy prices and the stash
-// sell prices derive from this map.
+// ITEM_GOLD_VALUE is now a derived view over ITEM_REGISTRY. Every item def
+// carries its own goldValue field (see shared/data/items/* and the weapon /
+// armor files). This module preserves the historical `ITEM_GOLD_VALUE` and
+// `sellPrice` exports so call sites (shop.js, stash sell flow) don't change.
 
-export const ITEM_GOLD_VALUE = {
-  // Weapons (SRD PHB equipment table)
-  dagger:          2,
-  handaxe:         5,
-  mace:            5,
-  shortsword:      10,
-  longsword:       15,
-  greataxe:        30,
-  greatsword:      50,
-  shortbow:        25,
-  longbow:         50,
+import { ITEM_REGISTRY } from './items/index.js';
 
-  // Armor (SRD PHB equipment table)
-  padded:          5,
-  leather:         10,
-  hide:            10,
-  ring_mail:       30,
-  studded_leather: 45,
-  chain_shirt:     50,
-  scale_mail:      50,
-  chain_mail:      75,
-  splint:          200,
-  breastplate:     400,
-  half_plate:      750,
-  plate:           1500,
-  shield:          10,
-
-  // Potions — match shop catalog pricing.
-  healing_potion:     50,
-  longstrider_potion: 75,
-  false_life_potion:  100,
-  bless_potion:       250,
-  extraction_scroll:  100,
-
-  // Crafting materials — nominal sell value so nothing is permanently
-  // unsellable; crafting use should still dominate.
-  wolf_pelt:     4,
-  skeleton_bone: 2,
-};
+export const ITEM_GOLD_VALUE = Object.freeze(
+  Object.fromEntries(
+    Object.entries(ITEM_REGISTRY).map(([id, def]) => [id, def.goldValue ?? 0]),
+  ),
+);
 
 export const SELL_RATIO = 0.25;
 

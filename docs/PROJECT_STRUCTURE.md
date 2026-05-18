@@ -1,7 +1,7 @@
 ---
 status: shipped
 updated: 2026-05-17
-purpose: Canonical file-layout reference. Source of truth — CLAUDE.md and tech_spec.md link here, do not duplicate. Last bump: ranged combat + advantage tri-state landed.
+purpose: Canonical file-layout reference. Source of truth — CLAUDE.md and tech_spec.md link here, do not duplicate. Last bump: itemization refactor (ITEM_REGISTRY barrel + derived display) landed.
 ---
 
 # Project Structure (Actual)
@@ -56,11 +56,12 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | File | Purpose |
 |---|---|
 | `data/constants.js` | Tuning constants (`ENTITY_RADIUS_PX=16`, `STEP_HALF_WIDTH_PX=24`, `PLATFORM_WALL_THICK_PX=2`, attack cooldowns, regen rates, etc). |
-| `data/values.js` | Canonical `ITEM_GOLD_VALUE` map + `sellPrice(id)` helper (¼× value, floor, min 1 gp). Single source of truth. |
+| `data/values.js` | `ITEM_GOLD_VALUE` map + `sellPrice(id)` helper (¼× value, floor, min 1 gp). Map is derived once at module load from `ITEM_REGISTRY[id].goldValue` — single source of truth lives on the def. |
 | `data/shop.js` | `VENDOR_CATALOG` (keyed by vendor: potions, armor) + flat `BUYABLE_PRICES` for server gate. |
-| `data/weapons/{melee,ranged,index}.js` | Weapon definitions. `melee.js` and `ranged.js` export per-weapon consts (all carry `kind: 'melee' \| 'ranged'`). `index.js` is the unified barrel exporting `WEAPON_REGISTRY` (melee ∪ ranged, excluding `UNARMED`). Ranged carries `range: { normal, long }` in px (built via `ft()` helper). |
-| `data/armor/armor.js` | `ARMOR_REGISTRY` + `computeAC`. |
-| `data/items/{consumables,shields,materials}.js` | Item registries. `consumables.js` includes `extraction_scroll` (type `extract`). |
+| `data/weapons/{melee,ranged,index}.js` | Weapon definitions. `melee.js` and `ranged.js` export per-weapon consts carrying `category: 'weapon'` and `type: 'melee' \| 'ranged'` (sub-discriminator). `index.js` is the unified barrel exporting `WEAPON_REGISTRY` (melee ∪ ranged, excluding `UNARMED`). Ranged carries `range: { normal, long }` in px (built via `ft()` helper). |
+| `data/armor/armor.js` | `ARMOR_REGISTRY` + `computeAC`. Each def carries `category: 'armor'` and `type: 'light' \| 'medium' \| 'heavy'`. |
+| `data/items/{consumables,shields,materials}.js` | Type-specific item registries. Every def carries `category` ∈ {`consumable`, `shield`, `material`}. `consumables.js` includes `extraction_scroll` (type `extract`). |
+| `data/items/index.js` | `ITEM_REGISTRY` — frozen union of all five type-specific registries. `isKnownItem(id)`, `getItem(id)`, `CATEGORY_DISPLAY_ORDER`. The single thing display layers and the recipe/loot/floor validator look up by id. |
 | `data/enemies/tier1.js` | Goblin, dog, skeleton. Each carries `canClimb: bool` (goblin true, others false). |
 | `data/classes/{fighter,barbarian,monk,index}.js` | `CLASS_REGISTRY`. Each class carries `canClimb: bool` (monk true, fighter/barbarian false). |
 | `data/loot/tier1.js` | `LOOT_TABLE_REGISTRY` keyed by enemy id. Entries support literal ids + `@pool_name` (currently `@potion_any`). |
@@ -73,11 +74,12 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `logic/geometry.js` | Pure geometry: `resolveWallCollision`, `circleOverlapsAny`, `isLineBlocked` (Liang-Barsky segment-vs-AABB; caller filters obstacles), `tryAutoClimb`, `platformPerimeterRects`, `segmentIntersectsCircle`, `segmentPerimeterCrossing`, `pointInRect`. |
 | `logic/character.js` | `validateAbilityScores(scores)` → `{ok}` or `{ok:false, error}`. Enforces six keys present, integer in `[SCORE_MIN, SCORE_MAX]`, point cost ≤ `POINT_BUY_BUDGET`. Used by HubScene (pre-submit) + DungeonRoom.onJoin (auth gate). |
 | `logic/equipment.js` | `equipItem(player, {itemId, slot?})`, `unequipItem(player, {slot})`, `recomputeStats(player)`. Owns SRD slot routing (auto-detect armor/shield/weapon, two-handed handling, shield + main-hand interactions) and the derived-stat hook called after any score or equipment change. |
+| `logic/item-display.js` | Derived display layer over `ITEM_REGISTRY`. `getItemDisplay(id)`, `getArmorSlotDescription(def)`, `getStashOrder()`, `getStashSections()`. Five per-category formatters (weapon/armor/shield/consumable/material). All other display tables in client code reference these. |
 | `logic/conditions.js` | `CONDITION_DEFS` table (mirror field + optional `onExpire`/`onExpireLog` per condition) + `applyCondition`, `tickConditions`, `clearPlayerConditions`. Pure timer bookkeeping; caller owns the `Map<\`${sessionId}_${conditionId}\`, ms>` and broadcasts the returned log strings. Used by `DungeonRoom._useConsumable`, `_activateRage`, `_tickConditions`, `_longRest`. |
 | `types/{player,enemy,weapon}.js` | JSDoc `@typedef` shapes. |
-| `tests/{combat,loot,geometry,character,equipment,conditions}.test.js` | Pure-logic unit tests. |
+| `tests/{combat,loot,geometry,character,equipment,conditions,items}.test.js` | Pure-logic unit tests + itemization validator. |
 
-**Not yet built:** `shared/data/subclasses/`, `shared/data/gear/`, `shared/logic/ai.js` (still in `server/systems/AISystem.js`), `shared/logic/floor-generator.js`, `shared/logic/items.js`, `shared/logic/extraction.js`.
+**Not yet built:** `shared/data/subclasses/`, `shared/data/gear/`, `shared/logic/ai.js` (still in `server/systems/AISystem.js`), `shared/logic/floor-generator.js`, `shared/logic/extraction.js`.
 
 ## Supabase (`supabase/migrations/`)
 
@@ -96,6 +98,7 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `shared/tests/character.test.js` | 10 | `validateAbilityScores` — shape, range, budget. |
 | `shared/tests/equipment.test.js` | 14 | `equipItem`/`unequipItem`/`recomputeStats` — slot routing, two-handed, AC recompute. |
 | `shared/tests/conditions.test.js` | 18 | `applyCondition`/`tickConditions`/`clearPlayerConditions` — idempotency, mirror sync, expiry side effects, multi-player isolation. |
+| `shared/tests/items.test.js` | 99 | Itemization validator — base shape, per-category fields, registry-key parity, disjoint namespaces, `getItemDisplay` completeness, reference integrity for chests/loot/vendors/recipes, recipe bench reference. |
 | `server/tests/container-lock.test.js` | 21 | |
 | `server/tests/loot-flow.test.js` | 35 | |
 | `server/tests/target-selection.test.js` | 17 | Explicit-target validation in `playerAttack` — fallback, override, out-of-range/invalid denials, cooldown preservation. |

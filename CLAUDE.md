@@ -76,6 +76,7 @@ D&D 5e SRD mechanics adapted for real-time play.
 - `npm run server` — Colyseus server only (also passes `--env-file=server/.env`)
 - `node shared/tests/combat.test.js` — run combat tests
 - `node shared/tests/loot.test.js` — run loot tests
+- `node shared/tests/items.test.js` — run itemization validator (covers floors/loot/vendor/recipe reference integrity)
 - `node server/tests/supabase-smoke.js` — round-trip a temp player through Supabase (requires `server/.env`)
 
 ## File Structure
@@ -97,6 +98,7 @@ Index: [`docs/README.md`](docs/README.md).
 | floors, descend, long rest, extraction scroll | `docs/agent-context/floors.md` |
 | shop, crafting, hub gold, stash, Debug Mode | `docs/agent-context/hub-economy.md` |
 | inventory, hotbar, containers, loot tables | `docs/agent-context/inventory-loot.md` |
+| item defs, registry, display strings, gold values, recipes-as-data | `docs/agent-context/itemization.md` |
 | Supabase, retry, dead-letter, run history | `docs/agent-context/persistence.md` |
 | client↔server messages or `/hub` HTTP routes | `docs/agent-context/protocol.md` |
 | target/planned architecture | `docs/tech_spec.md` |

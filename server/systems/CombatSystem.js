@@ -87,7 +87,7 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
 
   // Equipped weapon dictates whether a target is required and how dispatch works.
   const equippedWeapon = getWeapon(player.equippedWeaponId);
-  const isRangedWeapon = equippedWeapon.kind === 'ranged';
+  const isRangedWeapon = equippedWeapon.type === 'ranged';
 
   // Target resolution. Explicit targetId always validated. Missing targetId is
   // only legal for melee weapons (nearest-enemy fallback); ranged refuses.

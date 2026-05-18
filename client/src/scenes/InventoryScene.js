@@ -20,6 +20,9 @@ import {
 } from '../network/ColyseusClient.js';
 import { CLASS_REGISTRY } from '../../../shared/data/classes/index.js';
 import { getProficiencyBonus } from '../../../shared/logic/combat.js';
+import { getItem } from '../../../shared/data/items/index.js';
+import { ARMOR_REGISTRY } from '../../../shared/data/armor/armor.js';
+import { getItemDisplay, getArmorSlotDescription } from '../../../shared/logic/item-display.js';
 
 // Panel geometry (expanded height to fit saving throws + class features + hotbar).
 const PANEL_X   = 190;
@@ -41,72 +44,10 @@ function saveBonus(stat, player, saveProfs, profBonus) {
   return `${stat.toUpperCase().padEnd(4)} ${(t >= 0 ? '+' : '') + t}${saveProfs.has(stat) ? ' ●' : ''}`;
 }
 
-// Item display metadata.
-const WEAPON_DISPLAY = {
-  longsword:  { label: 'Longsword',  detail: '1d8  slashing',    note: 'versatile (1d10)' },
-  shortsword: { label: 'Shortsword', detail: '1d6  piercing',    note: 'finesse, light' },
-  dagger:     { label: 'Dagger',     detail: '1d4  piercing',    note: 'finesse · drag to offhand' },
-  greataxe:   { label: 'Greataxe',   detail: '1d12 slashing',    note: 'two-handed' },
-  greatsword: { label: 'Greatsword', detail: '2d6  slashing',    note: 'two-handed' },
-  handaxe:    { label: 'Handaxe',    detail: '1d6  slashing',    note: 'light, thrown' },
-  mace:       { label: 'Mace',       detail: '1d6  bludgeoning', note: 'effective vs. skeletons' },
-  shortbow:   { label: 'Shortbow',   detail: '1d6  piercing',    note: 'ranged 80/320, two-handed' },
-  longbow:    { label: 'Longbow',    detail: '1d8  piercing',    note: 'ranged 150/600, two-handed' },
-  unarmed:    { label: 'Unarmed',    detail: '1d4  bludgeoning', note: '' },
-};
-
-const SHIELD_DISPLAY = {
-  shield: { label: 'Shield', detail: '+2 AC' },
-};
-
-const CONSUMABLE_DISPLAY = {
-  healing_potion:    { label: 'Healing Potion',    detail: '2d4+2 HP',     short: 'Heal Pot' },
-  bless_potion:      { label: 'Bless Potion',      detail: '+1d4 atk 60s', short: 'Bless'    },
-  longstrider_potion: { label: 'Longstrider Pot',  detail: '+10ft spd 2m', short: 'Stride'   },
-  false_life_potion:  { label: 'False Life Pot',   detail: '1d4+4 tmp HP 2m', short: 'F.Life' },
-  extraction_scroll:  { label: 'Extraction Scroll', detail: 'exit dungeon', short: 'Extract' },
-};
-
-// Armor display: bag label and equipped-slot label are different sizes.
-const ARMOR_BAG_DISPLAY = {
-  padded:          { label: 'Padded',          detail: 'AC 11+DEX light' },
-  leather:         { label: 'Leather',         detail: 'AC 11+DEX light' },
-  studded_leather: { label: 'Studded Leather', detail: 'AC 12+DEX light' },
-  hide:            { label: 'Hide',            detail: 'AC 12+DEX med'   },
-  chain_shirt:     { label: 'Chain Shirt',     detail: 'AC 13+DEX med'   },
-  scale_mail:      { label: 'Scale Mail',      detail: 'AC 14+DEX med'   },
-  breastplate:     { label: 'Breastplate',     detail: 'AC 14+DEX med'   },
-  half_plate:      { label: 'Half Plate',      detail: 'AC 15+DEX med'   },
-  ring_mail:       { label: 'Ring Mail',       detail: 'AC 14  heavy'    },
-  chain_mail:      { label: 'Chain Mail',      detail: 'AC 16  heavy'    },
-  splint:          { label: 'Splint',          detail: 'AC 17  heavy'    },
-  plate:           { label: 'Plate',           detail: 'AC 18  heavy'    },
-};
-
-// Crafting materials — bag-only items, no equip / hotbar / consume affordance.
-// Server silently rejects equip/hotbar attempts; the row stays selectable so
-// future drop / craft actions have a hook point.
-const MATERIAL_DISPLAY = {
-  skeleton_bone: { label: 'Skeleton Bone', detail: 'crafting material' },
-  wolf_pelt:     { label: 'Wolf Pelt',     detail: 'crafting material' },
-};
-
-// Full description shown in the equipped armor slot.
-const ARMOR_SLOT_DISPLAY = {
-  padded:          'Padded — AC 11+DEX  (light, stealth disadv.)',
-  leather:         'Leather — AC 11+DEX  (light)',
-  studded_leather: 'Studded Leather — AC 12+DEX  (light)',
-  hide:            'Hide — AC 12+DEX(cap 2)  (medium)',
-  chain_shirt:     'Chain Shirt — AC 13+DEX(cap 2)  (medium)',
-  scale_mail:      'Scale Mail — AC 14+DEX(cap 2)  (medium, stealth disadv.)',
-  breastplate:     'Breastplate — AC 14+DEX(cap 2)  (medium)',
-  half_plate:      'Half Plate — AC 17  (medium, DEX capped +2)',
-  ring_mail:       'Ring Mail — AC 14  (heavy, stealth disadv.)',
-  chain_mail:      'Chain Mail — AC 16  (heavy, STR 13)',
-  splint:          'Splint — AC 17  (heavy, STR 15)',
-  plate:           'Plate — AC 18  (heavy, STR 15)',
-};
-
+// Item display strings (label / detail / note / equipped-armor description)
+// are derived from ITEM_REGISTRY via shared/logic/item-display.js — no per-id
+// tables live in this file. To change how an item renders, edit its def in
+// shared/data/items/* or shared/data/weapons/*.
 
 // Text styles.
 const STYLE_HEADER   = { fontSize: '18px', color: '#ffffff',  fontFamily: 'monospace', fontStyle: 'bold' };
@@ -508,7 +449,7 @@ export class InventoryScene extends Phaser.Scene {
     const MONK_WPNS      = new Set(['shortsword', 'dagger', 'handaxe', 'mace', 'unarmed', '']);
     const weapon = player.equippedWeaponId;
     if (weapon) {
-      const wDef       = WEAPON_DISPLAY[weapon];
+      const display    = getItemDisplay(weapon);
       const strMod     = mod(player.str ?? 10);
       const dexMod     = mod(player.dex ?? 10);
       const isMonk     = player.class === 'monk';
@@ -517,10 +458,10 @@ export class InventoryScene extends Phaser.Scene {
       const atkMod     = usesDex ? dexMod : strMod;
       const atkStat    = usesDex ? 'DEX' : 'STR';
       const modLabel   = (atkMod >= 0 ? '+' : '') + atkMod + ' ' + atkStat;
-      const dieLabel   = (weapon === 'longsword' && !player.offhandId) ? '1d10 slashing' : (wDef?.detail ?? weapon);
-      this._equippedBtn.setText(`${(wDef?.label ?? weapon).padEnd(11)}  ${dieLabel}   ${modLabel}`)
+      const dieLabel   = (weapon === 'longsword' && !player.offhandId) ? '1d10 slashing' : (display?.detail ?? weapon);
+      this._equippedBtn.setText(`${(display?.label ?? weapon).padEnd(11)}  ${dieLabel}   ${modLabel}`)
         .setStyle({ ...STYLE_ITEM, backgroundColor: '#1a1a2e' });
-      this._equippedNote.setText(wDef?.note ?? '');
+      this._equippedNote.setText(display?.note ?? '');
       this._equippedHint.setText('click to unequip');
     } else {
       this._equippedBtn.setText('—  (empty)').setStyle({ ...STYLE_MUTED, backgroundColor: '#111118' });
@@ -531,10 +472,8 @@ export class InventoryScene extends Phaser.Scene {
     // Offhand slot.
     const offhand = player.offhandId;
     if (offhand) {
-      const sDef = SHIELD_DISPLAY[offhand];
-      const wDef = WEAPON_DISPLAY[offhand];
-      const def  = sDef ?? wDef;
-      this._offhandBtn.setText(`${(def?.label ?? offhand).padEnd(11)}  ${def?.detail ?? ''}`)
+      const display = getItemDisplay(offhand);
+      this._offhandBtn.setText(`${(display?.label ?? offhand).padEnd(11)}  ${display?.detail ?? ''}`)
         .setStyle({ ...STYLE_ITEM, backgroundColor: '#1a1a2e' });
       this._offhandHint.setText('click to unequip');
     } else {
@@ -545,7 +484,8 @@ export class InventoryScene extends Phaser.Scene {
     // Armor slot.
     const armorId = player.equippedArmorId;
     if (armorId) {
-      this._armorBtn.setText(ARMOR_SLOT_DISPLAY[armorId] ?? armorId)
+      const armorDef = ARMOR_REGISTRY[armorId];
+      this._armorBtn.setText(armorDef ? getArmorSlotDescription(armorDef) : armorId)
         .setStyle({ ...STYLE_ITEM, backgroundColor: '#1a1a2e' });
       this._armorHint.setText('click to unequip');
     } else {
@@ -598,8 +538,9 @@ export class InventoryScene extends Phaser.Scene {
         slot.itemLabel.setText('2nd Wind').setColor('#ffdd88');
       } else if (binding === 'rage') {
         slot.itemLabel.setText('Rage').setColor('#ff8844');
-      } else if (binding && CONSUMABLE_DISPLAY[binding]) {
-        slot.itemLabel.setText(CONSUMABLE_DISPLAY[binding].short).setColor('#ffdd88');
+      } else if (binding && getItem(binding)?.category === 'consumable') {
+        const def = getItem(binding);
+        slot.itemLabel.setText(def.hotbarShort ?? def.label).setColor('#ffdd88');
       } else {
         slot.itemLabel.setText('—').setColor('#334455');
       }
@@ -861,7 +802,7 @@ export class InventoryScene extends Phaser.Scene {
     }
     if (this._selectionHint) {
       if (sel) {
-        const display = WEAPON_DISPLAY[sel] ?? SHIELD_DISPLAY[sel] ?? CONSUMABLE_DISPLAY[sel];
+        const display = getItemDisplay(sel);
         const name = display?.label ?? sel;
         this._selectionHint
           .setText(`▶ ${name} selected — click slot to assign  ·  dbl-click to auto-equip  ·  Esc clears`)
@@ -939,17 +880,12 @@ export class InventoryScene extends Phaser.Scene {
 
   /** Display label for any bag item id. */
   _itemLabel(id) {
-    const w = WEAPON_DISPLAY[id];
-    if (w) return `${w.label.padEnd(11)}  ${w.detail}`;
-    const s = SHIELD_DISPLAY[id];
-    if (s) return `${s.label.padEnd(11)}  ${s.detail}`;
-    const a = ARMOR_BAG_DISPLAY[id];
-    if (a) return `${a.label.padEnd(11)}  ${a.detail}`;
-    const c = CONSUMABLE_DISPLAY[id];
-    if (c) return `${c.label.padEnd(14)}  ${c.detail}`;
-    const m = MATERIAL_DISPLAY[id];
-    if (m) return `${m.label.padEnd(14)}  ${m.detail}`;
-    return id;
+    const display = getItemDisplay(id);
+    if (!display) return id;
+    // Consumables and materials use a wider label column because their names
+    // are longer ("Potion of Longstrider", "Skeleton Bone") than weapons/armor.
+    const pad = (display.category === 'consumable' || display.category === 'material') ? 14 : 11;
+    return `${display.label.padEnd(pad)}  ${display.detail}`;
   }
 
   /**
@@ -1008,9 +944,10 @@ export class InventoryScene extends Phaser.Scene {
         // Double-click: route to the right server message based on item type.
         // Consumables (incl. extraction_scroll) → bind to first free hotbar slot;
         // weapons/armor/shield → server's auto-equip; materials → no-op.
-        if (CONSUMABLE_DISPLAY[itemId]) {
+        const def = getItem(itemId);
+        if (def?.category === 'consumable') {
           this._assignConsumableToHotbar(itemId);
-        } else if (!MATERIAL_DISPLAY[itemId]) {
+        } else if (def?.category !== 'material') {
           sendEquip(itemId);
         }
         this._selectedItemId = null;

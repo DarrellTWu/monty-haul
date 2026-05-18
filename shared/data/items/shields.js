@@ -4,10 +4,12 @@
 
 export const SHIELD = {
   id: 'shield',
+  category: 'shield',
   label: 'Shield',
-  type: 'shield',
   acBonus: 2,          // Always +2 AC regardless of armor type (SRD)
   strRequirement: 0,
+  goldValue: 10,
+  sortKey: 300,
 };
 
 // Registry for lookup by id (used by server equip handler and InventoryScene).

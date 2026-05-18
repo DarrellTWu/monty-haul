@@ -3,24 +3,29 @@
 // AC for a given character = computeAC(armorDef, dexMod, hasShield).
 
 // ── Armor definitions ─────────────────────────────────────────────────────────
+//
+// Each entry carries `category: 'armor'` plus its existing `type` sub-discriminator
+// ('light' | 'medium' | 'heavy'). Display layers derive every armor string from
+// these fields via shared/logic/item-display.js — there is no separate label or
+// detail table anywhere else in the codebase.
 
 // Light armor: AC = base + full DEX modifier.
-export const PADDED          = { id: 'padded',          label: 'Padded',          type: 'light',  baseAC: 11, stealthDisadvantage: true,  strRequirement: 0 };
-export const LEATHER         = { id: 'leather',         label: 'Leather',         type: 'light',  baseAC: 11, stealthDisadvantage: false, strRequirement: 0 };
-export const STUDDED_LEATHER = { id: 'studded_leather', label: 'Studded Leather', type: 'light',  baseAC: 12, stealthDisadvantage: false, strRequirement: 0 };
+export const PADDED          = { id: 'padded',          category: 'armor', type: 'light',  label: 'Padded',          baseAC: 11, stealthDisadvantage: true,  strRequirement: 0, goldValue: 5,   sortKey: 200 };
+export const LEATHER         = { id: 'leather',         category: 'armor', type: 'light',  label: 'Leather',         baseAC: 11, stealthDisadvantage: false, strRequirement: 0, goldValue: 10,  sortKey: 210 };
+export const STUDDED_LEATHER = { id: 'studded_leather', category: 'armor', type: 'light',  label: 'Studded Leather', baseAC: 12, stealthDisadvantage: false, strRequirement: 0, goldValue: 45,  sortKey: 220 };
 
 // Medium armor: AC = base + DEX modifier, maximum +2.
-export const HIDE        = { id: 'hide',        label: 'Hide',        type: 'medium', baseAC: 12, stealthDisadvantage: false, strRequirement: 0 };
-export const CHAIN_SHIRT = { id: 'chain_shirt', label: 'Chain Shirt', type: 'medium', baseAC: 13, stealthDisadvantage: false, strRequirement: 0 };
-export const SCALE_MAIL  = { id: 'scale_mail',  label: 'Scale Mail',  type: 'medium', baseAC: 14, stealthDisadvantage: true,  strRequirement: 0 };
-export const BREASTPLATE = { id: 'breastplate', label: 'Breastplate', type: 'medium', baseAC: 14, stealthDisadvantage: false, strRequirement: 0 };
-export const HALF_PLATE  = { id: 'half_plate',  label: 'Half Plate',  type: 'medium', baseAC: 15, stealthDisadvantage: true,  strRequirement: 0 };
+export const HIDE        = { id: 'hide',        category: 'armor', type: 'medium', label: 'Hide',        baseAC: 12, stealthDisadvantage: false, strRequirement: 0, goldValue: 10,  sortKey: 230 };
+export const CHAIN_SHIRT = { id: 'chain_shirt', category: 'armor', type: 'medium', label: 'Chain Shirt', baseAC: 13, stealthDisadvantage: false, strRequirement: 0, goldValue: 50,  sortKey: 240 };
+export const SCALE_MAIL  = { id: 'scale_mail',  category: 'armor', type: 'medium', label: 'Scale Mail',  baseAC: 14, stealthDisadvantage: true,  strRequirement: 0, goldValue: 50,  sortKey: 250 };
+export const BREASTPLATE = { id: 'breastplate', category: 'armor', type: 'medium', label: 'Breastplate', baseAC: 14, stealthDisadvantage: false, strRequirement: 0, goldValue: 400, sortKey: 260 };
+export const HALF_PLATE  = { id: 'half_plate',  category: 'armor', type: 'medium', label: 'Half Plate',  baseAC: 15, stealthDisadvantage: true,  strRequirement: 0, goldValue: 750, sortKey: 270 };
 
 // Heavy armor: AC = base only, no DEX contribution.
-export const RING_MAIL  = { id: 'ring_mail',  label: 'Ring Mail',  type: 'heavy', baseAC: 14, stealthDisadvantage: true,  strRequirement: 0  };
-export const CHAIN_MAIL = { id: 'chain_mail', label: 'Chain Mail', type: 'heavy', baseAC: 16, stealthDisadvantage: true,  strRequirement: 13 };
-export const SPLINT     = { id: 'splint',     label: 'Splint',     type: 'heavy', baseAC: 17, stealthDisadvantage: true,  strRequirement: 15 };
-export const PLATE      = { id: 'plate',      label: 'Plate',      type: 'heavy', baseAC: 18, stealthDisadvantage: true,  strRequirement: 15 };
+export const RING_MAIL  = { id: 'ring_mail',  category: 'armor', type: 'heavy', label: 'Ring Mail',  baseAC: 14, stealthDisadvantage: true,  strRequirement: 0,  goldValue: 30,   sortKey: 280 };
+export const CHAIN_MAIL = { id: 'chain_mail', category: 'armor', type: 'heavy', label: 'Chain Mail', baseAC: 16, stealthDisadvantage: true,  strRequirement: 13, goldValue: 75,   sortKey: 290 };
+export const SPLINT     = { id: 'splint',     category: 'armor', type: 'heavy', label: 'Splint',     baseAC: 17, stealthDisadvantage: true,  strRequirement: 15, goldValue: 200,  sortKey: 295 };
+export const PLATE      = { id: 'plate',      category: 'armor', type: 'heavy', label: 'Plate',      baseAC: 18, stealthDisadvantage: true,  strRequirement: 15, goldValue: 1500, sortKey: 298 };
 
 // ── AC computation ────────────────────────────────────────────────────────────
 

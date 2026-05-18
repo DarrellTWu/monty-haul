@@ -47,15 +47,15 @@ Class default gear extracted at run-end enters the raider pack normally and trig
 
 ## Attack Dispatch (`pickAttackMode`)
 - `pickAttackMode(weapon, distance)` in `shared/logic/combat.js` returns `'melee' | 'ranged' | 'thrown' | null`. Single source of truth for the dispatch branch in `playerAttack`.
-- `'melee'` — `weapon.kind === 'melee'` and `distance ≤ MELEE_HIT_RANGE_PX`. Also returned for `null` weapon (empty slot → unarmed) at melee distance.
-- `'ranged'` — `weapon.kind === 'ranged'` and `distance ≤ weapon.range.long`. Caller is responsible for adding long-range disadvantage when `distance > weapon.range.normal`.
-- `'thrown'` — `weapon.kind === 'melee'` AND `weapon.thrown` is set AND target is beyond `MELEE_HIT_RANGE_PX` but within `weapon.thrown.range.long`. Reserved branch — no weapon ships with `thrown` today; `playerAttack` returns `invalid_target` defensively if it fires.
+- `'melee'` — `weapon.type === 'melee'` and `distance ≤ MELEE_HIT_RANGE_PX`. Also returned for `null` weapon (empty slot → unarmed) at melee distance.
+- `'ranged'` — `weapon.type === 'ranged'` and `distance ≤ weapon.range.long`. Caller is responsible for adding long-range disadvantage when `distance > weapon.range.normal`.
+- `'thrown'` — `weapon.type === 'melee'` AND `weapon.thrown` is set AND target is beyond `MELEE_HIT_RANGE_PX` but within `weapon.thrown.range.long`. Reserved branch — no weapon ships with `thrown` today; `playerAttack` returns `invalid_target` defensively if it fires.
 - `null` — beyond every viable mode → caller denies with `'out_of_range'`.
 
 ## Ranged Combat
 - Shortbow (1d6 piercing, range `ft(80)`/`ft(320)`) and longbow (1d8 piercing, range `ft(150)`/`ft(600)`). Both two-handed; longbow heavy. DEX-keyed. Live in `shared/data/weapons/ranged.js`; merged with melee in `shared/data/weapons/index.js` (unified `WEAPON_REGISTRY`).
 - Infinite arrows in v1 — no ammunition model.
-- **Target required.** Ranged weapons with no `targetId` reply `attack_denied: 'no_target'`. No nearest-enemy fallback. Phrased per-weapon (`kind: 'ranged'`), not as a global ranged-combat invariant — future ranged weapons whose target is a point or environment object will set their own targetability rules on the weapon def.
+- **Target required.** Ranged weapons with no `targetId` reply `attack_denied: 'no_target'`. No nearest-enemy fallback. Phrased per-weapon (`type: 'ranged'`), not as a global ranged-combat invariant — future ranged weapons whose target is a point or environment object will set their own targetability rules on the weapon def.
 - **LoS gate** — `isLineBlocked(x1, y1, x2, y2, obstacles)` in `shared/logic/geometry.js`. Caller passes pre-filtered obstacle rects; `DungeonRoom.attack` builds the list as static walls + currently-locked-door rects. Platforms never block.
 - **Arrows are cosmetic.** Server resolves to-hit instantly and broadcasts `projectile_fired` with `{attackerId, fromX, fromY, toX, toY, hit, style: 'arrow'}`. Client tweens a dot from→to over 250 ms; misses overshoot by 15%. The `style` discriminator carries forward to bolts, thrown daggers, firebolts, magic missiles — all reuse the same wire shape.
 - **Ranged enemies (forward note)**: `enemyAttack` currently builds a weapon-shaped object inline from `enemyDef.damageDice/damageBonus/damageType`. When the first ranged enemy lands, the same `pickAttackMode` branch can apply — either give enemies a `WEAPON_REGISTRY` id or carry a `kind: 'ranged'` weapon shape on the stat block.

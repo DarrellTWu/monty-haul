@@ -226,9 +226,9 @@ export function resolveAttack({ attacker, target, weapon, conditions, sources = 
  * Single source of truth for the melee-vs-ranged-vs-thrown branch; CombatSystem
  * calls this once per attack and routes accordingly.
  *
- *   - 'melee':  weapon.kind === 'melee' AND distance ≤ MELEE_HIT_RANGE_PX.
- *   - 'ranged': weapon.kind === 'ranged' AND distance ≤ weapon.range.long.
- *   - 'thrown': weapon.kind === 'melee' AND weapon.thrown is set AND
+ *   - 'melee':  weapon.type === 'melee' AND distance ≤ MELEE_HIT_RANGE_PX.
+ *   - 'ranged': weapon.type === 'ranged' AND distance ≤ weapon.range.long.
+ *   - 'thrown': weapon.type === 'melee' AND weapon.thrown is set AND
  *               distance > MELEE_HIT_RANGE_PX AND distance ≤ weapon.thrown.range.long.
  *   - null:     target is beyond every viable mode for this weapon.
  *
@@ -242,11 +242,11 @@ export function resolveAttack({ attacker, target, weapon, conditions, sources = 
  */
 export function pickAttackMode(weapon, distance) {
   if (!weapon) return distance <= MELEE_HIT_RANGE_PX ? 'melee' : null;
-  if (weapon.kind === 'ranged') {
+  if (weapon.type === 'ranged') {
     if (!weapon.range) return null;
     return distance <= weapon.range.long ? 'ranged' : null;
   }
-  // kind === 'melee'
+  // type === 'melee'
   if (distance <= MELEE_HIT_RANGE_PX) return 'melee';
   if (weapon.thrown && distance <= weapon.thrown.range.long) return 'thrown';
   return null;

@@ -5,6 +5,47 @@ Entries are newest-first within each session.
 
 ---
 
+## Session 7 — 2026-05-17
+
+### Completed
+
+#### Itemization refactor: one canonical registry, derived display
+
+Every item def (weapon, armor, shield, consumable, material) now carries its own `category`, `label`, `goldValue`, `sortKey`, and optional `note`. A new `ITEM_REGISTRY` barrel in `shared/data/items/index.js` unions the five type-specific registries; display strings, gold values, stash sort, stash sections, and recipe/floor/vendor reference checks all derive from it. Adding a new item drops from a 5–7 file change-set to a 1-file edit (2 if buyable) — the bow-invisible-in-stash bug from the ranged-combat sprint becomes structurally impossible.
+
+Zero gameplay change. A few cosmetic shifts called out below where the consolidation forced one canonical string in places that previously had two.
+
+- `shared/types/weapon.js` — `kind: 'melee'|'ranged'` renamed to `type` so every item type uses the same `category`+`type` two-axis discrimination. Added `label`, `goldValue`, `sortKey`, optional `note`.
+- `shared/data/weapons/{melee,ranged}.js` — every def gains `category: 'weapon'`, `type`, `label`, `goldValue`, `sortKey`, `note`. `UNARMED` extended too for shape-completeness; still excluded from `WEAPON_REGISTRY`.
+- `shared/data/armor/armor.js` — every def gains `category: 'armor'`, `goldValue`, `sortKey`. Existing `type`/`baseAC`/`stealthDisadvantage`/`strRequirement` unchanged.
+- `shared/data/items/{shields,consumables,materials}.js` — every def gains `category` + `goldValue` + `sortKey`. Consumables gain `hotbarShort` (the 7-char abbreviation used in the hotbar slot label). Redundant `shield.type = 'shield'` and `material.type = 'material'` dropped — `category` carries that information.
+- `shared/data/items/index.js` (new) — `ITEM_REGISTRY` frozen union, `isKnownItem`, `getItem`, `CATEGORY_DISPLAY_ORDER`.
+- `shared/logic/item-display.js` (new) — five per-category detail formatters + `getItemDisplay`, `getArmorSlotDescription`, `getStashOrder`, `getStashSections`. All pure; same def in, same string out. Stash sections share labels across categories so armor + shield collapse into one "Armor & Shield" row.
+- `shared/data/values.js` — `ITEM_GOLD_VALUE` is now a frozen view derived from `ITEM_REGISTRY[id].goldValue` at module load. `sellPrice(id)` signature and `SELL_RATIO` unchanged; `shop.js`, run-history value calc, and stash sell flow continue to read through unchanged.
+- `client/src/scenes/InventoryScene.js` — six hand-maintained display tables deleted (~80 LOC). Bag rows, equipped-weapon line, offhand line, equipped-armor description, hotbar labels, selection hint, and double-click routing now use `getItemDisplay` / `getArmorSlotDescription` / `getItem` from the shared module.
+- `client/src/ui/hub/hub-data.js` — `ITEM_META`, `STASH_ORDER`, `STASH_SECTIONS` derived from `ITEM_REGISTRY` at module load. Same exported shape; `StashPanel`/`ShopPanel`/`CraftPanel`/`RaiderPanel` untouched.
+- `shared/logic/combat.js`, `server/systems/CombatSystem.js`, `client/src/scenes/DungeonScene.js`, `shared/tests/combat.test.js` — `weapon.kind` references swept to `weapon.type`. Combat test count unchanged (46 → 46).
+- `shared/tests/items.test.js` (new) — 99 assertions across 8 suites: base shape, per-category required fields, def.id vs key parity, disjoint namespaces across the five type-specific registries, `getItemDisplay` completeness, reference integrity for `FLOOR_REGISTRY` chests, `LOOT_TABLE_REGISTRY` literal drops, `VENDOR_CATALOG`, `RECIPE_REGISTRY` input/output ids with output-category whitelist, and `RECIPE_REGISTRY.bench` against `BENCH_REGISTRY`.
+- Docs: new `docs/agent-context/itemization.md` (three-step add-an-item procedure, worked crossbow example, formatter mapping, validator coverage). `docs/agent-context/inventory-loot.md` "Item Registries" section replaced with a pointer. `docs/PROJECT_STRUCTURE.md` bumped. `CLAUDE.md` docs map row added.
+- Plan archived: `docs/archive/itemization-plan.md`.
+
+**Decisions of note:**
+
+- **Two axes, not three.** Combined `weapon.kind` rename + `category` introduction so every item type uses `category` (top-level) + `type` (within-category sub-discriminator). Shields and materials drop their now-redundant `type` field. Three-axis taxonomies (`kind` + `category` + `type`) are confusing; two axes consistently applied are not.
+- **Explicit `sortKey` per item, not derived from stats.** Considered `damageDice.sides`-derived defaults for weapons; would not have reproduced the current stash order (dagger→sword→bow→longsword→greataxe). A "derive with override on every item" rule is the worst of both worlds. `sortKey` is an integer per item with group conventions (weapons 100s, armor 200s, etc.).
+- **Detail strings preserve column alignment.** Weapons left-pad the dice expression to 4 chars (`'1d6  piercing'`, `'1d12 slashing'`); armor uses fixed two-space separators before the type clause. Same convention used pre-refactor in `hub-data.ITEM_META`; the bag rows in `InventoryScene` (which previously used inconsistent spacing) now match.
+- **`note` is for hand-tuned hints only.** Property-derivable strings like "two-handed" still live in `note` on weapons (preserved from old `WEAPON_DISPLAY` table); the property-derived path can replace them in a future pass without touching display code.
+
+### Cosmetic changes the consolidation forced
+
+- Bow stash rows lose `"ranged"` suffix: `'1d6  piercing  ranged'` → `'1d6  piercing'`. The "ranged 80/320, two-handed" text still appears in the equipped-weapon note pane in InventoryScene.
+- Light/medium armor rows in InventoryScene's bag gain one space (`'AC 11+DEX light'` → `'AC 11+DEX  light'`), matching the hub-data convention.
+- Potion labels in the stash become formal: `'Bless Potion'` → `'Potion of Bless'`, `'Longstrider Pot'` → `'Potion of Longstrider'`, `'False Life Pot'` → `'Potion of False Life'`. Healing Potion unchanged. Combat-log messages already used the formal name; the stash now agrees.
+- Extraction Scroll now appears in the stash under Potions. Previously absent from `STASH_ORDER`/`STASH_SECTIONS`. Add `hideInStash: true` on its def to opt out.
+- Equipped-armor descriptions now correctly reflect `stealthDisadvantage` for chain mail, splint, plate, and half plate (all four had stealthDisadvantage: true on their def but the old `ARMOR_SLOT_DISPLAY` string omitted it). Half plate description format normalized to `'Half Plate — AC 15+DEX(cap 2)  (medium, stealth disadv.)'` — same convention as the other medium armors.
+
+---
+
 ## Session 6 — 2026-05-16
 
 ### Completed

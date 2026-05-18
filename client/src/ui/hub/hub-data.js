@@ -1,69 +1,41 @@
 // client/src/ui/hub/hub-data.js
-// Shared constants + tiny helpers for the hub panels. Panel-display metadata
-// (labels, sections, class blurbs) lives here so individual panel modules
-// don't each carry their own table.
+// Shared constants + tiny helpers for the hub panels.
+//
+// Per-item display metadata (ITEM_META, STASH_ORDER, STASH_SECTIONS) is
+// derived once from ITEM_REGISTRY at module load. Panels read these as
+// plain exports — shape is unchanged from the pre-refactor hand-maintained
+// tables. To change how an item displays, edit its def in
+// shared/data/items/* (or shared/data/weapons/*), not this file.
 
 import { POINT_COST } from '../../../../shared/data/constants.js';
+import { ITEM_REGISTRY } from '../../../../shared/data/items/index.js';
+import {
+  getItemDisplay, getStashOrder, getStashSections,
+} from '../../../../shared/logic/item-display.js';
 
 // Panel geometry — used by all hub panels for placement.
 export const LP = { x: 30,  y: 70, w: 760, h: 600 }; // left panel
 export const RP = { x: 810, y: 70, w: 440, h: 600 }; // right panel (raider config)
 
-// Per-item display metadata (label + one-line detail).
-export const ITEM_META = {
-  longsword:           { label: 'Longsword',        detail: '1d8  slashing'    },
-  shortsword:          { label: 'Shortsword',       detail: '1d6  piercing'    },
-  dagger:              { label: 'Dagger',           detail: '1d4  piercing'    },
-  handaxe:             { label: 'Handaxe',          detail: '1d6  slashing'    },
-  mace:                { label: 'Mace',             detail: '1d6  bludgeoning' },
-  greataxe:            { label: 'Greataxe',         detail: '1d12 slashing'    },
-  greatsword:          { label: 'Greatsword',       detail: '2d6  slashing'    },
-  shortbow:            { label: 'Shortbow',         detail: '1d6  piercing  ranged' },
-  longbow:             { label: 'Longbow',          detail: '1d8  piercing  ranged' },
-  padded:              { label: 'Padded',           detail: 'AC 11+DEX  light' },
-  leather:             { label: 'Leather',          detail: 'AC 11+DEX  light' },
-  studded_leather:     { label: 'Studded Leather',  detail: 'AC 12+DEX  light' },
-  hide:                { label: 'Hide',             detail: 'AC 12+DEX  med'   },
-  chain_shirt:         { label: 'Chain Shirt',      detail: 'AC 13+DEX  med'   },
-  scale_mail:          { label: 'Scale Mail',       detail: 'AC 14+DEX  med'   },
-  breastplate:         { label: 'Breastplate',      detail: 'AC 14+DEX  med'   },
-  ring_mail:           { label: 'Ring Mail',        detail: 'AC 14  heavy'     },
-  chain_mail:          { label: 'Chain Mail',       detail: 'AC 16  heavy'     },
-  splint:              { label: 'Splint',           detail: 'AC 17  heavy'     },
-  half_plate:          { label: 'Half Plate',       detail: 'AC 15+DEX  med'   },
-  plate:               { label: 'Plate',            detail: 'AC 18  heavy'     },
-  shield:              { label: 'Shield',           detail: '+2 AC'            },
-  healing_potion:      { label: 'Healing Potion',   detail: '2d4+2 HP'         },
-  bless_potion:        { label: 'Bless Potion',     detail: '+1d4 atk 60s'     },
-  longstrider_potion:  { label: 'Longstrider Pot',  detail: '+10ft spd 2m'     },
-  false_life_potion:   { label: 'False Life Pot',   detail: '1d4+4 tmp HP 2m'  },
-  skeleton_bone:       { label: 'Skeleton Bone',    detail: 'crafting material'},
-  wolf_pelt:           { label: 'Wolf Pelt',        detail: 'crafting material'},
-};
+// Per-item display metadata — derived from ITEM_REGISTRY. Shape matches the
+// historical hand-maintained table so panel code is unchanged.
+export const ITEM_META = Object.freeze(
+  Object.fromEntries(
+    Object.keys(ITEM_REGISTRY).map((id) => {
+      const d = getItemDisplay(id);
+      return [id, { label: d.label, detail: d.detail }];
+    }),
+  ),
+);
 
-export const STASH_ORDER = [
-  'longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword',
-  'shortbow','longbow',
-  'padded','leather','studded_leather',
-  'hide','chain_shirt','scale_mail','breastplate','half_plate',
-  'ring_mail','chain_mail','splint','plate',
-  'shield',
-  'healing_potion','longstrider_potion','false_life_potion','bless_potion',
-  'skeleton_bone','wolf_pelt',
-];
+// Flat sort order across all items. Used by StashPanel and RaiderPanel to
+// place rows in stable, designer-controlled positions.
+export const STASH_ORDER = Object.freeze(getStashOrder());
 
-const ARMOR_IDS = [
-  'padded','leather','studded_leather',
-  'hide','chain_shirt','scale_mail','breastplate','half_plate',
-  'ring_mail','chain_mail','splint','plate',
-];
-
-export const STASH_SECTIONS = [
-  { label: 'Weapons',        ids: new Set(['longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword','shortbow','longbow']) },
-  { label: 'Armor & Shield', ids: new Set([...ARMOR_IDS, 'shield']) },
-  { label: 'Potions',        ids: new Set(['healing_potion','bless_potion','longstrider_potion','false_life_potion']) },
-  { label: 'Materials',      ids: new Set(['skeleton_bone','wolf_pelt']) },
-];
+// Section groupings for the stash list. Shape: [{ label, ids: Set<string> }].
+// Sections share a label when their categories want to render together
+// (armor + shield → "Armor & Shield").
+export const STASH_SECTIONS = Object.freeze(getStashSections());
 
 // Stat labels for the point-buy UI, in display order.
 export const STAT_KEYS   = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
