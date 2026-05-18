@@ -153,48 +153,30 @@ export class InventoryScene extends Phaser.Scene {
       }
       ly += 6;
 
-      // Class features.
-
+      // Class features. Iterate taken classes in the order they were leveled,
+      // dedup'd. Multiclass build shows each class's level-1 features stacked.
       this.add.text(lx, ly, 'CLASS FEATURES', STYLE_SUBHEAD); ly += 15;
 
-      if (playerClass === 'barbarian') {
-        this._abilityKey  = 'rage';
-        this._abilityText = this.add.text(lx, ly, '💢 Rage  [2 uses]', STYLE_ITEM);
-        this._makeDraggable(this._abilityText, 'rage', lx, ly);
-        { let d = false;
-          this._abilityText.on('pointerdown', () => { d = false; });
-          this._abilityText.on('drag',        () => { d = true;  });
-          this._abilityText.on('pointerup',   () => {
-            if (!d) { this._selectedItemId = (this._selectedItemId === 'rage') ? null : 'rage'; this._updateSelection(); }
-            d = false;
-          });
-        }
-        ly += 13;
-        this.add.text(lx, ly, '+2 dmg, resist phys dmg (30s)  drag→hotbar', STYLE_NOTE); ly += 17;
-      } else if (playerClass === 'monk') {
-        this.add.text(lx, ly, 'Unarmored Defense', STYLE_BODY); ly += 13;
-        this.add.text(lx, ly, 'AC = 10 + DEX + WIS  (no armor or shield)', STYLE_NOTE); ly += 17;
-        this.add.text(lx, ly, 'Martial Arts', STYLE_BODY); ly += 13;
-        this.add.text(lx, ly, 'DEX attacks · d4 unarmed · bonus unarmed strike', STYLE_NOTE); ly += 17;
-        this._abilityKey  = null;
-        this._abilityText = null;
-      } else {
-        this.add.text(lx, ly, 'Fighting Style: Dueling', STYLE_BODY); ly += 13;
-        this.add.text(lx, ly, '+2 dmg (one-hand, no weapon offhand)', STYLE_NOTE); ly += 17;
-        this._abilityKey  = 'second_wind';
-        this._abilityText = this.add.text(lx, ly, '⚡ Second Wind  [READY]', STYLE_ITEM);
-        this._makeDraggable(this._abilityText, 'second_wind', lx, ly);
-        { let d = false;
-          this._abilityText.on('pointerdown', () => { d = false; });
-          this._abilityText.on('drag',        () => { d = true;  });
-          this._abilityText.on('pointerup',   () => {
-            if (!d) { this._selectedItemId = (this._selectedItemId === 'second_wind') ? null : 'second_wind'; this._updateSelection(); }
-            d = false;
-          });
-        }
-        ly += 13;
-        this.add.text(lx, ly, 'Heal 1d10+1 HP (1/short rest)  drag→hotbar', STYLE_NOTE); ly += 17;
+      // Collect taken classes from levelUpHistory; fall back to primary class
+      // if history isn't populated yet (defensive — onJoin always seeds it).
+      const takenClasses = [];
+      const seen = new Set();
+      for (const cid of (_ip?.levelUpHistory ?? [])) {
+        if (!seen.has(cid)) { seen.add(cid); takenClasses.push(cid); }
       }
+      if (takenClasses.length === 0) takenClasses.push(playerClass);
+
+      // Track every draggable ability widget so _refresh can update their
+      // [READY] / [N uses] / [RAGING] status strings.
+      this._abilityWidgets = [];
+
+      for (const cid of takenClasses) {
+        ly = this._renderClassFeaturesBlock(cid, lx, ly);
+      }
+      // Back-compat: keep first widget pointers around in case anything else
+      // still references the singular `_abilityKey` / `_abilityText`.
+      this._abilityKey  = this._abilityWidgets[0]?.key  ?? null;
+      this._abilityText = this._abilityWidgets[0]?.text ?? null;
 
       // Feat.
       this.add.text(lx, ly, 'FEAT: Alert  (variant human)', STYLE_FEAT); ly += 13;
@@ -493,18 +475,18 @@ export class InventoryScene extends Phaser.Scene {
       this._armorHint.setText('');
     }
 
-    // Class ability availability.
-    if (this._abilityText) {
-      const sel = this._selectedItemId === this._abilityKey;
-      if (this._abilityKey === 'second_wind') {
+    // Class ability availability — refresh every draggable widget every frame.
+    for (const { key, text } of (this._abilityWidgets ?? [])) {
+      const sel = this._selectedItemId === key;
+      if (key === 'second_wind') {
         const avail = player.secondWindAvailable;
-        this._abilityText.setText(`⚡ Second Wind  [${avail ? 'READY' : 'USED'}]`)
+        text.setText(`⚡ Second Wind  [${avail ? 'READY' : 'USED'}]`)
           .setColor(sel ? '#88ddff' : (avail ? '#ffdd88' : '#665533'));
-      } else if (this._abilityKey === 'rage') {
+      } else if (key === 'rage') {
         const raging = player.rageRemainingMs > 0;
         const uses   = player.rageUsesRemaining ?? 0;
         const status = raging ? 'RAGING' : uses > 0 ? `${uses} uses` : 'SPENT';
-        this._abilityText.setText(`💢 Rage  [${status}]`)
+        text.setText(`💢 Rage  [${status}]`)
           .setColor(sel ? '#88ddff' : (raging || uses > 0) ? '#ff8844' : '#665533');
       }
     }
@@ -1003,6 +985,57 @@ export class InventoryScene extends Phaser.Scene {
     const firstFree = hotbar.findIndex(b => b === '');
     if (firstFree === -1) return;
     sendAssignHotbar(itemId, firstFree);
+  }
+
+  /**
+   * Render one class's level-1 feature block at (lx, ly) and return the new y.
+   * Draggable widgets (Second Wind, Rage) are appended to `_abilityWidgets`
+   * so `_refresh` can update their availability text each frame.
+   */
+  _renderClassFeaturesBlock(classId, lx, ly) {
+    const def       = CLASS_REGISTRY[classId];
+    const className = def?.name ?? (classId[0].toUpperCase() + classId.slice(1));
+
+    this.add.text(lx, ly, className, { ...STYLE_SUBHEAD, color: '#aaccdd' }); ly += 14;
+
+    if (classId === 'barbarian') {
+      const txt = this.add.text(lx, ly, '💢 Rage  [2 uses]', STYLE_ITEM);
+      this._makeDraggable(txt, 'rage', lx, ly);
+      { let d = false;
+        txt.on('pointerdown', () => { d = false; });
+        txt.on('drag',        () => { d = true;  });
+        txt.on('pointerup',   () => {
+          if (!d) { this._selectedItemId = (this._selectedItemId === 'rage') ? null : 'rage'; this._updateSelection(); }
+          d = false;
+        });
+      }
+      this._abilityWidgets.push({ key: 'rage', text: txt });
+      ly += 13;
+      this.add.text(lx, ly, '+2 dmg, resist phys dmg (30s)  drag→hotbar', STYLE_NOTE); ly += 17;
+    } else if (classId === 'monk') {
+      this.add.text(lx, ly, 'Unarmored Defense', STYLE_BODY); ly += 13;
+      this.add.text(lx, ly, 'AC = 10 + DEX + WIS  (no armor or shield)', STYLE_NOTE); ly += 17;
+      this.add.text(lx, ly, 'Martial Arts', STYLE_BODY); ly += 13;
+      this.add.text(lx, ly, 'DEX attacks · d4 unarmed · bonus unarmed strike', STYLE_NOTE); ly += 17;
+    } else if (classId === 'fighter') {
+      this.add.text(lx, ly, 'Fighting Style: Dueling', STYLE_BODY); ly += 13;
+      this.add.text(lx, ly, '+2 dmg (one-hand, no weapon offhand)', STYLE_NOTE); ly += 17;
+      const txt = this.add.text(lx, ly, '⚡ Second Wind  [READY]', STYLE_ITEM);
+      this._makeDraggable(txt, 'second_wind', lx, ly);
+      { let d = false;
+        txt.on('pointerdown', () => { d = false; });
+        txt.on('drag',        () => { d = true;  });
+        txt.on('pointerup',   () => {
+          if (!d) { this._selectedItemId = (this._selectedItemId === 'second_wind') ? null : 'second_wind'; this._updateSelection(); }
+          d = false;
+        });
+      }
+      this._abilityWidgets.push({ key: 'second_wind', text: txt });
+      ly += 13;
+      this.add.text(lx, ly, 'Heal 1d10+1 HP (1/short rest)  drag→hotbar', STYLE_NOTE); ly += 17;
+    }
+
+    return ly;
   }
 
   /** Make any existing game object draggable (used for Second Wind ability text). */
