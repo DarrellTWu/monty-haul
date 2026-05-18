@@ -18,6 +18,8 @@ export const ITEM_META = {
   mace:                { label: 'Mace',             detail: '1d6  bludgeoning' },
   greataxe:            { label: 'Greataxe',         detail: '1d12 slashing'    },
   greatsword:          { label: 'Greatsword',       detail: '2d6  slashing'    },
+  shortbow:            { label: 'Shortbow',         detail: '1d6  piercing  ranged' },
+  longbow:             { label: 'Longbow',          detail: '1d8  piercing  ranged' },
   padded:              { label: 'Padded',           detail: 'AC 11+DEX  light' },
   leather:             { label: 'Leather',          detail: 'AC 11+DEX  light' },
   studded_leather:     { label: 'Studded Leather',  detail: 'AC 12+DEX  light' },
@@ -41,6 +43,7 @@ export const ITEM_META = {
 
 export const STASH_ORDER = [
   'longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword',
+  'shortbow','longbow',
   'padded','leather','studded_leather',
   'hide','chain_shirt','scale_mail','breastplate','half_plate',
   'ring_mail','chain_mail','splint','plate',
@@ -56,7 +59,7 @@ const ARMOR_IDS = [
 ];
 
 export const STASH_SECTIONS = [
-  { label: 'Weapons',        ids: new Set(['longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword']) },
+  { label: 'Weapons',        ids: new Set(['longsword','shortsword','dagger','handaxe','mace','greataxe','greatsword','shortbow','longbow']) },
   { label: 'Armor & Shield', ids: new Set([...ARMOR_IDS, 'shield']) },
   { label: 'Potions',        ids: new Set(['healing_potion','bless_potion','longstrider_potion','false_life_potion']) },
   { label: 'Materials',      ids: new Set(['skeleton_bone','wolf_pelt']) },

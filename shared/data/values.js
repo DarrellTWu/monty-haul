@@ -13,6 +13,8 @@ export const ITEM_GOLD_VALUE = {
   longsword:       15,
   greataxe:        30,
   greatsword:      50,
+  shortbow:        25,
+  longbow:         50,
 
   // Armor (SRD PHB equipment table)
   padded:          5,

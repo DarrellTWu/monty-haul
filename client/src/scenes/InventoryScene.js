@@ -50,6 +50,8 @@ const WEAPON_DISPLAY = {
   greatsword: { label: 'Greatsword', detail: '2d6  slashing',    note: 'two-handed' },
   handaxe:    { label: 'Handaxe',    detail: '1d6  slashing',    note: 'light, thrown' },
   mace:       { label: 'Mace',       detail: '1d6  bludgeoning', note: 'effective vs. skeletons' },
+  shortbow:   { label: 'Shortbow',   detail: '1d6  piercing',    note: 'ranged 80/320, two-handed' },
+  longbow:    { label: 'Longbow',    detail: '1d8  piercing',    note: 'ranged 150/600, two-handed' },
   unarmed:    { label: 'Unarmed',    detail: '1d4  bludgeoning', note: '' },
 };
 
