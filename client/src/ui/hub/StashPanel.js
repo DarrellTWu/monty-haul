@@ -5,6 +5,7 @@
 import { getStash, stashToRaider, sellItem } from '../../store/stash.js';
 import { sellPrice } from '../../../../shared/data/values.js';
 import { LP, ITEM_META, STASH_ORDER, STASH_SECTIONS } from './hub-data.js';
+import { flashItemLoss, flashGoldDelta } from './feedback.js';
 
 export function renderStashPanel(scene) {
   const stash = getStash();
@@ -53,10 +54,16 @@ export function renderStashPanel(scene) {
         }).setOrigin(1, 0).setInteractive());
         sellBtn.on('pointerover', () => sellBtn.setColor('#ffffff'));
         sellBtn.on('pointerout',  () => sellBtn.setColor('#88ccff'));
+        const fxX = LP.x + LP.w - 20, fxY = y;
         sellBtn.on('pointerdown', () => {
           sellItem(id).then(r => {
-            if (r.ok) scene._onSold();
-            else      console.warn('[HubScene] sellItem failed:', r.error);
+            if (r.ok) {
+              flashItemLoss(scene, fxX, fxY, id, 1);
+              flashGoldDelta(scene, price);
+              scene._onSold();
+            } else {
+              console.warn('[HubScene] sellItem failed:', r.error);
+            }
           });
         });
       }

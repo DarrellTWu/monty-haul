@@ -5,6 +5,7 @@
 import { getHubGold, buyItem } from '../../store/stash.js';
 import { VENDOR_CATALOG } from '../../../../shared/data/shop.js';
 import { LP, ITEM_META } from './hub-data.js';
+import { flashItemGain, flashGoldDelta } from './feedback.js';
 
 export function renderShopPanel(scene) {
   const x = LP.x + 20;
@@ -67,10 +68,16 @@ export function renderShopPanel(scene) {
       buyBtn.setInteractive();
       buyBtn.on('pointerover', () => buyBtn.setColor('#ffffff'));
       buyBtn.on('pointerout',  () => buyBtn.setColor('#88ccff'));
+      const fxX = buyX, fxY = y;
       buyBtn.on('pointerdown', () => {
         buyItem(id).then(r => {
-          if (r.ok) scene._onPurchase();
-          else      console.warn('[HubScene] buyItem failed:', r.error);
+          if (r.ok) {
+            flashItemGain(scene, fxX, fxY, id, 1);
+            flashGoldDelta(scene, -price);
+            scene._onPurchase();
+          } else {
+            console.warn('[HubScene] buyItem failed:', r.error);
+          }
         });
       });
     }

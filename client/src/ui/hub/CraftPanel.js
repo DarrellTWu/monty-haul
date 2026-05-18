@@ -6,6 +6,7 @@ import { getStash, craftRecipe } from '../../store/stash.js';
 import { BENCH_REGISTRY } from '../../../../shared/data/crafting/benches.js';
 import { recipesForBench } from '../../../../shared/data/crafting/recipes.js';
 import { LP, ITEM_META } from './hub-data.js';
+import { flashItemGain } from './feedback.js';
 
 export function renderCraftPanel(scene) {
   const x = LP.x + 20;
@@ -103,10 +104,15 @@ export function renderCraftPanel(scene) {
       craftBtn.setInteractive();
       craftBtn.on('pointerover', () => craftBtn.setColor('#ffffff'));
       craftBtn.on('pointerout',  () => craftBtn.setColor('#88ccff'));
+      const fxX = buyX, fxY = y;
       craftBtn.on('pointerdown', () => {
         craftRecipe(recipe.id).then(r => {
-          if (r.ok) scene._onCraft();
-          else      console.warn('[HubScene] craftRecipe failed:', r.error);
+          if (r.ok) {
+            flashItemGain(scene, fxX, fxY, recipe.output.id, recipe.output.qty);
+            scene._onCraft();
+          } else {
+            console.warn('[HubScene] craftRecipe failed:', r.error);
+          }
         });
       });
     }
