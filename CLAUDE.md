@@ -164,3 +164,4 @@ Treat `design-only` and `archived` docs as context, not binding spec — current
 - Pure functions in `shared/logic/` — no side effects, no framework deps
 - Randomness injected via optional rng parameter for deterministic testing
 - Named constants for ALL numeric values — no bare literals in logic files
+- Phaser scenes are singletons: `scene.stop()` destroys gfx but the JS instance persists, so instance fields populated in `create()` outlive the session. Any field that's set conditionally (loot-mode-only widgets, panel-tab-only rows) must be reset on `shutdown` or unconditionally re-initialized at the top of the next `create()` — otherwise `_refresh` touches destroyed gfx and Phaser throws inside `updateText`/`drawImage`.

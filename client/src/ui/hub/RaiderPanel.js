@@ -6,10 +6,10 @@
 import { getRaiderPack, raiderToStash, dumpRaiderPackToStash } from '../../store/stash.js';
 import { validateAbilityScores } from '../../../../shared/logic/character.js';
 import { RP, ITEM_META, STASH_ORDER, CLASS_DISPLAY } from './hub-data.js';
+import { ScrollViewport } from '../ScrollViewport.js';
 
 export function renderRaiderPanel(scene) {
-  for (const obj of scene._rightObjs) obj.destroy();
-  scene._rightObjs = [];
+  scene._tearDownRight();
 
   const x = RP.x + 20;
   let y = RP.y + 16;
@@ -52,11 +52,30 @@ export function renderRaiderPanel(scene) {
   }).setOrigin(1, 0));
   y += 15;
 
+  // Pinned UI below the pack list: dump button and Enter Dungeon button. The
+  // viewport occupies the space between `y` (current cursor) and the dump
+  // button — pack rows scroll, dump and Enter Dungeon stay fixed and reachable
+  // even when the pack overflows.
+  const active     = !!scene._selectedClass;
+  const enterBtnY  = RP.y + RP.h - 36;
+  const dumpBtnY   = enterBtnY - 28;
+  const vpTop      = y;
+  const vpBottom   = dumpBtnY - 6;
+  const vp = new ScrollViewport(scene, {
+    x: RP.x + 8,
+    y: vpTop,
+    w: RP.w - 16,
+    h: vpBottom - vpTop,
+    step: 16,
+  });
+  scene._rightVp = vp;
+  scene._r(vp);
+
   const pack = getRaiderPack();
   if (pack.length === 0) {
-    scene._r(scene.add.text(x + 8, y, '(empty — default class gear on entry)', {
+    vp.track(scene._r(scene.add.text(x + 8, y, '(empty — default class gear on entry)', {
       fontSize: '11px', color: '#334455', fontFamily: 'monospace',
-    }));
+    })));
   } else {
     const sorted = [...pack].sort((a, b) => {
       const ai = STASH_ORDER.indexOf(a.id), bi = STASH_ORDER.indexOf(b.id);
@@ -64,10 +83,10 @@ export function renderRaiderPanel(scene) {
     });
     for (const { id, qty } of sorted) {
       const meta = ITEM_META[id] ?? { label: id, detail: '' };
-      const row  = scene._r(scene.add.text(x + 8, y,
+      const row  = vp.track(scene._r(scene.add.text(x + 8, y,
         `${meta.label.padEnd(16)} ${meta.detail}${qty > 1 ? `  ×${qty}` : ''}`,
         { fontSize: '12px', color: '#88ccff', fontFamily: 'monospace' },
-      ).setInteractive());
+      ).setInteractive()));
       row.on('pointerover',  () => row.setColor('#ffffff'));
       row.on('pointerout',   () => row.setColor('#88ccff'));
       row.on('pointerdown',  () => {
@@ -79,8 +98,7 @@ export function renderRaiderPanel(scene) {
       y += 16;
     }
 
-    y += 4;
-    const dumpBtn = scene._r(scene.add.text(x + 8, y, '[ Dump All to Stash ]', {
+    const dumpBtn = scene._r(scene.add.text(x + 8, dumpBtnY, '[ Dump All to Stash ]', {
       fontSize: '11px', color: '#aabbdd', fontFamily: 'monospace',
     }).setInteractive());
     dumpBtn.on('pointerover', () => dumpBtn.setColor('#ffffff'));
@@ -93,8 +111,7 @@ export function renderRaiderPanel(scene) {
     });
   }
 
-  const active = !!scene._selectedClass;
-  const btnY   = RP.y + RP.h - 36;
+  const btnY = enterBtnY;
   const enterBtn = scene._r(scene.add.text(RP.x + RP.w / 2, btnY, '[ Enter Dungeon ]', {
     fontSize: '18px', color: active ? '#ffcc44' : '#334455', fontFamily: 'monospace',
   }).setOrigin(0.5).setInteractive());

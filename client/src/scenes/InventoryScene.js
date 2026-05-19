@@ -23,6 +23,7 @@ import { getProficiencyBonus } from '../../../shared/logic/combat.js';
 import { getItem } from '../../../shared/data/items/index.js';
 import { ARMOR_REGISTRY } from '../../../shared/data/armor/armor.js';
 import { getItemDisplay, getArmorSlotDescription } from '../../../shared/logic/item-display.js';
+import { ScrollViewport } from '../ui/ScrollViewport.js';
 
 // Panel geometry (expanded height to fit saving throws + class features + hotbar).
 const PANEL_X   = 190;
@@ -111,37 +112,39 @@ export class InventoryScene extends Phaser.Scene {
     // becomes the loot panel — _refresh guards every char-sheet field for null.
     const lx = PANEL_X + 20;
 
-    // Left-column scroll setup. Every left-column gfx is registered via
-    // `_trackLeft(gfx)` which records its `y` as `baseY`, applies the shared
-    // mask, and lets `_scrollLeftCol` reposition all of them on wheel scroll.
+    // Left-column scroll viewport. Every left-column gfx is registered via
+    // `_leftVp.track(gfx)`, which records its `y` as baseY, applies the
+    // shared mask, and lets the viewport reposition them on wheel scroll.
     // Loot mode doesn't scroll — the loot panel has its own mask path.
-    this._leftCol               = [];
-    this._leftScrollOffset      = 0;
-    this._leftViewportTop       = PANEL_Y + 12;
-    this._leftViewportBottom    = PANEL_Y + PANEL_H - 12;
-    this._leftViewportH         = this._leftViewportBottom - this._leftViewportTop;
-    const leftW                 = DIVIDER_X - PANEL_X - 4;
-    if (!this._lootMode) {
-      this._leftMaskGfx = this.make.graphics();
-      this._leftMaskGfx.fillRect(PANEL_X + 2, this._leftViewportTop, leftW, this._leftViewportH);
-      this._leftMask    = this._leftMaskGfx.createGeometryMask();
-    } else {
-      this._leftMask = null;
-    }
+    const leftViewportTop = PANEL_Y + 12;
+    const leftViewportH   = PANEL_H - 24;
+    const leftW           = DIVIDER_X - PANEL_X - 4;
+    this._leftVp = this._lootMode ? null : new ScrollViewport(this, {
+      x: PANEL_X + 2,
+      y: leftViewportTop,
+      w: leftW,
+      h: leftViewportH,
+      step: 16, // one ability-score row's worth — feels proportionate.
+    });
 
     if (this._lootMode) {
       this._nameText = null; this._classDescText = null;
       this._hpText = null; this._acText = null; this._goldText = null;
       this._abilityKey = null; this._abilityText = null;
+      // Phaser scenes are singletons — _abilityWidgets from a prior non-loot
+      // session still points at destroyed Text objects. _refresh would call
+      // .setText().setColor() on them and Phaser nulls out its frame canvas
+      // on destroy, throwing in updateText. Reset to empty for loot mode.
+      this._abilityWidgets = [];
       this._buildLootPanel(lx, PANEL_Y + 18);
     } else {
       let ly = PANEL_Y + 18;
 
-      this._trackLeft(this.add.text(lx, ly, 'CHARACTER', STYLE_SUBHEAD)); ly += 20;
-      this._nameText      = this._trackLeft(this.add.text(lx, ly, 'Fighter', STYLE_HEADER)); ly += 24;
-      this._classDescText = this._trackLeft(this.add.text(lx, ly, 'Level 1  Human Fighter', STYLE_BODY)); ly += 18;
-      this._hpText        = this._trackLeft(this.add.text(lx, ly, 'HP  —', STYLE_BODY)); ly += 16;
-      this._acText        = this._trackLeft(this.add.text(lx, ly, 'AC  —', STYLE_BODY)); ly += 16;
+      this._leftVp.track(this.add.text(lx, ly, 'CHARACTER', STYLE_SUBHEAD)); ly += 20;
+      this._nameText      = this._leftVp.track(this.add.text(lx, ly, 'Fighter', STYLE_HEADER)); ly += 24;
+      this._classDescText = this._leftVp.track(this.add.text(lx, ly, 'Level 1  Human Fighter', STYLE_BODY)); ly += 18;
+      this._hpText        = this._leftVp.track(this.add.text(lx, ly, 'HP  —', STYLE_BODY)); ly += 16;
+      this._acText        = this._leftVp.track(this.add.text(lx, ly, 'AC  —', STYLE_BODY)); ly += 16;
 
       // Read live player state once for ability scores, saves, and class features.
       const _ir = getRoom();
@@ -152,10 +155,10 @@ export class InventoryScene extends Phaser.Scene {
       const _profBonus  = getProficiencyBonus(_ip?.level ?? 1);
 
       // Ability scores — read from live player state.
-      this._trackLeft(this.add.text(lx, ly, 'ABILITY SCORES', STYLE_SUBHEAD)); ly += 16;
+      this._leftVp.track(this.add.text(lx, ly, 'ABILITY SCORES', STYLE_SUBHEAD)); ly += 16;
       for (const stat of ['str', 'dex', 'con', 'int', 'wis', 'cha']) {
         const score = _ip?.[stat] ?? 10;
-        this._trackLeft(this.add.text(lx, ly,
+        this._leftVp.track(this.add.text(lx, ly,
           `${stat.toUpperCase().padEnd(4)}  ${String(score).padStart(2)}   (${modStr(score)})`,
           STYLE_BODY,
         ));
@@ -164,16 +167,16 @@ export class InventoryScene extends Phaser.Scene {
       ly += 4;
 
       // Saving throws — proficiency from class definition, bonus from level.
-      this._trackLeft(this.add.text(lx, ly, 'SAVING THROWS  (● proficient)', STYLE_SUBHEAD)); ly += 15;
+      this._leftVp.track(this.add.text(lx, ly, 'SAVING THROWS  (● proficient)', STYLE_SUBHEAD)); ly += 15;
       for (const stat of ['str', 'dex', 'con', 'int', 'wis', 'cha']) {
-        this._trackLeft(this.add.text(lx, ly, saveBonus(stat, _ip ?? {}, _saveProfs, _profBonus), STYLE_BODY));
+        this._leftVp.track(this.add.text(lx, ly, saveBonus(stat, _ip ?? {}, _saveProfs, _profBonus), STYLE_BODY));
         ly += 14;
       }
       ly += 6;
 
       // Class features. Iterate taken classes in the order they were leveled,
       // dedup'd. Multiclass build shows each class's level-1 features stacked.
-      this._trackLeft(this.add.text(lx, ly, 'CLASS FEATURES', STYLE_SUBHEAD)); ly += 15;
+      this._leftVp.track(this.add.text(lx, ly, 'CLASS FEATURES', STYLE_SUBHEAD)); ly += 15;
 
       // Collect taken classes from levelUpHistory; fall back to primary class
       // if history isn't populated yet (defensive — onJoin always seeds it).
@@ -197,11 +200,11 @@ export class InventoryScene extends Phaser.Scene {
       this._abilityText = this._abilityWidgets[0]?.text ?? null;
 
       // Feat.
-      this._trackLeft(this.add.text(lx, ly, 'FEAT: Alert  (variant human)', STYLE_FEAT)); ly += 13;
-      this._trackLeft(this.add.text(lx, ly, '+5 initiative, cannot be surprised', STYLE_NOTE));
+      this._leftVp.track(this.add.text(lx, ly, 'FEAT: Alert  (variant human)', STYLE_FEAT)); ly += 13;
+      this._leftVp.track(this.add.text(lx, ly, '+5 initiative, cannot be surprised', STYLE_NOTE));
 
-      // Total content height (measured from viewport top) — used to clamp scroll.
-      this._leftContentH = ly - this._leftViewportTop + 18;
+      // ScrollViewport computes content height lazily from tracked baseYs; no
+      // explicit setContentHeight needed here.
     }
 
     // ── Right column ──────────────────────────────────────────────────────────
@@ -333,28 +336,27 @@ export class InventoryScene extends Phaser.Scene {
     this.add.text(rx, hotbarY - 16, 'HOTBAR  (drag abilities or items here, press 1-0)', STYLE_SUBHEAD);
     this._hotbarSlots = this._buildHotbar(rx, hotbarY);
 
-    // Bag scroll setup — defines the clipping viewport, shared mask, overflow hint,
-    // and mouse-wheel listener.  All downstream bag methods read these instance fields.
-    this._bagScrollOffset   = 0;
-    this._bagViewportBottom = hotbarY - 28;
-    this._bagViewportH      = this._bagViewportBottom - this._bagStartY;
-    const bagRx = DIVIDER_X + 20;
-    const bagW  = PANEL_X + PANEL_W - bagRx - 4;
-    this._bagMaskGfx = this.make.graphics();
-    this._bagMaskGfx.fillRect(bagRx, this._bagStartY, bagW, this._bagViewportH);
-    this._bagMask = this._bagMaskGfx.createGeometryMask();
-    this._bagOverflowText = this.add.text(
-      bagRx, this._bagViewportBottom + 2, '', { ...STYLE_HINT, color: '#445566' },
-    );
+    // Bag scroll viewport. Step = BAG_ITEM_H so each wheel notch advances by
+    // exactly one row. Content height is set explicitly on each rebuild from
+    // grouped row count (cheap and exact). Overflow text under the viewport
+    // shows "↓ N more (scroll)" when hidden rows exist.
+    const bagRx        = DIVIDER_X + 20;
+    const bagW         = PANEL_X + PANEL_W - bagRx - 4;
+    const bagViewportH = (hotbarY - 28) - this._bagStartY;
+    this._bagVp = new ScrollViewport(this, {
+      x: bagRx,
+      y: this._bagStartY,
+      w: bagW,
+      h: bagViewportH,
+      step: BAG_ITEM_H,
+    });
+    this._bagVp.setOverflowText(this.add.text(
+      bagRx, this._bagStartY + bagViewportH + 2, '', { ...STYLE_HINT, color: '#445566' },
+    ));
+
     this.input.on('wheel', (pointer, _gameObjects, _dx, deltaY) => {
-      const inBag = pointer.x >= bagRx && pointer.x <= bagRx + bagW
-                 && pointer.y >= this._bagStartY && pointer.y <= this._bagViewportBottom;
-      if (inBag) { this._scrollBag(Math.sign(deltaY) * BAG_ITEM_H); return; }
-      const inLeft = !this._lootMode
-                  && pointer.x >= PANEL_X && pointer.x <= DIVIDER_X
-                  && pointer.y >= this._leftViewportTop && pointer.y <= this._leftViewportBottom;
-      // Step ≈ one ability-score row so a scroll feels proportionate to the column.
-      if (inLeft) this._scrollLeftCol(Math.sign(deltaY) * 16);
+      if (this._bagVp  && this._bagVp.contains(pointer))  { this._bagVp.handleWheel(deltaY); return; }
+      if (this._leftVp && this._leftVp.contains(pointer)) this._leftVp.handleWheel(deltaY);
     });
 
     // Global drop handler (weapon/offhand slots + hotbar).
@@ -382,6 +384,23 @@ export class InventoryScene extends Phaser.Scene {
     ).setOrigin(1, 1);
 
     this.input.keyboard.on('keydown-I', () => { this.scene.stop(); });
+
+    // Tear down ScrollViewport mask gfx on shutdown — the mask graphic isn't
+    // on the display list so Phaser won't clean it up for us. Also drop any
+    // instance fields that hold references to gfx Phaser will destroy on
+    // shutdown: Phaser scenes are singletons, so the JS instance lives on
+    // and `_refresh` on the next launch would touch stale, destroyed gfx
+    // (Phaser throws inside `updateText` / `drawImage` when the frame canvas
+    // has been nulled). At-risk fields are those populated only by one of
+    // create()'s conditional branches — see CLAUDE.md "Code Style".
+    this.events.once('shutdown', () => {
+      if (this._leftVp) { this._leftVp.destroy(); this._leftVp = null; }
+      if (this._bagVp)  { this._bagVp.destroy();  this._bagVp  = null; }
+      this._abilityWidgets = [];
+      this._bagBtns        = [];
+      this._dropBtns       = [];
+      this._lootRowGfx     = [];
+    });
 
     // ── Loot-mode lifecycle ──────────────────────────────────────────────────
     // Scene owns the open/close handshake. Caller just sends `lootSource` on
@@ -582,6 +601,9 @@ export class InventoryScene extends Phaser.Scene {
     for (const dropBtn of this._dropBtns) dropBtn.destroy();
     this._bagBtns  = [];
     this._dropBtns = [];
+    // clear() drops tracked refs but preserves scrollOffset, so a rebuild
+    // triggered by equip/unequip keeps the user where they were scrolled to.
+    this._bagVp.clear();
 
     // Group inventory by id (preserving first-seen order) so duplicate items
     // collapse into a single row showing "× N". Server inventory stays flat —
@@ -598,31 +620,36 @@ export class InventoryScene extends Phaser.Scene {
       }
     }
 
-    const maxScroll = Math.max(0, grouped.length * BAG_ITEM_H - this._bagViewportH);
-    this._bagScrollOffset = Math.min(Math.max(this._bagScrollOffset, 0), maxScroll);
+    // Tell the viewport the exact content height so overflow + clamp work
+    // before any track() walk would produce a useful answer.
+    this._bagVp.setContentHeight(grouped.length * BAG_ITEM_H);
 
     if (this._selectedItemId && !seenAt.has(this._selectedItemId)) {
       this._selectedItemId = null;
     }
 
-    const rx = DIVIDER_X + 20;
+    const rx     = DIVIDER_X + 20;
+    const offset = this._bagVp.scrollOffset;
 
     for (let i = 0; i < grouped.length; i++) {
       const { id: itemId, qty } = grouped[i];
       const logicalY = i * BAG_ITEM_H;
-      const actualY  = this._bagStartY + logicalY - this._bagScrollOffset;
+      const baseY    = this._bagStartY + logicalY;
+      const actualY  = baseY - offset;
       const baseLabel = this._itemLabel(itemId);
       const label    = qty > 1 ? `${baseLabel}  × ${qty}` : baseLabel;
       const blocked  = this._isBlocked(itemId, player);
 
       const btn = this._makeItemButton(rx, actualY, label, itemId, logicalY);
-      btn.setVisible(!blocked).setMask(this._bagMask);
+      btn.setVisible(!blocked);
+      this._bagVp.track(btn, baseY);
 
       const blockedText = this.add.text(rx, actualY, `${label}  ✗`, {
         ...STYLE_BLOCKED,
         backgroundColor: '#0d0d14',
         padding: { x: 8, y: 4 },
-      }).setVisible(blocked).setMask(this._bagMask);
+      }).setVisible(blocked);
+      this._bagVp.track(blockedText, baseY);
 
       this._bagBtns.push({ id: itemId, btn, blockedText, logicalY });
 
@@ -637,16 +664,16 @@ export class InventoryScene extends Phaser.Scene {
           padding: { x: 6, y: 4 },
         })
           .setOrigin(1, 0)
-          .setInteractive({ useHandCursor: true })
-          .setMask(this._bagMask);
+          .setInteractive({ useHandCursor: true });
         dropBtn.setData({ logicalY });
         dropBtn.on('pointerdown', () => this._onDropClick(itemId));
+        this._bagVp.track(dropBtn, baseY);
         this._dropBtns.push(dropBtn);
       }
     }
 
     this._updateSelection();
-    this._updateOverflow(grouped.length);
+    this._bagVp.refresh();
   }
 
   /** Loot-mode click handler — drop one copy of `itemId` into the open container. */
@@ -945,15 +972,16 @@ export class InventoryScene extends Phaser.Scene {
 
     btn.on('drag', (ptr, dragX, dragY) => {
       isDragging = true;
-      btn.clearMask();
+      this._bagVp.lockDrag(btn);
       btn.setPosition(dragX, dragY).setDepth(10);
     });
 
     btn.on('dragend', () => {
-      // Snap back to wherever the item currently sits after any scroll that happened
-      // during the drag.
-      btn.setMask(this._bagMask);
-      btn.setPosition(x, this._bagStartY + logicalY - this._bagScrollOffset).setDepth(0);
+      // Snap back to wherever the row currently sits after any scroll that
+      // happened during the drag. lockDrag is released before reposition so
+      // the mask is reapplied.
+      this._bagVp.unlockDrag(btn);
+      btn.setPosition(x, this._bagStartY + logicalY - this._bagVp.scrollOffset).setDepth(0);
       // dragend fires before drop; isDragging stays true so pointerup skips click logic.
     });
 
@@ -1022,10 +1050,10 @@ export class InventoryScene extends Phaser.Scene {
     const def       = CLASS_REGISTRY[classId];
     const className = def?.name ?? (classId[0].toUpperCase() + classId.slice(1));
 
-    this._trackLeft(this.add.text(lx, ly, className, { ...STYLE_SUBHEAD, color: '#aaccdd' })); ly += 14;
+    this._leftVp.track(this.add.text(lx, ly, className, { ...STYLE_SUBHEAD, color: '#aaccdd' })); ly += 14;
 
     if (classId === 'barbarian') {
-      const txt = this._trackLeft(this.add.text(lx, ly, '💢 Rage  [2 uses]', STYLE_ITEM));
+      const txt = this._leftVp.track(this.add.text(lx, ly, '💢 Rage  [2 uses]', STYLE_ITEM));
       this._makeDraggable(txt, 'rage', lx, ly);
       { let d = false;
         txt.on('pointerdown', () => { d = false; });
@@ -1037,16 +1065,16 @@ export class InventoryScene extends Phaser.Scene {
       }
       this._abilityWidgets.push({ key: 'rage', text: txt });
       ly += 13;
-      this._trackLeft(this.add.text(lx, ly, '+2 dmg, resist phys dmg (30s)  drag→hotbar', STYLE_NOTE)); ly += 17;
+      this._leftVp.track(this.add.text(lx, ly, '+2 dmg, resist phys dmg (30s)  drag→hotbar', STYLE_NOTE)); ly += 17;
     } else if (classId === 'monk') {
-      this._trackLeft(this.add.text(lx, ly, 'Unarmored Defense', STYLE_BODY)); ly += 13;
-      this._trackLeft(this.add.text(lx, ly, 'AC = 10 + DEX + WIS  (no armor or shield)', STYLE_NOTE)); ly += 17;
-      this._trackLeft(this.add.text(lx, ly, 'Martial Arts', STYLE_BODY)); ly += 13;
-      this._trackLeft(this.add.text(lx, ly, 'DEX attacks · d4 unarmed · bonus unarmed strike', STYLE_NOTE)); ly += 17;
+      this._leftVp.track(this.add.text(lx, ly, 'Unarmored Defense', STYLE_BODY)); ly += 13;
+      this._leftVp.track(this.add.text(lx, ly, 'AC = 10 + DEX + WIS  (no armor or shield)', STYLE_NOTE)); ly += 17;
+      this._leftVp.track(this.add.text(lx, ly, 'Martial Arts', STYLE_BODY)); ly += 13;
+      this._leftVp.track(this.add.text(lx, ly, 'DEX attacks · d4 unarmed · bonus unarmed strike', STYLE_NOTE)); ly += 17;
     } else if (classId === 'fighter') {
-      this._trackLeft(this.add.text(lx, ly, 'Fighting Style: Dueling', STYLE_BODY)); ly += 13;
-      this._trackLeft(this.add.text(lx, ly, '+2 dmg (one-hand, no weapon offhand)', STYLE_NOTE)); ly += 17;
-      const txt = this._trackLeft(this.add.text(lx, ly, '⚡ Second Wind  [READY]', STYLE_ITEM));
+      this._leftVp.track(this.add.text(lx, ly, 'Fighting Style: Dueling', STYLE_BODY)); ly += 13;
+      this._leftVp.track(this.add.text(lx, ly, '+2 dmg (one-hand, no weapon offhand)', STYLE_NOTE)); ly += 17;
+      const txt = this._leftVp.track(this.add.text(lx, ly, '⚡ Second Wind  [READY]', STYLE_ITEM));
       this._makeDraggable(txt, 'second_wind', lx, ly);
       { let d = false;
         txt.on('pointerdown', () => { d = false; });
@@ -1058,76 +1086,35 @@ export class InventoryScene extends Phaser.Scene {
       }
       this._abilityWidgets.push({ key: 'second_wind', text: txt });
       ly += 13;
-      this._trackLeft(this.add.text(lx, ly, 'Heal 1d10+1 HP (1/short rest)  drag→hotbar', STYLE_NOTE)); ly += 17;
+      this._leftVp.track(this.add.text(lx, ly, 'Heal 1d10+1 HP (1/short rest)  drag→hotbar', STYLE_NOTE)); ly += 17;
     }
 
     return ly;
   }
 
   /**
-   * Register a left-column game object for scroll + masking. baseY captures
-   * the object's authored Y; `_scrollLeftCol` repositions it via
-   * `gfx.y = baseY - _leftScrollOffset`. Mask is shared across the column.
-   */
-  _trackLeft(gfx) {
-    this._leftCol.push({ gfx, baseY: gfx.y });
-    if (this._leftMask) gfx.setMask(this._leftMask);
-    return gfx;
-  }
-
-  _scrollLeftCol(delta) {
-    const maxScroll = Math.max(0, this._leftContentH - this._leftViewportH);
-    this._leftScrollOffset = Math.max(0, Math.min(this._leftScrollOffset + delta, maxScroll));
-    for (const { gfx, baseY } of this._leftCol) {
-      gfx.y = baseY - this._leftScrollOffset;
-    }
-  }
-
-  /**
    * Make any existing game object draggable (used for Second Wind / Rage
-   * ability text). `originY` here is the *unscrolled* base Y; dragend snaps
-   * back to `originY - currentLeftScroll` so the ability text returns to
-   * wherever it visually sits after a scroll.
+   * ability text). `originY` is the *unscrolled* base Y; dragend snaps back
+   * to `originY - currentLeftScroll` so the ability returns to wherever it
+   * visually sits after a scroll. lockDrag/unlockDrag carve the gfx out of
+   * the viewport's reposition pass while dragging.
    */
   _makeDraggable(obj, itemId, originX, originY) {
     obj.setData({ itemId, originX, originY });
     obj.setInteractive({ useHandCursor: true, draggable: true });
     this.input.setDraggable(obj);
     obj.on('drag', (ptr, dx, dy) => {
-      // Lift the left-col mask while dragging so the ability text stays
-      // visible when dragged outside the column viewport.
-      obj.clearMask();
+      // lockDrag clears the mask and skips reposition so a wheel-mid-drag
+      // won't yank the ability text back into the column.
+      if (this._leftVp) this._leftVp.lockDrag(obj);
+      else              obj.clearMask();
       obj.setPosition(dx, dy).setDepth(10);
     });
     obj.on('dragend', () => {
-      const scrolled = originY - (this._leftScrollOffset ?? 0);
+      const scrolled = originY - (this._leftVp?.scrollOffset ?? 0);
       obj.setPosition(originX, scrolled).setDepth(0);
-      if (this._leftMask) obj.setMask(this._leftMask);
+      if (this._leftVp) this._leftVp.unlockDrag(obj);
     });
-  }
-
-  _scrollBag(delta) {
-    const maxScroll = Math.max(0, this._bagBtns.length * BAG_ITEM_H - this._bagViewportH);
-    this._bagScrollOffset = Math.max(0, Math.min(this._bagScrollOffset + delta, maxScroll));
-    for (const { btn, blockedText, logicalY } of this._bagBtns) {
-      const y = this._bagStartY + logicalY - this._bagScrollOffset;
-      btn.setY(y);
-      blockedText.setY(y);
-    }
-    for (const dropBtn of this._dropBtns) {
-      dropBtn.setY(this._bagStartY + dropBtn.getData('logicalY') - this._bagScrollOffset);
-    }
-    this._updateOverflow(this._bagBtns.length);
-  }
-
-  _updateOverflow(itemCount) {
-    const hiddenBelow = itemCount * BAG_ITEM_H - this._bagViewportH - this._bagScrollOffset;
-    if (hiddenBelow > 0) {
-      const moreCount = Math.ceil(hiddenBelow / BAG_ITEM_H);
-      this._bagOverflowText.setText(`↓ ${moreCount} more  (scroll)`).setVisible(true);
-    } else {
-      this._bagOverflowText.setVisible(false);
-    }
   }
 
   /** Non-draggable equipment slot button (click to equip-here or unequip). */

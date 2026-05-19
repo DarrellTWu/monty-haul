@@ -1,6 +1,6 @@
 ---
 status: shipped
-updated: 2026-05-17
+updated: 2026-05-18
 purpose: Inventory, hotbar, containers (chests + corpses), loot tables. Read when the task touches items, drops, or container interaction.
 ---
 
@@ -32,7 +32,7 @@ Pure protocol in `shared/logic/loot-window.js`:
 
 ## Client Bag Rendering (`InventoryScene`)
 - Groups duplicate items into one row with `× N` qty (**display-only** — server inventory stays flat).
-- Fixed-height scrollable viewport via shared `GeometryMask`, reachable by mouse wheel; mask cleared on drag-start, restored on drag-end.
+- Fixed-height scroll viewport via `client/src/ui/ScrollViewport.js` (shared helper, also used by character sheet, Stash, Raider loadout). Wheel-routed; drag carve-out via `lockDrag` clears the mask + skips reposition.
 - Double-click routes by item type: weapons/armor → `sendEquip`, consumables → `sendAssignHotbar` to first free slot, materials → no-op.
 
 ## Loot Mode (Inventory ↔ Container)

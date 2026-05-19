@@ -43,6 +43,11 @@ export class HubScene extends Phaser.Scene {
     this._craftBench     = 'forge';
     this._leftObjs       = [];
     this._rightObjs      = [];
+    // Per-panel ScrollViewports. Panels assign these on render and the hub's
+    // wheel listener routes scroll input by pointer hit-test. Cleared along
+    // with _leftObjs / _rightObjs on tab switch or full rebuild.
+    this._leftVp         = null;
+    this._rightVp        = null;
     this._topObjs        = [];
     this._loginObjs      = [];
     this._settingsObjs     = [];
@@ -103,6 +108,28 @@ export class HubScene extends Phaser.Scene {
     this._buildSubNav();
     this._showLeftContent();
     renderRaiderPanel(this);
+
+    // Single wheel listener routes to whichever panel viewport the pointer
+    // is over. Panels are responsible for assigning _leftVp / _rightVp on
+    // render and nulling them via the scene's teardown helpers.
+    this.input.on('wheel', (pointer, _go, _dx, deltaY) => {
+      if (this._leftVp  && this._leftVp.contains(pointer))  this._leftVp.handleWheel(deltaY);
+      if (this._rightVp && this._rightVp.contains(pointer)) this._rightVp.handleWheel(deltaY);
+    });
+
+    // Drop references to gfx Phaser destroys on shutdown. The scene instance
+    // is a singleton — a stale array of destroyed Text objects would crash
+    // `_refresh`-style code on the next launch. See CLAUDE.md "Code Style".
+    this.events.once('shutdown', () => {
+      if (this._leftVp)  { this._leftVp.destroy();  this._leftVp  = null; }
+      if (this._rightVp) { this._rightVp.destroy(); this._rightVp = null; }
+      this._leftObjs         = [];
+      this._rightObjs        = [];
+      this._topObjs          = [];
+      this._loginObjs        = [];
+      this._settingsObjs     = [];
+      this._settingsBodyObjs = [];
+    });
   }
 
   // ── Top bar: username + settings icon (persistent across tab switches) ────────
@@ -191,9 +218,20 @@ export class HubScene extends Phaser.Scene {
     // UI has data to render.
     this._leftView = view;
     this._updateSubNav();
+    this._tearDownLeft();
+    this._showLeftContent();
+  }
+
+  _tearDownLeft() {
     for (const obj of this._leftObjs) obj.destroy();
     this._leftObjs = [];
-    this._showLeftContent();
+    this._leftVp   = null;
+  }
+
+  _tearDownRight() {
+    for (const obj of this._rightObjs) obj.destroy();
+    this._rightObjs = [];
+    this._rightVp   = null;
   }
 
   _showLeftContent() {
@@ -224,8 +262,7 @@ export class HubScene extends Phaser.Scene {
 
   _onPackChanged() {
     if (this._leftView === 'stash') {
-      for (const obj of this._leftObjs) obj.destroy();
-      this._leftObjs = [];
+      this._tearDownLeft();
       renderStashPanel(this);
     }
     renderRaiderPanel(this);
@@ -234,8 +271,7 @@ export class HubScene extends Phaser.Scene {
   _onSold() {
     this._refreshVault();
     if (this._leftView === 'stash') {
-      for (const obj of this._leftObjs) obj.destroy();
-      this._leftObjs = [];
+      this._tearDownLeft();
       renderStashPanel(this);
     }
   }
