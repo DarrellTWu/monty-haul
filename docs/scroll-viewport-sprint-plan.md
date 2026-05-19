@@ -1,7 +1,7 @@
 ---
 status: in-progress
 updated: 2026-05-18
-purpose: Sprint plan — extract a shared ScrollViewport helper so character sheet, bag, stash, and crawler inventory (and future panels) all scroll consistently instead of each reinventing the mask/offset/wheel triplet.
+purpose: Sprint plan — extract a shared ScrollViewport helper so character sheet, bag, stash, and raider loadout (and future panels) all scroll consistently instead of each reinventing the mask/offset/wheel triplet.
 ---
 
 # ScrollViewport Helper
@@ -17,14 +17,21 @@ They do the same job with different vocabulary and slightly different bugs. Two 
 
 Skipping the previously-considered "consistency prep" pass on the existing two scrolls — aligning them toward each other just to throw both shapes away when the helper lands is wasted motion.
 
-## 2. Scope clarification needed
+## 2. Confirmed consumer list
 
-"Crawler inventory" was named alongside Stash as a fourth scroll consumer. The current build has exactly one inventory surface (`InventoryScene.js`, opened with I). Before phase 3 starts, confirm one of:
+"Crawler inventory" is ambiguous between two existing surfaces — and both are real consumers:
 
-- **A** — "crawler inventory" === existing `InventoryScene` bag, already covered.
-- **B** — "crawler inventory" is a new in-dungeon quick-access inventory panel (separate from the I-key sheet) that does not exist yet.
+- **In-dungeon reading** → the bag inside `InventoryScene.js`. Already covered as phase 5.
+- **Hub-loadout reading** → `client/src/ui/hub/RaiderPanel.js` (116 lines, no scroll today). Added as phase 4.
 
-If B, the helper must be sized against four consumers (bag, left-col, stash, quick-inv); design unchanged but porting plan grows. If A, the four consumers collapse to three (bag, left-col, stash).
+Final list — four existing surfaces, no new features to build, ordered cleanest-first:
+
+| Phase | Surface | File | Why this slot |
+|---|---|---|---|
+| 2 | Character left-col | `InventoryScene.js` | Cleanest, homogeneous, validates drag interop |
+| 3 | Stash | `ui/hub/StashPanel.js` | Validates `scene._l` ↔ `vp.track` coexistence |
+| 4 | Raider loadout | `ui/hub/RaiderPanel.js` | Same hub pattern as Stash; cheap once Stash works |
+| 5 | Bag | `InventoryScene.js` | Heterogeneous rows + rebuild cycle; pressure-tests API last |
 
 ## 3. What ships
 
@@ -87,9 +94,13 @@ Why first: cleanest of the existing two, written most recently, homogeneous trac
 3. Wire wheel handler in `HubScene` (or extend the existing one if any).
 4. **Verify**: stash with enough items to overflow scrolls; tab switch to Shop/Craft/Raider tears down rows cleanly (no orphaned masked gfx).
 
-### Phase 4 — Build crawler inventory on it (if scope B; skip if scope A)
+### Phase 4 — Raider loadout panel
 
-Pending §2 clarification. If a new surface ships in this sprint, build it directly on the helper. If it's a future feature, drop a `// TODO(deferred): scroll-viewport ready — see docs/scroll-viewport-sprint-plan.md` note where the surface will land.
+`client/src/ui/hub/RaiderPanel.js` (116 lines today, no scroll). Shares Stash's `scene._l(...)` teardown pattern, so phase 3's approach applies directly — no new helper API needed.
+
+1. Add `ScrollViewport` for the panel's viewport rect (likely the same hub left-panel rect Stash uses).
+2. Track each loadout row with both `scene._l(...)` (tab teardown) and `vp.track(...)` (scroll).
+3. **Verify**: load a build with enough items to overflow the panel; scroll works; tab switch to other hub tabs tears down rows cleanly.
 
 ### Phase 5 — Port the bag scroll last
 
@@ -122,7 +133,8 @@ Pure-logic shared tests don't cover Phaser scenes. Manual test matrix per phase 
 - Drag Rage/Second Wind with column scrolled; wheel mid-drag.
 - Bag overflowing — scroll, equip/unequip during scroll.
 - Stash overflow — scroll, click row to move to pack with column scrolled.
-- Tab switch with stash scrolled — no orphaned gfx, scroll resets correctly.
+- Raider loadout overflow — scroll, interact with rows with column scrolled.
+- Tab switch with Stash or Raider scrolled — no orphaned gfx, scroll resets correctly on re-entry.
 - Loot-mode inventory (left col replaced by loot panel) — wheel on left does nothing.
 
 ## 8. Out-of-band followups (not blocking)
