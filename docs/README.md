@@ -17,7 +17,7 @@ purpose: Docs index. First stop for "which doc do I need?"
 
 | Task touches… | Read |
 |---|---|
-| combat resolution, classes, ability scores, loadout | [`agent-context/combat.md`](agent-context/combat.md) |
+| combat resolution, classes, ability scores, loadout, level-up + multiclass | [`agent-context/combat.md`](agent-context/combat.md) |
 | walls, doors, platforms, steps, elevation, high-ground advantage | [`agent-context/geometry-elevation.md`](agent-context/geometry-elevation.md) |
 | floors, descend, long rest, Scroll of Extraction | [`agent-context/floors.md`](agent-context/floors.md) |
 | shop, crafting, hub gold, stash mutations, Debug Mode toggle | [`agent-context/hub-economy.md`](agent-context/hub-economy.md) |
@@ -45,6 +45,7 @@ purpose: Docs index. First stop for "which doc do I need?"
 - [`archive/conditions-refactor-plan.md`](archive/conditions-refactor-plan.md) — `shared/logic/conditions.js` extraction (shipped)
 - [`archive/target-selection-plan.md`](archive/target-selection-plan.md) — Click + Tab target selection (shipped)
 - [`archive/ranged-combat-plan.md`](archive/ranged-combat-plan.md) — Shortbow + longbow + LoS + advantage tri-state (shipped)
+- [`archive/level-up-sprint-plan.md`](archive/level-up-sprint-plan.md) — Level-up-on-descend + multiclass MVP (shipped)
 - [`archive/advantage-architecture-plan.md`](archive/advantage-architecture-plan.md) — Advantage/disadvantage tri-state design (executed in ranged-combat sprint)
 - [`archive/2026_05_10_proposed_work.md`](archive/2026_05_10_proposed_work.md) — Superseded work proposal
 

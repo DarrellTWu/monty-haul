@@ -217,15 +217,6 @@ export class DungeonScene extends Phaser.Scene {
     if (!me) return;
     const flagSet = me.pendingLevelUp && me.alive;
     const floorReady = this._currentFloor === this._room.state.floor;
-    // Debug — strip once the flow is verified.
-    if (flagSet && !this._levelUpModal && !this._loggedPending) {
-      this._loggedPending = true;
-      console.log('[DungeonScene] pendingLevelUp observed', {
-        flagSet, floorReady, currentFloor: this._currentFloor, stateFloor: this._room.state.floor,
-        alive: me.alive, level: me.level,
-      });
-    }
-    if (!flagSet) this._loggedPending = false;
 
     if (!flagSet) {
       if (this._levelUpModal) {

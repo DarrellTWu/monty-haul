@@ -1,8 +1,8 @@
 ---
-status: in-progress
+status: archived
 updated: 2026-05-18
 purpose: Sprint plan — wire character level-up to each dungeon descent, with multiclass-only level choices as the MVP gameplay surface. Architecture is built to absorb subclasses, ASIs, and per-level class features later without rework.
-note: Code shipped 2026-05-18 (commit 4ed4ce9). Status stays `in-progress` until manual two-player playtest confirms the modal flow; flip to `shipped` and archive the file after.
+note: Shipped 2026-05-18. Two-player playtest confirmed the modal flow; archived. Current behavior lives in `agent-context/combat.md` (Level-Up + Multiclass section).
 ---
 
 # Level-Up-on-Descent + Multiclass MVP

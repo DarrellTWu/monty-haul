@@ -106,6 +106,7 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `server/tests/loot-flow.test.js` | 35 | |
 | `server/tests/target-selection.test.js` | 17 | Explicit-target validation in `playerAttack` — fallback, override, out-of-range/invalid denials, cooldown preservation. |
 | `server/tests/ranged-combat.test.js` | 25 | Ranged path: no-target denial, range gates, LoS, long-range + foe-adjacent disadvantage, advantage/disadvantage cancellation, projectile_fired emission, melee regression. |
+| `server/tests/level-up-flow.test.js` | 19 | Mirrors `choose_level_up` handler: pendingLevelUp gate, descend flips flag for alive only, ineligible/unknown classId rejection, multiclass HP+AC+history mutations, repeat-call drop, hotbar-full notify line, rage-pool init on first Barbarian level. |
 | `server/tests/supabase-smoke.js` | 34 | Real dev Supabase. `process.loadEnvFile('server/.env')`. |
 | `server/tests/concurrency-smoke.js` | 7 | N concurrent buys → no duplicate rows. |
 | `server/tests/anti-cheat-smoke.js` | 25 | Buy/sell/craft rejection paths. |
