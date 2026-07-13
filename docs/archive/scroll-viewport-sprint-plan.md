@@ -1,6 +1,6 @@
 ---
-status: in-progress
-updated: 2026-05-18
+status: shipped
+updated: 2026-05-19
 purpose: Sprint plan — extract a shared ScrollViewport helper so character sheet, bag, stash, and raider loadout (and future panels) all scroll consistently instead of each reinventing the mask/offset/wheel triplet.
 ---
 
