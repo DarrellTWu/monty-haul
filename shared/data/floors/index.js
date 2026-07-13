@@ -5,8 +5,10 @@
 
 import { FLOOR_1 } from './floor1.js';
 import { FLOOR_2 } from './floor2.js';
+import { FLOOR_3 } from './floor3.js';
 
 export const FLOOR_REGISTRY = {
   1: FLOOR_1,
   2: FLOOR_2,
+  3: FLOOR_3,
 };

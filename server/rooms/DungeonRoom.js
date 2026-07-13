@@ -62,6 +62,10 @@ export class DungeonRoom extends Room {
     this._floorWalls      = [];
     this._floorPlatforms  = [];
     this._floorRooms      = [];
+    // Stair ids that should never auto-unlock on enemies-cleared. Cleared and
+    // repopulated by _loadFloor. Stopgap for debug floor 3's stair-to-floor-4;
+    // TODO(deferred): replace with a general stair/door unlock-condition system.
+    this._permanentlyLockedStairs = new Set();
 
     this._loadFloor(1);
 
@@ -433,13 +437,15 @@ export class DungeonRoom extends Room {
       trap.cooldownMs = 0;
       this.state.traps.set(t.id, trap);
     }
+    this._permanentlyLockedStairs.clear();
     for (const s of floor.stairs) {
       const stair = new StairState();
       stair.id      = s.id;
       stair.x       = s.x;
       stair.y       = s.y;
       stair.toFloor = s.toFloor;
-      stair.locked  = !!s.lockedUntilAllEnemiesDead;
+      stair.locked  = !!(s.lockedUntilAllEnemiesDead || s.permanentLock);
+      if (s.permanentLock) this._permanentlyLockedStairs.add(s.id);
       this.state.stairs.set(s.id, stair);
     }
     for (const d of floor.doors ?? []) {
@@ -581,7 +587,9 @@ export class DungeonRoom extends Room {
       const allDead = [...this.state.enemies.values()].every(e => !e.alive);
       if (allDead) {
         for (const [, stair] of this.state.stairs) {
-          if (stair.locked) {
+          // TODO(deferred): replace this enemies-cleared gate with a general
+          // unlock-condition system; the Set skip below is a stopgap.
+          if (stair.locked && !this._permanentlyLockedStairs.has(stair.id)) {
             stair.locked = false;
             this.broadcast('combat_log', {
               message: `Stair to Floor ${stair.toFloor} unlocked.`,
