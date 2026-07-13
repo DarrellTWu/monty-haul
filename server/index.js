@@ -8,10 +8,13 @@ import { DungeonRoom }                          from './rooms/DungeonRoom.js';
 import { hubRouter }                            from './routes/hub.js';
 import { deadLetterCount, DEAD_LETTER_PATH }    from './persistence/deadLetter.js';
 
-const PORT = 2567;
+// Hosted platforms (Railway, Render, Fly) inject PORT; default keeps local dev on 2567.
+const PORT = Number(process.env.PORT) || 2567;
 
 const app = express();
 app.use(express.json());
+// Liveness probe for hosting platforms + humans. Deliberately does not touch Supabase.
+app.get('/healthz', (_req, res) => res.json({ ok: true }));
 app.use('/hub', hubRouter);
 
 const httpServer = createServer(app);
