@@ -25,6 +25,13 @@ export const COMBAT_DETECTION_RADIUS = 200; // Px — enemy within this = in com
 export const RAGE_DURATION_MS  = 30000; // 30s (SRD: 1 minute — shortened for real-time play)
 export const RAGE_DAMAGE_BONUS = 2;     // +2 to STR melee damage while raging
 export const RAGE_USES         = 2;     // activations per run at level 1
+
+// CLASS FEATURES (levels 2–3)
+export const SUBCLASS_UNLOCK_LEVEL       = 3;    // class level at which a subclass can be taken (needs the matching emblem item)
+export const KI_ABILITY_COST             = 1;    // ki points per Flurry / Patient Defense / Step of the Wind
+export const PATIENT_DEFENSE_DURATION_MS = 6000; // attackers have disadvantage (SRD: until next turn ≈ one attack cycle)
+export const STEP_OF_WIND_DURATION_MS    = 6000; // dash speed window (SRD: one turn)
+export const OPEN_HAND_STAGGER_MS        = 4500; // Open Hand Technique: flurry hits push the target's attack timer to this
 export const ATTACK_COOLDOWN_MS = 3000;  // Player attack timer cooldown
 export const MELEE_ATTACK_RANGE_PX = 25; // Weapon reach in pixels (from attacker edge)
 export const MELEE_HIT_RANGE_PX = 64;   // Center-to-center distance for melee hit check.

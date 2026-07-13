@@ -18,7 +18,10 @@ import { applyDeathLoot }            from '../../shared/logic/loot.js';
 import { pointInRect }               from '../../shared/logic/geometry.js';
 import { validateAbilityScores }     from '../../shared/logic/character.js';
 import { equipItem, unequipItem, recomputeStats } from '../../shared/logic/equipment.js';
-import { applyClassLevel, getEligibleClassChoicesForLevelUp, computeHpGainForLevel } from '../../shared/logic/class-progression.js';
+import {
+  applyClassLevel, getEligibleClassChoicesForLevelUp, computeHpGainForLevel,
+  getGrantedFeatures, getDerivedClassFeatures, getKiMax, getRageUsesMax, trySubclassUnlock,
+} from '../../shared/logic/class-progression.js';
 import {
   tryOpenContainer, tryCloseContainer, releaseLocksHeldBy, tickContainerLocks,
   tryTakeItem, tryTakeGold, tryDropItem,
@@ -29,15 +32,20 @@ import { ARMOR_REGISTRY }            from '../../shared/data/armor/armor.js';
 import { WEAPON_REGISTRY }           from '../../shared/data/weapons/index.js';
 import { SHIELD_REGISTRY }           from '../../shared/data/items/shields.js';
 import { CONSUMABLE_REGISTRY }       from '../../shared/data/items/consumables.js';
+import { ITEM_REGISTRY }             from '../../shared/data/items/index.js';
+import { ABILITY_REGISTRY }          from '../../shared/data/abilities.js';
 import {
   SERVER_TICK_RATE_HZ, MELEE_HIT_RANGE_PX, CHEST_LOOT_RANGE_PX,
   TRAP_DAMAGE, TRAP_SAVE_DC, TRAP_RADIUS_PX, TRAP_COOLDOWN_MS,
   RAGE_DURATION_MS, RAGE_DAMAGE_BONUS,
+  PATIENT_DEFENSE_DURATION_MS, STEP_OF_WIND_DURATION_MS, KI_ABILITY_COST,
 } from '../../shared/data/constants.js';
 
 import * as MovementSystem from '../systems/MovementSystem.js';
 import * as AISystem       from '../systems/AISystem.js';
-import { playerAttack, enemyAttack, applySecondWind } from '../systems/CombatSystem.js';
+import {
+  playerAttack, enemyAttack, applySecondWind, applyActionSurge, applyFlurryOfBlows,
+} from '../systems/CombatSystem.js';
 import { getPlayer, commitExtract, commitDeath } from '../store/playerStore.js';
 
 // type string → enemy stat block. Used by _loadFloor when reading floor data.
@@ -191,6 +199,19 @@ export class DungeonRoom extends Room {
       recomputeStats(player);
       player.pendingLevelUp = false;
 
+      // Subclass unlock: at class level SUBCLASS_UNLOCK_LEVEL, a carried
+      // emblem item (bag or equipped slots) grants the matching subclass.
+      const carried = [...player.inventory];
+      if (player.equippedWeaponId) carried.push(player.equippedWeaponId);
+      if (player.offhandId)        carried.push(player.offhandId);
+      if (player.equippedArmorId)  carried.push(player.equippedArmorId);
+      const unlocked = trySubclassUnlock(player, classId, carried, ITEM_REGISTRY);
+      if (unlocked) {
+        this.broadcast('combat_log', {
+          message: `★ ${CLASS_REGISTRY[classId]?.name ?? classId} subclass unlocked: ${unlocked.name}!`,
+        });
+      }
+
       // Seed newly-granted features onto the first empty hotbar slot, if any.
       const newFeatures = result.features ?? [];
       for (const feat of newFeatures) {
@@ -228,7 +249,7 @@ export class DungeonRoom extends Room {
       if (!player) return;
       const s  = Math.max(0, Math.min(9, Math.floor(Number(slot))));
       const id = String(itemId);
-      if (id === 'second_wind' || id === 'rage' || CONSUMABLE_REGISTRY[id]) {
+      if (ABILITY_REGISTRY[id] || CONSUMABLE_REGISTRY[id]) {
         // Each item may occupy only one hotbar slot — clear any existing binding first.
         for (let i = 0; i < player.hotbar.length; i++) {
           if (player.hotbar[i] === id) player.hotbar[i] = '';
@@ -244,13 +265,11 @@ export class DungeonRoom extends Room {
       const binding = player.hotbar[s] ?? '';
       if (!binding) return;
 
-      if (binding === 'second_wind') {
-        const heal = applySecondWind(this.state, client.sessionId);
-        if (heal !== null) {
-          this.broadcast('combat_log', { message: `Second Wind: ${player.class[0].toUpperCase() + player.class.slice(1)} recovers ${heal} HP` });
-        }
-      } else if (binding === 'rage') {
-        this._activateRage(player, client.sessionId);
+      if (ABILITY_REGISTRY[binding]) {
+        // Abilities require the class feature — binding alone isn't enough
+        // (assign_hotbar accepts any known ability id without a class check).
+        if (!getGrantedFeatures(player).has(binding)) return;
+        this._useAbility(player, client.sessionId, binding);
       } else if (CONSUMABLE_REGISTRY[binding]) {
         this._useConsumable(player, client.sessionId, binding);
       }
@@ -320,6 +339,13 @@ export class DungeonRoom extends Room {
     for (let i = seedResult.features.length; i < 10; i++) player.hotbar.push('');
 
     for (const id of raiderItems) player.inventory.push(id);
+
+    // Free starter loadout extras (subclass emblems) ride with the class
+    // defaults — empty-pack joins only. A raider who extracts keeps theirs in
+    // the pack; a raider who died starts fresh and is re-seeded here.
+    if (raiderItems.length === 0) {
+      for (const id of classDef.startingItemIds ?? []) player.inventory.push(id);
+    }
 
     if (raiderItems.length > 0) {
       // Auto-equip first weapon, armor, and shield found in bag.
@@ -534,22 +560,25 @@ export class DungeonRoom extends Room {
   }
 
   /**
-   * SRD-style long rest: HP to max, temp HP cleared, Second Wind + rage uses
-   * refreshed, all timed conditions dropped (rage, bless, longstrider, false
-   * life). Called for each player on descend.
+   * SRD-style long rest: HP to max, temp HP cleared, per-class resource pools
+   * (Second Wind, Action Surge, rage uses, ki) refreshed, all conditions
+   * dropped (timed ones plus the Reckless toggle). Called for each player on
+   * descend.
    */
   _longRest(player, sessionId) {
     player.hp     = player.maxHp;
     player.tempHp = 0;
-    player.secondWindAvailable = true;
 
-    // Refill rage if the player has taken any level in Barbarian.
-    // Reads the rageUses pool off the Barbarian class def directly — it's a
-    // per-class resource, not a derived feature.
-    const barbLvl = player.classLevels?.get?.('barbarian') ?? 0;
-    if (barbLvl > 0) {
-      player.rageUsesRemaining = CLASS_REGISTRY.barbarian.rageUses ?? 0;
-    }
+    const features = getGrantedFeatures(player);
+    if (features.has('second_wind'))  player.secondWindAvailable  = true;
+    if (features.has('action_surge')) player.actionSurgeAvailable = true;
+
+    // Level-scaled pools read through the progression module so the refill
+    // amount tracks class level (rage: 2 → 3 at Barbarian 3; ki = monk level).
+    const rageMax = getRageUsesMax(player);
+    if (rageMax > 0) player.rageUsesRemaining = rageMax;
+    const kiMax = getKiMax(player);
+    if (kiMax > 0) player.kiPoints = kiMax;
 
     clearPlayerConditions(player, this._conditionTimers, sessionId);
   }
@@ -614,7 +643,9 @@ export class DungeonRoom extends Room {
         level:         player.level,
         saveProfs:     classDef.saveProficiencies,
       };
-      const save        = resolveSave({ creature, ability: 'dex', dc: TRAP_SAVE_DC });
+      // Danger Sense (Barbarian 2): advantage on DEX saves.
+      const advantage   = getDerivedClassFeatures(player).dangerSense;
+      const save        = resolveSave({ creature, ability: 'dex', dc: TRAP_SAVE_DC, advantage });
       let trapDamage = Math.max(1, save.success ? Math.floor(TRAP_DAMAGE / 2) : TRAP_DAMAGE);
       // Rage: resistance to piercing damage (SRD).
       if (player.conditions.includes('rage')) trapDamage = Math.max(1, Math.floor(trapDamage / 2));
@@ -749,6 +780,56 @@ export class DungeonRoom extends Room {
     this.broadcast('combat_log', {
       message: `💢 ${cn} enters a Rage! (+${RAGE_DAMAGE_BONUS} dmg, resist physical, 30s)`,
     });
+  }
+
+  /**
+   * Dispatch a hotbar class-ability use. Caller has already verified the
+   * player is alive and actually has the feature (getGrantedFeatures).
+   */
+  _useAbility(player, sessionId, abilityId) {
+    const cn = player.class ? player.class[0].toUpperCase() + player.class.slice(1) : 'Player';
+
+    if (abilityId === 'second_wind') {
+      const heal = applySecondWind(this.state, sessionId);
+      if (heal !== null) {
+        this.broadcast('combat_log', { message: `Second Wind: ${cn} recovers ${heal} HP` });
+      }
+    } else if (abilityId === 'rage') {
+      this._activateRage(player, sessionId);
+    } else if (abilityId === 'action_surge') {
+      if (applyActionSurge(this.state, sessionId)) {
+        this.broadcast('combat_log', { message: `⚡ Action Surge: ${cn}'s attack timer resets!` });
+      }
+    } else if (abilityId === 'reckless_attack') {
+      // Toggle — no timer. Cleared by long rest (clearPlayerConditions pops
+      // every active condition) or by toggling off.
+      const idx = player.conditions.indexOf('reckless');
+      if (idx === -1) {
+        player.conditions.push('reckless');
+        this.broadcast('combat_log', { message: `💢 ${cn} attacks recklessly (adv on melee attacks; foes gain adv).` });
+      } else {
+        player.conditions.splice(idx, 1);
+        this.broadcast('combat_log', { message: `${cn} steadies their stance (Reckless Attack off).` });
+      }
+    } else if (abilityId === 'flurry_of_blows') {
+      const result = applyFlurryOfBlows(this.state, sessionId, this._enemyDefs);
+      if (result.denied) return;
+      for (const msg of result.logs) this.broadcast('combat_log', { message: msg });
+    } else if (abilityId === 'patient_defense') {
+      if ((player.kiPoints ?? 0) < KI_ABILITY_COST || player.conditions.includes('patient_defense')) return;
+      player.kiPoints -= KI_ABILITY_COST;
+      applyCondition(player, 'patient_defense', PATIENT_DEFENSE_DURATION_MS, this._conditionTimers, sessionId);
+      this.broadcast('combat_log', {
+        message: `🛡 Patient Defense: attacks against ${cn} have disadvantage (${PATIENT_DEFENSE_DURATION_MS / 1000}s, 1 ki).`,
+      });
+    } else if (abilityId === 'step_of_wind') {
+      if ((player.kiPoints ?? 0) < KI_ABILITY_COST || player.conditions.includes('dash')) return;
+      player.kiPoints -= KI_ABILITY_COST;
+      applyCondition(player, 'dash', STEP_OF_WIND_DURATION_MS, this._conditionTimers, sessionId);
+      this.broadcast('combat_log', {
+        message: `💨 Step of the Wind: ${cn} dashes (double speed, ${STEP_OF_WIND_DURATION_MS / 1000}s, 1 ki).`,
+      });
+    }
   }
 
 }

@@ -8,7 +8,8 @@
 // of player position.
 
 import { CLASS_REGISTRY } from '../../../../shared/data/classes/index.js';
-import { HP_MULTIPLIER }  from '../../../../shared/data/constants.js';
+import { ABILITY_REGISTRY } from '../../../../shared/data/abilities.js';
+import { HP_MULTIPLIER, SUBCLASS_UNLOCK_LEVEL } from '../../../../shared/data/constants.js';
 import { getModifier }    from '../../../../shared/logic/combat.js';
 import { sendChooseLevelUp } from '../../network/ColyseusClient.js';
 
@@ -48,7 +49,7 @@ export function openLevelUpModal(scene, { player, eligibleClassIds, newTotalLeve
   _l(scene.add.text(cx, y0 + 22, `Level ${newTotalLevel}`, {
     fontSize: '20px', color: '#ffcc44', fontFamily: 'monospace', fontStyle: 'bold',
   })).setOrigin(0.5).setScrollFactor(0).setDepth(1002);
-  _l(scene.add.text(cx, y0 + 48, 'Choose a class to multiclass into.', {
+  _l(scene.add.text(cx, y0 + 48, 'Choose a class to take a level in.', {
     fontSize: '12px', color: '#aaccdd', fontFamily: 'monospace',
   })).setOrigin(0.5).setScrollFactor(0).setDepth(1002);
 
@@ -81,9 +82,14 @@ export function openLevelUpModal(scene, { player, eligibleClassIds, newTotalLeve
     const hit = _l(scene.add.rectangle(cardX + cardW / 2, rowY + cardH / 2, cardW, cardH, 0xffffff, 0.001))
       .setScrollFactor(0).setDepth(1003).setInteractive({ useHandCursor: true });
 
+    // Next level IN THIS CLASS (1 = fresh multiclass, 2/3 = continuing).
+    const currentLvl = player.classLevels?.get?.(classId) ?? 0;
+    const nextLvl    = currentLvl + 1;
+
     let ty = rowY + 16;
-    _l(scene.add.text(cardX + cardW / 2, ty, def.name ?? classId, {
-      fontSize: '18px', color: '#ffcc44', fontFamily: 'monospace', fontStyle: 'bold',
+    const title = currentLvl > 0 ? `${def.name ?? classId} ${currentLvl} → ${nextLvl}` : (def.name ?? classId);
+    _l(scene.add.text(cardX + cardW / 2, ty, title, {
+      fontSize: currentLvl > 0 ? '15px' : '18px', color: '#ffcc44', fontFamily: 'monospace', fontStyle: 'bold',
     })).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1003);
     ty += 28;
 
@@ -93,22 +99,36 @@ export function openLevelUpModal(scene, { player, eligibleClassIds, newTotalLeve
     })).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1003);
     ty += 22;
 
-    const features = def.levels?.[1]?.features ?? [];
-    const grants   = def.levels?.[1]?.grants ?? {};
+    const features = def.levels?.[nextLvl]?.features ?? [];
+    const grants   = def.levels?.[nextLvl]?.grants ?? {};
     const lines = [];
-    if (features.length) lines.push(`Features: ${features.join(', ')}`);
+    if (features.length) {
+      const names = features.map(f => ABILITY_REGISTRY[f]?.label ?? f);
+      lines.push(`Gain: ${names.join(', ')}`);
+    }
     if (grants.fightingStyle) lines.push(`Style: ${grants.fightingStyle}`);
-    if (def.unarmoredDefense)  lines.push(`Unarmored Defense (${def.unarmoredDefense.toUpperCase()})`);
-    if (def.canClimb)          lines.push('Can climb platforms');
-    if (def.rageUses)          lines.push(`Rage ×${def.rageUses} / rest`);
-    if (lines.length === 0)    lines.push('(no level-1 active features)');
+    if (grants.dangerSense)   lines.push('Danger Sense (adv on DEX saves)');
+    if (grants.ki)            lines.push(`Ki pool (${nextLvl} pts / rest)`);
+    if (grants.unarmoredMovementFt) lines.push(`+${grants.unarmoredMovementFt}ft speed unarmored`);
+    if (grants.rageUses)      lines.push(`Rage ×${grants.rageUses} / rest`);
+    if (grants.subclassChoice) {
+      const subNames = Object.values(def.subclasses ?? {}).map(s => s.name).join(', ');
+      lines.push(`Subclass: ${subNames || 'TBD'} (emblem item required)`);
+    }
+    if (nextLvl === 1) {
+      if (def.unarmoredDefense) lines.push(`Unarmored Defense (${def.unarmoredDefense.toUpperCase()})`);
+      if (def.canClimb)         lines.push('Can climb platforms');
+      if (def.rageUses)         lines.push(`Rage ×${def.rageUses} / rest`);
+    }
+    if (lines.length === 0)    lines.push('(no new active features)');
 
     for (const ln of lines) {
-      _l(scene.add.text(cardX + 12, ty, `· ${ln}`, {
+      const t = _l(scene.add.text(cardX + 12, ty, `· ${ln}`, {
         fontSize: '11px', color: '#ccddee', fontFamily: 'monospace',
         wordWrap: { width: cardW - 24 },
       })).setScrollFactor(0).setDepth(1003);
-      ty += 32;
+      // Advance by rendered height so wrapped lines don't overlap the next row.
+      ty += Math.max(18, t.height + 6);
     }
 
     hit.on('pointerover', () => repaint(true));

@@ -15,6 +15,8 @@
 // All five formatters are pure and deterministic — same def in, same string out.
 
 import { ITEM_REGISTRY, CATEGORY_DISPLAY_ORDER } from '../data/items/index.js';
+import { CLASS_REGISTRY }         from '../data/classes/index.js';
+import { SUBCLASS_UNLOCK_LEVEL }  from '../data/constants.js';
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -176,12 +178,24 @@ function materialDetail() {
   return 'crafting material';
 }
 
+// Emblem detail: name the subclass + class it unlocks, e.g.
+// "unlocks Champion (Fighter 3)". Class/subclass display names come from the
+// class registry so a rename happens once, on the class def.
+function emblemDetail(def) {
+  const classDef  = CLASS_REGISTRY[def.unlocks?.classId];
+  const subDef    = classDef?.subclasses?.[def.unlocks?.subclassId];
+  const className = classDef?.name ?? def.unlocks?.classId ?? '?';
+  const subName   = subDef?.name ?? def.unlocks?.subclassId ?? '?';
+  return `unlocks ${subName} (${className} ${SUBCLASS_UNLOCK_LEVEL})`;
+}
+
 const DETAIL_FORMATTERS = {
   weapon:     weaponDetail,
   armor:      armorDetail,
   shield:     shieldDetail,
   consumable: consumableDetail,
   material:   materialDetail,
+  emblem:     emblemDetail,
 };
 
 // Section labels (one per category) for stash UI grouping.
@@ -191,6 +205,7 @@ const SECTION_LABELS = {
   shield:     'Armor & Shield',   // shields render in the same section as armor
   consumable: 'Potions',
   material:   'Materials',
+  emblem:     'Emblems',
 };
 
 // SECTION_FOR_CATEGORY mirrors SECTION_LABELS; kept separate so the public

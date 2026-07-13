@@ -6,8 +6,10 @@ import {
   totalLevel, getClassLevel, getEligibleClassChoicesForLevelUp,
   getGrantedFeatures, getDerivedClassFeatures, applyClassLevel,
   computeHpGainForLevel, getMaxLevelForClass,
+  getKiMax, getRageUsesMax, trySubclassUnlock, DEFAULT_CRIT_RANGE,
 } from '../logic/class-progression.js';
 import { CLASS_REGISTRY } from '../data/classes/index.js';
+import { ITEM_REGISTRY } from '../data/items/index.js';
 import { HP_MULTIPLIER, RAGE_USES } from '../data/constants.js';
 
 let passed = 0, failed = 0;
@@ -99,12 +101,129 @@ test('computeHpGainForLevel matches SRD-average formula', () => {
   assertEq(computeHpGainForLevel(fighter, 2), Math.floor((10 / 2 + 1 + 2) * HP_MULTIPLIER));
 });
 
-test('eligibility excludes already-taken classes', () => {
+test('eligibility includes taken classes below the cap (same-class re-leveling)', () => {
   const p = mkPlayer();
   applyClassLevel(p, 'fighter');
   const elig = getEligibleClassChoicesForLevelUp(p);
-  assertTrue(!elig.includes('fighter'));
+  assertTrue(elig.includes('fighter'), 'fighter 1 can continue to 2');
   assertTrue(elig.includes('barbarian') && elig.includes('monk'));
+});
+
+test('eligibility excludes a class at the gearless cap (3)', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'fighter');
+  applyClassLevel(p, 'fighter');
+  applyClassLevel(p, 'fighter');
+  const elig = getEligibleClassChoicesForLevelUp(p);
+  assertTrue(!elig.includes('fighter'), 'fighter 3 is capped');
+  assertTrue(elig.includes('barbarian') && elig.includes('monk'));
+});
+
+test('fighter 2 grants action_surge and seeds actionSurgeAvailable', () => {
+  const p = mkPlayer();
+  seedFighter(p);
+  const r = applyClassLevel(p, 'fighter');
+  assertTrue(r.ok);
+  assertTrue(r.features.includes('action_surge'));
+  assertEq(p.actionSurgeAvailable, true);
+  assertEq(getClassLevel(p, 'fighter'), 2);
+});
+
+test('monk 2 grants ki abilities and seeds ki pool = monk level', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'monk');
+  assertEq(getKiMax(p), 0, 'no ki below monk 2');
+  const r = applyClassLevel(p, 'monk');
+  assertTrue(r.features.includes('flurry_of_blows'));
+  assertTrue(r.features.includes('patient_defense'));
+  assertTrue(r.features.includes('step_of_wind'));
+  assertEq(p.kiMax, 2);
+  assertEq(p.kiPoints, 2);
+  applyClassLevel(p, 'monk');
+  assertEq(p.kiMax, 3, 'ki scales with monk level');
+});
+
+test('barbarian 2 grants reckless_attack; barbarian 3 raises rage pool to 3', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'barbarian');
+  assertEq(getRageUsesMax(p), RAGE_USES);
+  const r2 = applyClassLevel(p, 'barbarian');
+  assertTrue(r2.features.includes('reckless_attack'));
+  applyClassLevel(p, 'barbarian');
+  assertEq(getRageUsesMax(p), 3);
+  assertEq(p.rageUsesRemaining, 3, 'level 3 grant refills the pool');
+});
+
+test('derived: dangerSense at barbarian 2, not at 1', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'barbarian');
+  assertEq(getDerivedClassFeatures(p).dangerSense, false);
+  applyClassLevel(p, 'barbarian');
+  assertEq(getDerivedClassFeatures(p).dangerSense, true);
+});
+
+test('derived: unarmoredMovementFt at monk 2', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'monk');
+  assertEq(getDerivedClassFeatures(p).unarmoredMovementFt, 0);
+  applyClassLevel(p, 'monk');
+  assertEq(getDerivedClassFeatures(p).unarmoredMovementFt, 10);
+});
+
+test('derived: barbarian unarmored defense is CON', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'barbarian');
+  assertEq(getDerivedClassFeatures(p).unarmoredDefense, 'con');
+});
+
+test('trySubclassUnlock: champion via sigil at fighter 3', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'fighter');
+  applyClassLevel(p, 'fighter');
+  assertEq(trySubclassUnlock(p, 'fighter', ['champion_sigil'], ITEM_REGISTRY), null, 'below level 3');
+  applyClassLevel(p, 'fighter');
+  assertEq(trySubclassUnlock(p, 'fighter', [], ITEM_REGISTRY), null, 'no emblem carried');
+  const r = trySubclassUnlock(p, 'fighter', ['healing_potion', 'champion_sigil'], ITEM_REGISTRY);
+  assertTrue(r !== null);
+  assertEq(r.subclassId, 'champion');
+  assertEq(p.subclasses.get('fighter'), 'champion');
+  assertEq(trySubclassUnlock(p, 'fighter', ['champion_sigil'], ITEM_REGISTRY), null, 'already unlocked');
+});
+
+test("trySubclassUnlock: wrong class's emblem does not unlock", () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'fighter');
+  applyClassLevel(p, 'fighter');
+  applyClassLevel(p, 'fighter');
+  assertEq(trySubclassUnlock(p, 'fighter', ['berserker_totem'], ITEM_REGISTRY), null);
+});
+
+test('derived: champion subclass sets critRange 19; default is 20', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'fighter');
+  assertEq(getDerivedClassFeatures(p).critRange, DEFAULT_CRIT_RANGE);
+  applyClassLevel(p, 'fighter');
+  applyClassLevel(p, 'fighter');
+  trySubclassUnlock(p, 'fighter', ['champion_sigil'], ITEM_REGISTRY);
+  assertEq(getDerivedClassFeatures(p).critRange, 19);
+});
+
+test('derived: berserker frenzy and open hand technique flags', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'barbarian');
+  applyClassLevel(p, 'barbarian');
+  applyClassLevel(p, 'barbarian');
+  trySubclassUnlock(p, 'barbarian', ['berserker_totem'], ITEM_REGISTRY);
+  const d = getDerivedClassFeatures(p);
+  assertEq(d.frenzy, true);
+  assertEq(d.openHandTechnique, false);
+
+  const m = mkPlayer();
+  applyClassLevel(m, 'monk');
+  applyClassLevel(m, 'monk');
+  applyClassLevel(m, 'monk');
+  trySubclassUnlock(m, 'monk', ['open_hand_manual'], ITEM_REGISTRY);
+  assertEq(getDerivedClassFeatures(m).openHandTechnique, true);
 });
 
 test('getMaxLevelForClass returns gearless cap 3', () => {
@@ -139,14 +258,14 @@ test('getDerivedClassFeatures: fighter+monk → dueling + climb + UD wis', () =>
   assertEq(d.unarmoredDefense, 'wis');
 });
 
-test('getDerivedClassFeatures: fighter+barbarian → dueling, no climb, no UD', () => {
+test('getDerivedClassFeatures: fighter+barbarian → dueling, no climb, UD con', () => {
   const p = mkPlayer();
   applyClassLevel(p, 'fighter');
   applyClassLevel(p, 'barbarian');
   const d = getDerivedClassFeatures(p);
   assertEq(d.fightingStyle, 'dueling');
   assertEq(d.canClimb, false);
-  assertEq(d.unarmoredDefense, null);
+  assertEq(d.unarmoredDefense, 'con');
 });
 
 test('applyClassLevel returns error for unknown class', () => {

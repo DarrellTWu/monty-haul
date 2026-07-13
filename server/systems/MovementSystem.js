@@ -20,11 +20,14 @@
 import {
   BASE_SPEED_PX_PER_SEC,
   LONGSTRIDER_SPEED_BONUS_PX,
+  DASH_SPEED_MULTIPLIER,
+  PX_PER_FOOT,
 } from '../../shared/data/constants.js';
 import {
   resolveWallCollision, tryAutoClimb, platformPerimeterRects,
 } from '../../shared/logic/geometry.js';
 import { getDerivedClassFeatures } from '../../shared/logic/class-progression.js';
+import { SHIELD_REGISTRY } from '../../shared/data/items/shields.js';
 
 /**
  * @param {import('../state/GameState.js').GameState} state
@@ -69,14 +72,22 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
     const prevX = player.x;
     const prevY = player.y;
 
+    const derived = getDerivedClassFeatures(player);
+
     if (player.vx !== 0 || player.vy !== 0) {
-      const speed = BASE_SPEED_PX_PER_SEC +
+      let speed = BASE_SPEED_PX_PER_SEC +
         (player.conditions?.includes('longstrider') ? LONGSTRIDER_SPEED_BONUS_PX : 0);
+      // Monk Unarmored Movement: flat bonus while wearing no armor and no shield.
+      if (derived.unarmoredMovementFt > 0 && !player.equippedArmorId && !SHIELD_REGISTRY[player.offhandId]) {
+        speed += derived.unarmoredMovementFt * PX_PER_FOOT;
+      }
+      // Dash (Step of the Wind): multiplier applies after flat bonuses.
+      if (player.conditions?.includes('dash')) speed *= DASH_SPEED_MULTIPLIER;
       player.x = player.x + player.vx * speed * dtSec;
       player.y = player.y + player.vy * speed * dtSec;
     }
 
-    const canClimb = getDerivedClassFeatures(player).canClimb;
+    const canClimb = derived.canClimb;
     const rects = buildObstacleRects(walls, lockedDoors, platformPerimeters, player.elevation, canClimb);
     const resolved = resolveWallCollision({ x: player.x, y: player.y }, rects);
     player.x = resolved.x;

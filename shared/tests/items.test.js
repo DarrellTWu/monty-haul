@@ -17,6 +17,8 @@ import { ARMOR_REGISTRY }      from '../data/armor/armor.js';
 import { SHIELD_REGISTRY }     from '../data/items/shields.js';
 import { CONSUMABLE_REGISTRY } from '../data/items/consumables.js';
 import { MATERIAL_REGISTRY }   from '../data/items/materials.js';
+import { EMBLEM_REGISTRY }     from '../data/items/emblems.js';
+import { CLASS_REGISTRY }      from '../data/classes/index.js';
 import { getItemDisplay }      from '../logic/item-display.js';
 import { FLOOR_REGISTRY }      from '../data/floors/index.js';
 import { LOOT_TABLE_REGISTRY } from '../data/loot/tier1.js';
@@ -103,6 +105,16 @@ describe('per-category required fields', () => {
       assert.equal(def.category, 'material');
     });
   }
+  for (const [id, def] of Object.entries(EMBLEM_REGISTRY)) {
+    test(`emblem ${id} has valid unlocks target`, () => {
+      assert.equal(def.category, 'emblem');
+      assert.ok(def.unlocks && typeof def.unlocks === 'object', 'unlocks required');
+      const classDef = CLASS_REGISTRY[def.unlocks.classId];
+      assert.ok(classDef, `unlocks.classId "${def.unlocks.classId}" must resolve in CLASS_REGISTRY`);
+      assert.ok(classDef.subclasses?.[def.unlocks.subclassId],
+        `unlocks.subclassId "${def.unlocks.subclassId}" must exist on ${def.unlocks.classId}.subclasses`);
+    });
+  }
 });
 
 // ─── 3. id matches map key in every type-specific registry ───────────────────
@@ -114,6 +126,7 @@ describe('id matches registry key', () => {
     ['SHIELD_REGISTRY',     SHIELD_REGISTRY],
     ['CONSUMABLE_REGISTRY', CONSUMABLE_REGISTRY],
     ['MATERIAL_REGISTRY',   MATERIAL_REGISTRY],
+    ['EMBLEM_REGISTRY',     EMBLEM_REGISTRY],
   ];
   for (const [name, reg] of registries) {
     test(`${name}: every entry's def.id matches its key`, () => {
@@ -134,6 +147,7 @@ describe('disjoint id namespaces', () => {
       SHIELD_REGISTRY,
       CONSUMABLE_REGISTRY,
       MATERIAL_REGISTRY,
+      EMBLEM_REGISTRY,
     };
     const owners = new Map(); // id → first owning registry name
     for (const [name, reg] of Object.entries(registries)) {

@@ -17,6 +17,7 @@ export class PlayerState extends Schema {
     this.classLevels    = new MapSchema();   // classId → level (e.g. fighter:1, monk:1)
     this.levelUpHistory = new ArraySchema(); // ordered class ids; index i = level i+1
     this.pendingLevelUp = false;             // true between descend and choose_level_up
+    this.subclasses     = new MapSchema();   // classId → subclassId (set at class level 3 via emblem item)
     this.vx = 0;
     this.vy = 0;
     this.attackCooldownMs = 0;
@@ -26,9 +27,14 @@ export class PlayerState extends Schema {
     this.equippedArmorId = '';   // armor slot; '' = unarmored
     this.offhandId = '';         // offhand slot: weapon or shield; '' = empty
     this.secondWindAvailable = true;
+    this.actionSurgeAvailable = false; // Fighter 2 — reset attack cooldown, 1/rest
+    this.kiPoints                 = 0; // Monk 2+ ki pool (spent by flurry/patient/step; refilled on long rest)
+    this.kiMax                    = 0; // = monk class level (0 below monk 2)
     this.blessRemainingMs         = 0; // synced each tick for client HUD ring display
     this.longstriderRemainingMs   = 0; // synced each tick for client HUD ring display
     this.falseLifeRemainingMs     = 0; // synced each tick for client HUD ring display
+    this.patientDefenseRemainingMs = 0; // synced for HUD ring display
+    this.dashRemainingMs          = 0; // synced for HUD ring display (Step of the Wind)
     this.tempHp                   = 0; // temporary HP (absorbed before regular HP)
     this.rageRemainingMs          = 0; // synced for HUD ring display
     this.rageUsesRemaining        = 0; // remaining rage activations this run
@@ -67,9 +73,14 @@ defineTypes(PlayerState, {
   equippedArmorId: 'string',
   offhandId: 'string',
   secondWindAvailable:      'boolean',
+  actionSurgeAvailable:     'boolean',
+  kiPoints:                 'number',
+  kiMax:                    'number',
   blessRemainingMs:         'number',
   longstriderRemainingMs:   'number',
   falseLifeRemainingMs:     'number',
+  patientDefenseRemainingMs: 'number',
+  dashRemainingMs:          'number',
   tempHp:                   'number',
   rageRemainingMs:          'number',
   rageUsesRemaining:        'number',
@@ -86,5 +97,6 @@ defineTypes(PlayerState, {
   classLevels:    { map: 'number' },
   levelUpHistory: { array: 'string' },
   pendingLevelUp: 'boolean',
+  subclasses:     { map: 'string' },
   elevation:  'number',
 });

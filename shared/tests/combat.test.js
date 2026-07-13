@@ -8,7 +8,7 @@
 // never called in these tests.
 
 import assert from 'node:assert/strict';
-import { resolveAttack, applyDamage, rollDice, getModifier, getProficiencyBonus, resolveRollMode, pickAttackMode } from '../logic/combat.js';
+import { resolveAttack, applyDamage, rollDice, getModifier, getProficiencyBonus, resolveRollMode, pickAttackMode, resolveSave } from '../logic/combat.js';
 import { ft } from '../data/constants.js';
 
 // ─── Deterministic RNG helpers ────────────────────────────────────────────────
@@ -618,6 +618,74 @@ test('exact-HP damage: newHP = 0, overkill = 0', () => {
   const result = applyDamage({ target, damage: 10, damageType: 'slashing' });
   assert.equal(result.newHP, 0);
   assert.equal(result.overkill, 0);
+});
+
+// ─── Expanded crit range (Champion Improved Critical) ─────────────────────────
+
+console.log('\ncrit range');
+
+test('critRange 19: a natural 19 that hits is a critical', () => {
+  // d20 = 19, +3 STR +2 prof = 24 vs AC 8 → hit. Champion critRange 19 → crit.
+  // Crit damage: 2× dice (2d8) + bonuses once → dice 4+4=8, +3 str = 11, ×2 = 22.
+  const rng = seq(die(19, 20), die(4, 8), die(4, 8));
+  const result = resolveAttack({
+    attacker: makePlayer({ critRange: 19 }),
+    target: makeTarget({ ac: 8 }),
+    weapon: longsword,
+    rng,
+  });
+  assert.equal(result.hit, true);
+  assert.equal(result.crit, true, 'natural 19 should crit with critRange 19');
+});
+
+test('critRange 19: a natural 19 is NOT an automatic hit vs impossible AC', () => {
+  // d20 = 19, total 24 vs AC 30 → miss (only a natural 20 auto-hits).
+  const rng = seq(die(19, 20));
+  const result = resolveAttack({
+    attacker: makePlayer({ critRange: 19 }),
+    target: makeTarget({ ac: 30 }),
+    weapon: longsword,
+    rng,
+  });
+  assert.equal(result.hit, false);
+  assert.equal(result.crit, false);
+});
+
+test('default critRange: a natural 19 is a normal hit', () => {
+  const rng = seq(die(19, 20), die(4, 8));
+  const result = resolveAttack({
+    attacker: makePlayer(),
+    target: makeTarget({ ac: 8 }),
+    weapon: longsword,
+    rng,
+  });
+  assert.equal(result.hit, true);
+  assert.equal(result.crit, false, 'natural 19 must not crit without Improved Critical');
+});
+
+// ─── resolveSave advantage (Danger Sense) ─────────────────────────────────────
+
+console.log('\nresolveSave advantage');
+
+test('advantage save keeps the higher of two d20s', () => {
+  // Rolls 4 then 18 → keeps 18. DC 15, no mods → success.
+  const rng = seq(die(4, 20), die(18, 20));
+  const save = resolveSave({
+    creature: { abilityScores: { dex: 10 }, level: 1, saveProfs: [] },
+    ability: 'dex', dc: 15, advantage: true, rng,
+  });
+  assert.equal(save.roll, 18);
+  assert.equal(save.success, true);
+});
+
+test('normal save rolls a single d20', () => {
+  const rng = seq(die(4, 20)); // exhausts after one roll — a second would throw
+  const save = resolveSave({
+    creature: { abilityScores: { dex: 10 }, level: 1, saveProfs: [] },
+    ability: 'dex', dc: 15, rng,
+  });
+  assert.equal(save.roll, 4);
+  assert.equal(save.success, false);
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────

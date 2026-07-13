@@ -6,11 +6,14 @@ import {
   getModifier, getProficiencyBonus, pickAttackMode,
 } from '../../shared/logic/combat.js';
 import { isLineBlocked } from '../../shared/logic/geometry.js';
-import { ATTACK_COOLDOWN_MS, MELEE_HIT_RANGE_PX, ADJACENT_FOE_PX, RAGE_DAMAGE_BONUS } from '../../shared/data/constants.js';
+import {
+  ATTACK_COOLDOWN_MS, MELEE_HIT_RANGE_PX, ADJACENT_FOE_PX, RAGE_DAMAGE_BONUS,
+  KI_ABILITY_COST, OPEN_HAND_STAGGER_MS,
+} from '../../shared/data/constants.js';
 import { WEAPON_REGISTRY, UNARMED } from '../../shared/data/weapons/index.js';
 import { SHIELD_REGISTRY } from '../../shared/data/items/shields.js';
 import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.js';
-import { getDerivedClassFeatures } from '../../shared/logic/class-progression.js';
+import { getDerivedClassFeatures, getClassLevel, getGrantedFeatures } from '../../shared/logic/class-progression.js';
 
 // Monk weapons: unarmed strikes and light/simple melee weapons per SRD.
 const MONK_WEAPON_IDS = new Set(['shortsword', 'dagger', 'handaxe', 'mace', 'unarmed', '']);
@@ -129,7 +132,8 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
 
   const logs      = [];
   const tLabel    = target.state.type || 'enemy';
-  const attacker  = playerToAttacker(player);
+  const derived   = getDerivedClassFeatures(player);
+  const attacker  = playerToAttacker(player, derived);
   const profBonus = getProficiencyBonus(attacker.level);
 
   // Look up the target's damage traits from the enemy definition (not in schema).
@@ -147,7 +151,6 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
     baseWeapon = { ...baseWeapon, damageBonus: (baseWeapon.damageBonus ?? 0) + RAGE_DAMAGE_BONUS };
   }
   // Dueling and versatile two-handed apply to melee only.
-  const derived = getDerivedClassFeatures(player);
   const weapon = mode === 'melee'
     ? applyDueling(getEffectiveWeapon(baseWeapon, player), player, derived.fightingStyle)
     : baseWeapon;
@@ -169,11 +172,14 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
     mainAbilKey = 'str';
   }
 
-  // Source assembly: high-ground advantage (any mode), long-range and
-  // foe-adjacent disadvantage (ranged only).
+  // Source assembly: high-ground advantage (any mode), reckless advantage
+  // (melee only — SRD), long-range and foe-adjacent disadvantage (ranged only).
   const sources = [];
   if (player.elevation === 1 && target.state.elevation === 0) {
     sources.push({ kind: 'advantage', reason: 'high-ground' });
+  }
+  if (mode === 'melee' && player.conditions.includes('reckless')) {
+    sources.push({ kind: 'advantage', reason: 'reckless' });
   }
   if (mode === 'ranged') {
     if (weapon.range && distance > weapon.range.normal) {
@@ -246,12 +252,38 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
     }
   }
 
+  // ── Berserker Frenzy bonus weapon attack ────────────────────────────────────
+  // One extra main-weapon attack per Attack event while raging (GDD Berserker).
+  if (mode === 'melee' && derived.frenzy && player.conditions.includes('rage') && target.state.alive) {
+    const fzResult = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon, sources });
+    if (fzResult.hit) {
+      const applied = applyDamage({
+        target: enemyToTarget(target.state, targetResistances, targetDR),
+        damage: fzResult.damage,
+        damageType: weapon.damageType,
+      });
+      target.state.hp = applied.newHP;
+      if (target.state.hp <= 0) {
+        target.state.hp    = 0;
+        target.state.alive = false;
+        target.state.vx    = 0;
+        target.state.vy    = 0;
+      }
+      const tag = _damageTag(applied, fzResult.crit);
+      logs.push(`${pLabel} [frenzy] → ${tLabel}: hit (${rollStr(fzResult, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac}), ${fzResult.damage}${tag} ${weapon.damageType}`);
+    } else {
+      logs.push(`${pLabel} [frenzy] → ${tLabel}: miss (${rollStr(fzResult, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac})`);
+    }
+  }
+
   // ── Martial Arts bonus unarmed strike ────────────────────────────────────────
-  // Triggers when monk attacks unarmored, no shield, with a monk weapon.
+  // Triggers when a character with any Monk level attacks unarmored, no shield,
+  // with a monk weapon (post-multiclass: the feature follows monk levels, not
+  // the primary class).
   const hasShieldEquipped = !!SHIELD_REGISTRY[player.offhandId];
   if (
     mode === 'melee' &&
-    player.class === 'monk' &&
+    getClassLevel(player, 'monk') >= 1 &&
     !player.equippedArmorId &&
     !hasShieldEquipped &&
     MONK_WEAPON_IDS.has(player.equippedWeaponId) &&
@@ -328,9 +360,17 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
   };
 
   // High-ground advantage: enemy on a platform vs player on the ground.
+  // Reckless Attack: attacks against a reckless player have advantage (SRD).
+  // Patient Defense: attacks against a dodging monk have disadvantage.
   const sources = [];
   if (enemyState.elevation === 1 && targetPlayer.elevation === 0) {
     sources.push({ kind: 'advantage', reason: 'high-ground' });
+  }
+  if (targetPlayer.conditions?.includes('reckless')) {
+    sources.push({ kind: 'advantage', reason: 'reckless target' });
+  }
+  if (targetPlayer.conditions?.includes('patient_defense')) {
+    sources.push({ kind: 'disadvantage', reason: 'patient defense' });
   }
 
   const result = resolveAttack({ attacker, target: playerToTarget(targetPlayer), weapon: null, sources });
@@ -380,14 +420,108 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
 
 /**
  * Use the Second Wind class feature. Returns HP healed, or null if unavailable.
+ * SRD: 1d10 + fighter level (class level, not character level).
  */
 export function applySecondWind(state, sessionId) {
   const player = state.players.get(sessionId);
   if (!player || !player.alive || !player.secondWindAvailable) return null;
-  const heal = rollDice(1, 10) + player.level;
+  const fighterLevel = Math.max(1, getClassLevel(player, 'fighter'));
+  const heal = rollDice(1, 10) + fighterLevel;
   player.hp = Math.min(player.maxHp, player.hp + heal);
   player.secondWindAvailable = false;
   return heal;
+}
+
+/**
+ * Use Action Surge (Fighter 2): instantly reset the attack timer. 1/rest.
+ * Returns true on success, null if unavailable or the timer is already ready
+ * (don't burn the use on a no-op).
+ */
+export function applyActionSurge(state, sessionId) {
+  const player = state.players.get(sessionId);
+  if (!player || !player.alive || !player.actionSurgeAvailable) return null;
+  if (player.attackCooldownMs <= 0) return null;
+  player.attackCooldownMs = 0;
+  player.actionSurgeAvailable = false;
+  return true;
+}
+
+/**
+ * Flurry of Blows (Monk 2): spend 1 ki for two immediate unarmed strikes
+ * against the nearest living enemy in melee range. Independent of the attack
+ * timer (bonus action per GDD action-economy translation). Requires the
+ * martial-arts stance: no armor, no shield, monk weapon.
+ *
+ * Open Hand Technique (Way of the Open Hand): each flurry hit staggers the
+ * target — its attack timer is pushed back to OPEN_HAND_STAGGER_MS.
+ *
+ * Returns { logs } on success, { denied } otherwise
+ * ('no_ki' | 'no_target' | 'not_unarmored').
+ */
+export function applyFlurryOfBlows(state, sessionId, enemyDefs = new Map()) {
+  const player = state.players.get(sessionId);
+  if (!player || !player.alive) return { denied: 'no_target' };
+  if ((player.kiPoints ?? 0) < KI_ABILITY_COST) return { denied: 'no_ki' };
+
+  const hasShieldEquipped = !!SHIELD_REGISTRY[player.offhandId];
+  if (player.equippedArmorId || hasShieldEquipped || !MONK_WEAPON_IDS.has(player.equippedWeaponId)) {
+    return { denied: 'not_unarmored' };
+  }
+
+  const target = nearestLivingEnemy(state, player);
+  if (!target) return { denied: 'no_target' };
+
+  player.kiPoints -= KI_ABILITY_COST;
+
+  const derived   = getDerivedClassFeatures(player);
+  const attacker  = playerToAttacker(player, derived);
+  const profBonus = getProficiencyBonus(attacker.level);
+  const enemyDef          = enemyDefs.get(target.id) ?? {};
+  const targetResistances = enemyDef.resistances ?? [];
+  const targetDR          = enemyDef.damageReduction ?? null;
+
+  const pLabel = player.class ? player.class[0].toUpperCase() + player.class.slice(1) : 'Player';
+  const tLabel = target.state.type || 'enemy';
+
+  const maWeapon  = { ...UNARMED, properties: [...(UNARMED.properties ?? []), 'finesse'] };
+  const strMod    = getModifier(player.str);
+  const dexMod    = getModifier(player.dex);
+  const abilMod   = dexMod > strMod ? dexMod : strMod;
+  const abilKey   = dexMod > strMod ? 'dex' : 'str';
+
+  const sources = [];
+  if (player.elevation === 1 && target.state.elevation === 0) {
+    sources.push({ kind: 'advantage', reason: 'high-ground' });
+  }
+
+  const logs = [];
+  for (let strike = 0; strike < 2 && target.state.alive; strike++) {
+    const result = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon: maWeapon, sources });
+    if (result.hit) {
+      const applied = applyDamage({
+        target: enemyToTarget(target.state, targetResistances, targetDR),
+        damage: result.damage,
+        damageType: maWeapon.damageType,
+      });
+      target.state.hp = applied.newHP;
+      if (target.state.hp <= 0) {
+        target.state.hp    = 0;
+        target.state.alive = false;
+        target.state.vx    = 0;
+        target.state.vy    = 0;
+      }
+      let staggerTag = '';
+      if (derived.openHandTechnique && target.state.alive) {
+        target.state.attackCooldownMs = Math.max(target.state.attackCooldownMs, OPEN_HAND_STAGGER_MS);
+        staggerTag = ' — staggered!';
+      }
+      const tag = _damageTag(applied, result.crit);
+      logs.push(`${pLabel} [flurry] → ${tLabel}: hit (${rollStr(result, profBonus, abilMod, abilKey)} vs AC ${target.state.ac}), ${result.damage}${tag} ${maWeapon.damageType}${staggerTag}`);
+    } else {
+      logs.push(`${pLabel} [flurry] → ${tLabel}: miss (${rollStr(result, profBonus, abilMod, abilKey)} vs AC ${target.state.ac})`);
+    }
+  }
+  return { logs };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -406,12 +540,18 @@ function nearestLivingEnemy(state, player) {
   return nearest;
 }
 
-function playerToAttacker(player) {
+/**
+ * `derived` is the getDerivedClassFeatures(player) result — passed in so a
+ * multi-attack sequence computes it once. critRange carries the Champion's
+ * Improved Critical (19) into resolveAttack; omitted → natural 20 only.
+ */
+function playerToAttacker(player, derived = null) {
   return {
     abilityScores: { str: player.str, dex: player.dex, con: player.con,
                      int: player.int, wis: player.wis, cha: player.cha },
     level: player.level,
     conditions: [...player.conditions],
+    critRange: derived?.critRange ?? 20,
   };
 }
 

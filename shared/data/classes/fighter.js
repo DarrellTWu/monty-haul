@@ -30,12 +30,23 @@ export const FIGHTER = {
   // SRD Fighter: STR and CON. First-class only post-multiclass.
   saveProficiencies: ['str', 'con'],
 
-  // Per-level progression. MVP fills only level 1; 2/3 are explicit stubs.
+  // Per-level progression (SRD Fighter 1–3).
   levels: {
     1: { features: ['second_wind'], grants: { fightingStyle: 'dueling', feat: 'alert' } },
-    2: { features: [] },
-    3: { features: [] }, // subclass slot — deferred
+    2: { features: ['action_surge'] },
+    3: { features: [], grants: { subclassChoice: true } }, // subclass unlocked by emblem item — see subclasses below
   },
+
+  // Subclasses reachable at SUBCLASS_UNLOCK_LEVEL when the matching emblem
+  // item (category 'emblem', unlocks.classId === 'fighter') is carried.
+  // Champion (SRD): Improved Critical — crit on 19–20.
+  subclasses: {
+    champion: { id: 'champion', name: 'Champion', grants: { critRange: 19 } },
+  },
+
+  // Free starter loadout extras (empty-raider-pack joins only). The emblem
+  // enables the Champion subclass unlock at Fighter 3.
+  startingItemIds: ['champion_sigil'],
 
   // Gearless cap per class (GDD §3). Will become gear-dependent later.
   gearlessLevelCap: 3,

@@ -4,10 +4,14 @@
 //        combat log (bottom-right).
 
 import { getRoom } from '../network/ColyseusClient.js';
-import { ATTACK_COOLDOWN_MS, RAGE_DURATION_MS } from '../../../shared/data/constants.js';
+import {
+  ATTACK_COOLDOWN_MS, RAGE_DURATION_MS,
+  PATIENT_DEFENSE_DURATION_MS, STEP_OF_WIND_DURATION_MS,
+} from '../../../shared/data/constants.js';
 import {
   BLESS_POTION, LONGSTRIDER_POTION, FALSE_LIFE_POTION,
 } from '../../../shared/data/items/consumables.js';
+import { ABILITY_REGISTRY } from '../../../shared/data/abilities.js';
 
 // Attack timer ring — bottom-center.
 const ATK_CX          = 640;
@@ -45,6 +49,25 @@ const CONDITION_META = {
     getRemaining: (p) => p.rageRemainingMs         ?? 0,
     timerText:    (p) => `${((p.rageRemainingMs ?? 0) / 1000).toFixed(0)}s`,
   },
+  patient_defense: {
+    label: 'DEF', color: 0x66ccff, dimColor: 0x112a33, colorHex: '#66ccff',
+    durationMs:   PATIENT_DEFENSE_DURATION_MS,
+    getRemaining: (p) => p.patientDefenseRemainingMs ?? 0,
+    timerText:    (p) => `${((p.patientDefenseRemainingMs ?? 0) / 1000).toFixed(0)}s`,
+  },
+  dash: {
+    label: 'DSH', color: 0xaaffee, dimColor: 0x113330, colorHex: '#aaffee',
+    durationMs:   STEP_OF_WIND_DURATION_MS,
+    getRemaining: (p) => p.dashRemainingMs ?? 0,
+    timerText:    (p) => `${((p.dashRemainingMs ?? 0) / 1000).toFixed(0)}s`,
+  },
+  // Reckless Attack is a toggle, not a timer — render a full ring while active.
+  reckless: {
+    label: 'RCK', color: 0xff4444, dimColor: 0x331111, colorHex: '#ff4444',
+    durationMs:   1,
+    getRemaining: () => 1,
+    timerText:    () => 'ON',
+  },
 };
 
 // Hotbar display — to the right of the attack ring.
@@ -55,10 +78,10 @@ const HOTBAR_SLOT_H = 32;
 const HOTBAR_GAP    = 2;
 const KEYS          = ['1','2','3','4','5','6','7','8','9','0'];
 
-// Short display labels for hotbar items.
+// Short display labels for hotbar items. Abilities derive from
+// ABILITY_REGISTRY; consumables keep their hand-tuned shorts.
 const HOTBAR_SHORT = {
-  second_wind:        '2nd Wind',
-  rage:               'Rage',
+  ...Object.fromEntries(Object.values(ABILITY_REGISTRY).map(a => [a.id, a.hotbarShort])),
   healing_potion:     'Heal Pot',
   bless_potion:       'Bless',
   longstrider_potion: 'Stride',
@@ -89,6 +112,11 @@ export class HUDScene extends Phaser.Scene {
     this._statusLabel = this.add.text(ATK_CX, CY + RING_RADIUS + 5, 'READY', {
       fontSize: '10px', color: '#44ff44', fontFamily: 'monospace',
     }).setOrigin(0.5, 0);
+
+    // Ki counter — visible only when the player has a ki pool (Monk 2+).
+    this._kiLabel = this.add.text(ATK_CX, CY + RING_RADIUS + 17, '', {
+      fontSize: '10px', color: '#88ddff', fontFamily: 'monospace',
+    }).setOrigin(0.5, 0).setVisible(false);
 
     // ── Condition ring pool (dynamically filled left of attack ring) ──────────
     // Slots are assigned newest-first from right; unused slots are invisible.
@@ -156,6 +184,13 @@ export class HUDScene extends Phaser.Scene {
       this._statusLabel.setText('READY').setColor('#44ff44');
     } else {
       this._statusLabel.setText(`${(cooldown / 1000).toFixed(1)}s`).setColor('#ffaa44');
+    }
+
+    // ── Ki counter ───────────────────────────────────────────────────────────
+    if ((player.kiMax ?? 0) > 0) {
+      this._kiLabel.setText(`KI ${player.kiPoints}/${player.kiMax}`).setVisible(true);
+    } else {
+      this._kiLabel.setVisible(false);
     }
 
     // ── Condition rings (dynamic, newest-first from right) ───────────────────

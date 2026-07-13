@@ -152,7 +152,11 @@ export function resolveAttack({ attacker, target, weapon, conditions, sources = 
     return { hit: false, crit: false, damage: 0, roll: d20, rawD20: d20, conditionBonus: 0, rollMode, rollModeSources, advantageRolls };
   }
 
-  const isCrit = d20 === 20;
+  // Expanded crit range (Champion's Improved Critical: 19–20). Per SRD only a
+  // natural 20 is an automatic hit — a 19 crits only if the total also hits;
+  // the isCrit && hit combination below enforces that.
+  const critRange = attacker.critRange ?? 20;
+  const isCrit = d20 >= critRange;
 
   // ── Attack bonus ─────────────────────────────────────────────────────────
   // Players have abilityScores + level; enemies have a pre-computed attackBonus.
@@ -191,7 +195,9 @@ export function resolveAttack({ attacker, target, weapon, conditions, sources = 
   //       as they are designed and added to the conditions system.
 
   const totalRoll = d20 + attackBonus + conditionBonus;
-  const hit = isCrit || totalRoll >= target.ac;
+  // Only a natural 20 auto-hits; an expanded-range crit (19) still needs the
+  // total to beat AC. Past this gate, a hit that rolled ≥ critRange is a crit.
+  const hit = d20 === 20 || totalRoll >= target.ac;
 
   if (!hit) {
     return { hit: false, crit: false, damage: 0, roll: totalRoll, rawD20: d20, conditionBonus, rollMode, rollModeSources, advantageRolls };
@@ -257,16 +263,22 @@ export function pickAttackMode(weapon, distance) {
 /**
  * Resolve a saving throw against a DC.
  *
+ * `advantage: true` rolls 2d20 keep higher (e.g. Barbarian Danger Sense on
+ * DEX saves). No disadvantage source exists on saves yet — add the tri-state
+ * when one does.
+ *
  * @param {{
  *   creature: { abilityScores?: object, level?: number, saveProfs?: string[] },
  *   ability: 'str'|'dex'|'con'|'int'|'wis'|'cha',
  *   dc: number,
+ *   advantage?: boolean,
  *   rng?: () => number
  * }} params
  * @returns {{ success: boolean, roll: number, total: number }}
  */
-export function resolveSave({ creature, ability, dc, rng = Math.random }) {
-  const d20 = rollDice(1, 20, rng);
+export function resolveSave({ creature, ability, dc, advantage = false, rng = Math.random }) {
+  let d20 = rollDice(1, 20, rng);
+  if (advantage) d20 = Math.max(d20, rollDice(1, 20, rng));
   const abilityMod = getModifier(creature.abilityScores?.[ability] ?? 10);
   const isProf = creature.saveProfs?.includes(ability) ?? false;
   const profBonus = isProf ? getProficiencyBonus(creature.level ?? 1) : 0;

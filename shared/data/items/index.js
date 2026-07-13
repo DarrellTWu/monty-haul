@@ -16,6 +16,7 @@ import { ARMOR_REGISTRY }      from '../armor/armor.js';
 import { SHIELD_REGISTRY }     from './shields.js';
 import { CONSUMABLE_REGISTRY } from './consumables.js';
 import { MATERIAL_REGISTRY }   from './materials.js';
+import { EMBLEM_REGISTRY }     from './emblems.js';
 
 export const ITEM_REGISTRY = Object.freeze({
   ...WEAPON_REGISTRY,
@@ -23,6 +24,7 @@ export const ITEM_REGISTRY = Object.freeze({
   ...SHIELD_REGISTRY,
   ...CONSUMABLE_REGISTRY,
   ...MATERIAL_REGISTRY,
+  ...EMBLEM_REGISTRY,
 });
 
 /** True iff `id` resolves in ITEM_REGISTRY. */
@@ -32,4 +34,4 @@ export const isKnownItem = (id) => Object.hasOwn(ITEM_REGISTRY, id);
 export const getItem = (id) => ITEM_REGISTRY[id] ?? null;
 
 /** Categories in display order (used by getStashSections and friends). */
-export const CATEGORY_DISPLAY_ORDER = ['weapon', 'armor', 'shield', 'consumable', 'material'];
+export const CATEGORY_DISPLAY_ORDER = ['weapon', 'armor', 'shield', 'consumable', 'material', 'emblem'];

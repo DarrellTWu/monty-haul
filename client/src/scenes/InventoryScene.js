@@ -19,6 +19,7 @@ import {
   sendTakeItem, sendTakeGold, sendDropItem,
 } from '../network/ColyseusClient.js';
 import { CLASS_REGISTRY } from '../../../shared/data/classes/index.js';
+import { ABILITY_REGISTRY } from '../../../shared/data/abilities.js';
 import { getProficiencyBonus } from '../../../shared/logic/combat.js';
 import { getItem } from '../../../shared/data/items/index.js';
 import { ARMOR_REGISTRY } from '../../../shared/data/armor/armor.js';
@@ -533,6 +534,20 @@ export class InventoryScene extends Phaser.Scene {
         const status = raging ? 'RAGING' : uses > 0 ? `${uses} uses` : 'SPENT';
         text.setText(`💢 Rage  [${status}]`)
           .setColor(sel ? '#88ddff' : (raging || uses > 0) ? '#ff8844' : '#665533');
+      } else if (key === 'action_surge') {
+        const avail = player.actionSurgeAvailable;
+        text.setText(`⚡ Action Surge  [${avail ? 'READY' : 'USED'}]`)
+          .setColor(sel ? '#88ddff' : (avail ? '#ffdd88' : '#665533'));
+      } else if (key === 'reckless_attack') {
+        const on = player.conditions?.includes('reckless');
+        text.setText(`💢 Reckless Attack  [${on ? 'ON' : 'OFF'}]`)
+          .setColor(sel ? '#88ddff' : (on ? '#ff4444' : '#ffdd88'));
+      } else if (key === 'flurry_of_blows' || key === 'patient_defense' || key === 'step_of_wind') {
+        const icon  = key === 'flurry_of_blows' ? '👊' : key === 'patient_defense' ? '🛡' : '💨';
+        const label = key === 'flurry_of_blows' ? 'Flurry of Blows' : key === 'patient_defense' ? 'Patient Defense' : 'Step of the Wind';
+        const ki    = player.kiPoints ?? 0;
+        text.setText(`${icon} ${label}  [${ki} ki]`)
+          .setColor(sel ? '#88ddff' : (ki > 0 ? '#ffdd88' : '#665533'));
       }
     }
     if (this._nameText) {
@@ -580,10 +595,9 @@ export class InventoryScene extends Phaser.Scene {
       const binding = player.hotbar?.[i] ?? '';
       const slot    = this._hotbarSlots[i];
       if (!slot) continue;
-      if (binding === 'second_wind') {
-        slot.itemLabel.setText('2nd Wind').setColor('#ffdd88');
-      } else if (binding === 'rage') {
-        slot.itemLabel.setText('Rage').setColor('#ff8844');
+      if (ABILITY_REGISTRY[binding]) {
+        slot.itemLabel.setText(ABILITY_REGISTRY[binding].hotbarShort)
+          .setColor(binding === 'rage' || binding === 'reckless_attack' ? '#ff8844' : '#ffdd88');
       } else if (binding && getItem(binding)?.category === 'consumable') {
         const def = getItem(binding);
         slot.itemLabel.setText(def.hotbarShort ?? def.label).setColor('#ffdd88');
@@ -1042,30 +1056,28 @@ export class InventoryScene extends Phaser.Scene {
   }
 
   /**
-   * Render one class's level-1 feature block at (lx, ly) and return the new y.
-   * Draggable widgets (Second Wind, Rage) are appended to `_abilityWidgets`
-   * so `_refresh` can update their availability text each frame.
+   * Render one class's feature block at (lx, ly) and return the new y.
+   * Shows the class's taken level and every feature granted at levels ≤ it.
+   * Draggable widgets (Second Wind, Rage, Action Surge, Reckless, ki
+   * abilities) are appended to `_abilityWidgets` so `_refresh` can update
+   * their availability text each frame.
    */
   _renderClassFeaturesBlock(classId, lx, ly) {
     const def       = CLASS_REGISTRY[classId];
     const className = def?.name ?? (classId[0].toUpperCase() + classId.slice(1));
 
-    this._leftVp.track(this.add.text(lx, ly, className, { ...STYLE_SUBHEAD, color: '#aaccdd' })); ly += 14;
+    const room   = getRoom();
+    const player = room?.state.players.get(room?.sessionId);
+    const lvl    = player?.classLevels?.get?.(classId) ?? 1;
 
+    this._leftVp.track(this.add.text(lx, ly, `${className} ${lvl}`, { ...STYLE_SUBHEAD, color: '#aaccdd' })); ly += 14;
+
+    // ── Level 1 passives (hand-tuned flavor lines) ────────────────────────────
     if (classId === 'barbarian') {
-      const txt = this._leftVp.track(this.add.text(lx, ly, '💢 Rage  [2 uses]', STYLE_ITEM));
-      this._makeDraggable(txt, 'rage', lx, ly);
-      { let d = false;
-        txt.on('pointerdown', () => { d = false; });
-        txt.on('drag',        () => { d = true;  });
-        txt.on('pointerup',   () => {
-          if (!d) { this._selectedItemId = (this._selectedItemId === 'rage') ? null : 'rage'; this._updateSelection(); }
-          d = false;
-        });
-      }
-      this._abilityWidgets.push({ key: 'rage', text: txt });
-      ly += 13;
+      ly = this._renderAbilityWidget('rage', '💢 Rage  [2 uses]', lx, ly);
       this._leftVp.track(this.add.text(lx, ly, '+2 dmg, resist phys dmg (30s)  drag→hotbar', STYLE_NOTE)); ly += 17;
+      this._leftVp.track(this.add.text(lx, ly, 'Unarmored Defense', STYLE_BODY)); ly += 13;
+      this._leftVp.track(this.add.text(lx, ly, 'AC = 10 + DEX + CON  (no armor or shield)', STYLE_NOTE)); ly += 17;
     } else if (classId === 'monk') {
       this._leftVp.track(this.add.text(lx, ly, 'Unarmored Defense', STYLE_BODY)); ly += 13;
       this._leftVp.track(this.add.text(lx, ly, 'AC = 10 + DEX + WIS  (no armor or shield)', STYLE_NOTE)); ly += 17;
@@ -1074,22 +1086,67 @@ export class InventoryScene extends Phaser.Scene {
     } else if (classId === 'fighter') {
       this._leftVp.track(this.add.text(lx, ly, 'Fighting Style: Dueling', STYLE_BODY)); ly += 13;
       this._leftVp.track(this.add.text(lx, ly, '+2 dmg (one-hand, no weapon offhand)', STYLE_NOTE)); ly += 17;
-      const txt = this._leftVp.track(this.add.text(lx, ly, '⚡ Second Wind  [READY]', STYLE_ITEM));
-      this._makeDraggable(txt, 'second_wind', lx, ly);
-      { let d = false;
-        txt.on('pointerdown', () => { d = false; });
-        txt.on('drag',        () => { d = true;  });
-        txt.on('pointerup',   () => {
-          if (!d) { this._selectedItemId = (this._selectedItemId === 'second_wind') ? null : 'second_wind'; this._updateSelection(); }
-          d = false;
-        });
+      ly = this._renderAbilityWidget('second_wind', '⚡ Second Wind  [READY]', lx, ly);
+      this._leftVp.track(this.add.text(lx, ly, 'Heal 1d10+lvl HP (1/rest)  drag→hotbar', STYLE_NOTE)); ly += 17;
+    }
+
+    // ── Level 2 features ──────────────────────────────────────────────────────
+    if (lvl >= 2) {
+      if (classId === 'fighter') {
+        ly = this._renderAbilityWidget('action_surge', '⚡ Action Surge  [READY]', lx, ly);
+        this._leftVp.track(this.add.text(lx, ly, 'Reset attack timer (1/rest)  drag→hotbar', STYLE_NOTE)); ly += 17;
+      } else if (classId === 'barbarian') {
+        ly = this._renderAbilityWidget('reckless_attack', '💢 Reckless Attack  [OFF]', lx, ly);
+        this._leftVp.track(this.add.text(lx, ly, 'Toggle: adv on melee atks, foes adv on you', STYLE_NOTE)); ly += 17;
+        this._leftVp.track(this.add.text(lx, ly, 'Danger Sense', STYLE_BODY)); ly += 13;
+        this._leftVp.track(this.add.text(lx, ly, 'Advantage on DEX saves', STYLE_NOTE)); ly += 17;
+      } else if (classId === 'monk') {
+        this._leftVp.track(this.add.text(lx, ly, `Ki pool: ${lvl} pts / rest · Unarmored Movement +10ft`, STYLE_NOTE)); ly += 17;
+        ly = this._renderAbilityWidget('flurry_of_blows', '👊 Flurry of Blows  [1 ki]', lx, ly);
+        this._leftVp.track(this.add.text(lx, ly, 'Two bonus unarmed strikes  drag→hotbar', STYLE_NOTE)); ly += 17;
+        ly = this._renderAbilityWidget('patient_defense', '🛡 Patient Defense  [1 ki]', lx, ly);
+        this._leftVp.track(this.add.text(lx, ly, 'Attackers have disadv (6s)  drag→hotbar', STYLE_NOTE)); ly += 17;
+        ly = this._renderAbilityWidget('step_of_wind', '💨 Step of the Wind  [1 ki]', lx, ly);
+        this._leftVp.track(this.add.text(lx, ly, 'Dash: double speed (6s)  drag→hotbar', STYLE_NOTE)); ly += 17;
       }
-      this._abilityWidgets.push({ key: 'second_wind', text: txt });
-      ly += 13;
-      this._leftVp.track(this.add.text(lx, ly, 'Heal 1d10+1 HP (1/short rest)  drag→hotbar', STYLE_NOTE)); ly += 17;
+    }
+
+    // ── Level 3 subclass line ────────────────────────────────────────────────
+    if (lvl >= 3) {
+      const subId  = player?.subclasses?.get?.(classId);
+      const subDef = def?.subclasses?.[subId];
+      if (subDef) {
+        this._leftVp.track(this.add.text(lx, ly, `★ ${subDef.name}`, { ...STYLE_BODY, color: '#ffcc44' })); ly += 13;
+        const grantNote =
+          subDef.grants?.critRange         ? `Crit on ${subDef.grants.critRange}–20` :
+          subDef.grants?.frenzy            ? 'Frenzy: extra attack while raging' :
+          subDef.grants?.openHandTechnique ? 'Flurry hits stagger the target' : '';
+        if (grantNote) { this._leftVp.track(this.add.text(lx, ly, grantNote, STYLE_NOTE)); ly += 17; }
+      } else {
+        this._leftVp.track(this.add.text(lx, ly, 'Subclass slot open — carry the class emblem when leveling', STYLE_NOTE)); ly += 17;
+      }
     }
 
     return ly;
+  }
+
+  /**
+   * Shared draggable + click-to-select ability row. Returns the new y.
+   * Appends to `_abilityWidgets` so `_refresh` updates the status text.
+   */
+  _renderAbilityWidget(key, initialLabel, lx, ly) {
+    const txt = this._leftVp.track(this.add.text(lx, ly, initialLabel, STYLE_ITEM));
+    this._makeDraggable(txt, key, lx, ly);
+    { let d = false;
+      txt.on('pointerdown', () => { d = false; });
+      txt.on('drag',        () => { d = true;  });
+      txt.on('pointerup',   () => {
+        if (!d) { this._selectedItemId = (this._selectedItemId === key) ? null : key; this._updateSelection(); }
+        d = false;
+      });
+    }
+    this._abilityWidgets.push({ key, text: txt });
+    return ly + 13;
   }
 
   /**

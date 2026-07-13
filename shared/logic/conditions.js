@@ -38,6 +38,15 @@ export const CONDITION_DEFS = {
     isExhausted: (p) => p.tempHp <= 0,
     onExpire:    (p) => { p.tempHp = 0; },
   },
+  // Monk ki abilities. patient_defense: attackers roll with disadvantage
+  // (checked in CombatSystem.enemyAttack). dash: doubled movement speed
+  // (checked in MovementSystem) — Step of the Wind is the only source today.
+  patient_defense: {
+    mirrorField: 'patientDefenseRemainingMs',
+  },
+  dash: {
+    mirrorField: 'dashRemainingMs',
+  },
 };
 
 const timerKey = (sessionId, conditionId) => `${sessionId}_${conditionId}`;
