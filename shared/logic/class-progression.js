@@ -104,6 +104,16 @@ export function getGrantedFeatures(player) {
   return out;
 }
 
+/**
+ * Sneak Attack dice count (d6s) for the player's Rogue level: ceil(level / 2).
+ * SRD scaling — 1d6 at rogue 1, 2d6 at 3, 3d6 at 5. Returns 0 with no Rogue
+ * levels. Die size is SNEAK_ATTACK_DIE_SIDES in shared/data/constants.js.
+ */
+export function getSneakAttackDice(player) {
+  const lvl = getClassLevel(player, 'rogue');
+  return lvl > 0 ? Math.ceil(lvl / 2) : 0;
+}
+
 /** Default critical-hit threshold (natural 20) when no subclass improves it. */
 export const DEFAULT_CRIT_RANGE = 20;
 
@@ -126,6 +136,8 @@ export const DEFAULT_CRIT_RANGE = 20;
  *                          attack per Attack event while raging.
  *   - openHandTechnique:   OR across taken subclasses (Open Hand) — Flurry hits
  *                          stagger the target.
+ *   - skirmish:            OR across taken subclasses (Skirmisher) — Sneak Attack
+ *                          eligible when attacker and target are both moving.
  */
 export function getDerivedClassFeatures(player) {
   const out = {
@@ -137,6 +149,7 @@ export function getDerivedClassFeatures(player) {
     critRange: DEFAULT_CRIT_RANGE,
     frenzy: false,
     openHandTechnique: false,
+    skirmish: false,
   };
   // Tolerate missing classLevels (e.g. plain-object test fixtures): no taken
   // classes ⇒ no derived features.
@@ -165,6 +178,7 @@ export function getDerivedClassFeatures(player) {
       if (grants.critRange && grants.critRange < out.critRange) out.critRange = grants.critRange;
       if (grants.frenzy) out.frenzy = true;
       if (grants.openHandTechnique) out.openHandTechnique = true;
+      if (grants.skirmish) out.skirmish = true;
     }
   }
   return out;

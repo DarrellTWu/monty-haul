@@ -225,6 +225,40 @@ export function resolveAttack({ attacker, target, weapon, conditions, sources = 
   return { hit: true, crit: isCrit, damage, roll: totalRoll, rawD20: d20, conditionBonus, rollMode, rollModeSources, advantageRolls };
 }
 
+// ─── Sneak Attack eligibility ────────────────────────────────────────────────
+
+/**
+ * Sneak Attack eligibility for one resolved attack (SRD adapted for real-time).
+ * Caller (CombatSystem) enforces once-per-Attack-event and rolls the dice;
+ * this helper only answers "does this hit qualify, and why?".
+ *
+ * SRD rule: finesse or ranged weapon, AND either advantage on the attack, or
+ * an ally within 5 ft of the target while the attack has no disadvantage.
+ * Skirmish (Skirmisher subclass) adds a third leg under the same
+ * no-disadvantage guard: attacker and target are both moving at resolution
+ * time (see docs/design/skirmisher-progression.md for the moving-window spec).
+ *
+ * @param {{
+ *   weapon: import('../types/weapon.js').Weapon | null,
+ *   rollMode: 'normal' | 'advantage' | 'disadvantage',
+ *   allyAdjacent?: boolean,
+ *   skirmish?: boolean,
+ *   attackerMoving?: boolean,
+ *   targetMoving?: boolean
+ * }} params
+ * @returns {'advantage' | 'ally adjacent' | 'skirmish' | null} the winning
+ *   eligibility reason (combat-log label), or null if the hit doesn't qualify
+ */
+export function sneakAttackEligibility({ weapon, rollMode, allyAdjacent = false, skirmish = false, attackerMoving = false, targetMoving = false }) {
+  const weaponOk = weapon?.type === 'ranged' || weapon?.properties?.includes('finesse');
+  if (!weaponOk) return null;
+  if (rollMode === 'advantage') return 'advantage';
+  if (rollMode === 'disadvantage') return null;
+  if (allyAdjacent) return 'ally adjacent';
+  if (skirmish && attackerMoving && targetMoving) return 'skirmish';
+  return null;
+}
+
 // ─── Attack-mode dispatch ────────────────────────────────────────────────────
 
 /**

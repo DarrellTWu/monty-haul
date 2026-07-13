@@ -40,6 +40,7 @@ import {
   TRAP_DAMAGE, TRAP_SAVE_DC, TRAP_RADIUS_PX, TRAP_COOLDOWN_MS,
   RAGE_DURATION_MS, RAGE_DAMAGE_BONUS,
   PATIENT_DEFENSE_DURATION_MS, STEP_OF_WIND_DURATION_MS, KI_ABILITY_COST,
+  CUNNING_ACTION_DASH_MS, CUNNING_ACTION_COOLDOWN_MS,
   MAX_PLAYERS_PER_ROOM,
 } from '../../shared/data/constants.js';
 
@@ -605,6 +606,7 @@ export class DungeonRoom extends Room {
     if (rageMax > 0) player.rageUsesRemaining = rageMax;
     const kiMax = getKiMax(player);
     if (kiMax > 0) player.kiPoints = kiMax;
+    player.cunningActionCooldownMs = 0;
 
     clearPlayerConditions(player, this._conditionTimers, sessionId);
   }
@@ -851,6 +853,16 @@ export class DungeonRoom extends Room {
       applyCondition(player, 'dash', STEP_OF_WIND_DURATION_MS, this._conditionTimers, sessionId);
       this.broadcast('combat_log', {
         message: `💨 Step of the Wind: ${cn} dashes (double speed, ${STEP_OF_WIND_DURATION_MS / 1000}s, 1 ki).`,
+      });
+    } else if (abilityId === 'cunning_action') {
+      // Rogue 2 — Dash on a cooldown (the game's first rate-limited bonus
+      // action; GDD flags these for PvP review). Shares the 'dash' condition
+      // (and HUD ring) with Step of the Wind.
+      if (player.cunningActionCooldownMs > 0 || player.conditions.includes('dash')) return;
+      player.cunningActionCooldownMs = CUNNING_ACTION_COOLDOWN_MS;
+      applyCondition(player, 'dash', CUNNING_ACTION_DASH_MS, this._conditionTimers, sessionId);
+      this.broadcast('combat_log', {
+        message: `🗡 Cunning Action: ${cn} dashes (double speed, ${CUNNING_ACTION_DASH_MS / 1000}s).`,
       });
     }
   }

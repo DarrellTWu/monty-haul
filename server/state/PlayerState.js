@@ -38,6 +38,7 @@ export class PlayerState extends Schema {
     this.tempHp                   = 0; // temporary HP (absorbed before regular HP)
     this.rageRemainingMs          = 0; // synced for HUD ring display
     this.rageUsesRemaining        = 0; // remaining rage activations this run
+    this.cunningActionCooldownMs  = 0; // Rogue 2 — Cunning Action reuse lockout; synced for inventory/hotbar status
     this.gold                     = 0; // run-scope wallet; transferred to hub on extract, lost on death
     this.kills                    = 0; // enemies killed this run (feeds run_history.kills)
     // Ability scores — set at join from player's point-buy choices, mutable during run
@@ -85,6 +86,7 @@ defineTypes(PlayerState, {
   tempHp:                   'number',
   rageRemainingMs:          'number',
   rageUsesRemaining:        'number',
+  cunningActionCooldownMs:  'number',
   gold:                     'number',
   kills:                    'number',
   str:                      'number',

@@ -68,6 +68,10 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
     if (player.attackCooldownMs > 0) {
       player.attackCooldownMs = Math.max(0, player.attackCooldownMs - dt);
     }
+    // Ability cooldowns tick alongside the attack timer.
+    if (player.cunningActionCooldownMs > 0) {
+      player.cunningActionCooldownMs = Math.max(0, player.cunningActionCooldownMs - dt);
+    }
 
     const prevX = player.x;
     const prevY = player.y;

@@ -1,6 +1,6 @@
 ---
 status: shipped
-updated: 2026-05-17
+updated: 2026-07-13
 purpose: Docs index. First stop for "which doc do I need?"
 ---
 
@@ -39,6 +39,7 @@ purpose: Docs index. First stop for "which doc do I need?"
 > These describe scope larger than what is built. Use as design context, not binding spec.
 - [`design/gdd.md`](design/gdd.md) — Game design document, combat system, class roster, items
 - [`design/gdd_crafting.md`](design/gdd_crafting.md) — Crafting & itemization GDD
+- [`design/skirmisher-progression.md`](design/skirmisher-progression.md) — Rogue/Skirmisher 1–10 ability sequence (1–3 shipped; 4–10 design intent)
 
 ## Historical (do not edit; may be stale)
 - [`archive/server-persistence-plan.md`](archive/server-persistence-plan.md) — Phase 0–3 persistence build (shipped)

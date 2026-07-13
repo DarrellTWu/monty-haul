@@ -3,17 +3,18 @@
 
 import {
   resolveAttack, applyDamage, rollDice,
-  getModifier, getProficiencyBonus, pickAttackMode,
+  getModifier, getProficiencyBonus, pickAttackMode, sneakAttackEligibility,
 } from '../../shared/logic/combat.js';
 import { isLineBlocked } from '../../shared/logic/geometry.js';
 import {
   ATTACK_COOLDOWN_MS, MELEE_HIT_RANGE_PX, ADJACENT_FOE_PX, RAGE_DAMAGE_BONUS,
   KI_ABILITY_COST, OPEN_HAND_STAGGER_MS,
+  SNEAK_ATTACK_DIE_SIDES, ALLY_ADJACENT_PX, CRIT_MULTIPLIER,
 } from '../../shared/data/constants.js';
 import { WEAPON_REGISTRY, UNARMED } from '../../shared/data/weapons/index.js';
 import { SHIELD_REGISTRY } from '../../shared/data/items/shields.js';
 import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.js';
-import { getDerivedClassFeatures, getClassLevel, getGrantedFeatures } from '../../shared/logic/class-progression.js';
+import { getDerivedClassFeatures, getClassLevel, getGrantedFeatures, getSneakAttackDice } from '../../shared/logic/class-progression.js';
 
 // Monk weapons: unarmed strikes and light/simple melee weapons per SRD.
 const MONK_WEAPON_IDS = new Set(['shortsword', 'dagger', 'handaxe', 'mace', 'unarmed', '']);
@@ -190,12 +191,36 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
     }
   }
 
+  // Sneak Attack (Rogue): once per Attack event, the first eligible hit (main
+  // hand, else offhand) carries the sneak dice. Eligibility is the pure helper
+  // in shared/logic/combat.js; movement is sampled at resolution time.
+  const sneakDiceCount = getSneakAttackDice(player);
+  const sneakCtx = sneakDiceCount > 0 ? {
+    allyAdjacent:   _anyAllyAdjacent(state, sessionId, target.state),
+    skirmish:       derived.skirmish,
+    attackerMoving: player.vx !== 0 || player.vy !== 0,
+    targetMoving:   target.state.vx !== 0 || target.state.vy !== 0,
+  } : null;
+  let sneakSpent = false;
+
   const result = resolveAttack({ attacker, target: enemyToTarget(target.state, targetResistances, targetDR), weapon, sources });
 
   if (result.hit) {
+    let mainDamage = result.damage;
+    let sneakTag   = '';
+    if (sneakCtx && !sneakSpent) {
+      const reason = sneakAttackEligibility({ weapon, rollMode: result.rollMode, ...sneakCtx });
+      if (reason) {
+        // Sneak dice double on a crit (SRD: all dice of the attack are doubled).
+        const sneakDamage = rollDice(sneakDiceCount * (result.crit ? CRIT_MULTIPLIER : 1), SNEAK_ATTACK_DIE_SIDES);
+        mainDamage += sneakDamage;
+        sneakSpent  = true;
+        sneakTag    = ` (sneak +${sneakDamage} — ${reason})`;
+      }
+    }
     const applied = applyDamage({
       target: enemyToTarget(target.state, targetResistances, targetDR),
-      damage: result.damage,
+      damage: mainDamage,
       damageType: weapon.damageType,
     });
     target.state.hp = applied.newHP;
@@ -207,7 +232,7 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
       player.kills += 1;
     }
     const tag = _damageTag(applied, result.crit);
-    logs.push(`${pLabel} → ${tLabel}: hit (${rollStr(result, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac}), ${result.damage}${tag} ${weapon.damageType}`);
+    logs.push(`${pLabel} → ${tLabel}: hit (${rollStr(result, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac}), ${mainDamage}${tag} ${weapon.damageType}${sneakTag}`);
   } else {
     logs.push(`${pLabel} → ${tLabel}: miss (${rollStr(result, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac})`);
   }
@@ -233,6 +258,19 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
       offRawDamage = Math.max(1, offRawDamage - offAbilMod);
     }
 
+    // Sneak Attack still available if the main hand missed or wasn't eligible
+    // (the SRD once-per-turn rule — offhand fishing is the classic Rogue play).
+    let offSneakTag = '';
+    if (offResult.hit && sneakCtx && !sneakSpent) {
+      const reason = sneakAttackEligibility({ weapon: offWeapon, rollMode: offResult.rollMode, ...sneakCtx });
+      if (reason) {
+        const sneakDamage = rollDice(sneakDiceCount * (offResult.crit ? CRIT_MULTIPLIER : 1), SNEAK_ATTACK_DIE_SIDES);
+        offRawDamage += sneakDamage;
+        sneakSpent    = true;
+        offSneakTag   = ` (sneak +${sneakDamage} — ${reason})`;
+      }
+    }
+
     if (offResult.hit) {
       const applied = applyDamage({
         target: enemyToTarget(target.state, targetResistances, targetDR),
@@ -248,7 +286,7 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
         player.kills += 1;
       }
       const tag = _damageTag(applied, offResult.crit);
-      logs.push(`${pLabel} [off] → ${tLabel}: hit (${rollStr(offResult, profBonus, offAbilMod, offAbilKey)} vs AC ${target.state.ac}), ${offRawDamage}${tag} ${offWeapon.damageType}`);
+      logs.push(`${pLabel} [off] → ${tLabel}: hit (${rollStr(offResult, profBonus, offAbilMod, offAbilKey)} vs AC ${target.state.ac}), ${offRawDamage}${tag} ${offWeapon.damageType}${offSneakTag}`);
     } else {
       logs.push(`${pLabel} [off] → ${tLabel}: miss (${rollStr(offResult, profBonus, offAbilMod, offAbilKey)} vs AC ${target.state.ac})`);
     }
@@ -335,6 +373,19 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
 
   player.attackCooldownMs = ATTACK_COOLDOWN_MS;
   return { hit: result.hit, crit: result.crit, damage: result.damage, targetId: target.id, logs, projectile };
+}
+
+/**
+ * Helper: is any other living player within ALLY_ADJACENT_PX of the target?
+ * The SRD Sneak Attack "ally within 5 ft of the target" leg — only players
+ * count as allies (enemies are never allies of a player).
+ */
+function _anyAllyAdjacent(state, attackerSessionId, targetState) {
+  for (const [sid, p] of state.players) {
+    if (sid === attackerSessionId || !p.alive) continue;
+    if (dist2d(p.x, p.y, targetState.x, targetState.y) <= ALLY_ADJACENT_PX) return true;
+  }
+  return false;
 }
 
 /**

@@ -17,8 +17,8 @@ Each class file in `shared/data/classes/` exports a const (see `fighter.js` / `m
 - `startingWeaponId`, `startingArmorId` — item ids (`''` = none)
 - `unarmoredDefense` — optional string key (e.g. `'wis'` for monk). AC = 10 + DEX mod + [stat] mod when no armor and no shield. **Activates if any taken class grants it** (see `getDerivedClassFeatures`); applied inside `recomputeStats`.
 - `saveProficiencies` — array of ability keys. **First-class only post-multiclass** (SRD rule); reads off `player.class` (the primary class).
-- `levels: { [n]: { features, grants } }` — per-level progression table, filled for levels 1–3. `features` is the list of ability ids granted at level `n` (must exist in `ABILITY_REGISTRY`, `shared/data/abilities.js`; seeded onto the hotbar by the `choose_level_up` handler when `applyClassLevel` returns them). `grants` carries passive metadata: `fightingStyle`, `feat`, `dangerSense`, `ki`, `unarmoredMovementFt`, `rageUses` (absolute override), `subclassChoice`.
-- `subclasses: { [subclassId]: { id, name, grants } }` — subclasses reachable at `SUBCLASS_UNLOCK_LEVEL` (3). Subclass `grants`: `critRange` (Champion 19), `frenzy` (Berserker), `openHandTechnique` (Open Hand).
+- `levels: { [n]: { features, grants } }` — per-level progression table, filled for levels 1–3. `features` is the list of ability ids granted at level `n` (must exist in `ABILITY_REGISTRY`, `shared/data/abilities.js`; seeded onto the hotbar by the `choose_level_up` handler when `applyClassLevel` returns them). `grants` carries passive metadata: `fightingStyle`, `feat`, `dangerSense`, `ki`, `unarmoredMovementFt`, `rageUses` (absolute override), `sneakAttack` (Rogue 1 — display marker; the mechanic keys off rogue class level), `subclassChoice`.
+- `subclasses: { [subclassId]: { id, name, grants } }` — subclasses reachable at `SUBCLASS_UNLOCK_LEVEL` (3). Subclass `grants`: `critRange` (Champion 19), `frenzy` (Berserker), `openHandTechnique` (Open Hand), `skirmish` (Skirmisher).
 - `startingItemIds` — extra bag items for the free starter loadout (empty-raider-pack joins only). Each class seeds its basic subclass emblem here.
 - `rageUses` — Barbarian resource pool at level 1; `levels[3].grants.rageUses = 3` overrides upward. Read through `getRageUsesMax(player)`; `_longRest` refills from it on descend.
 - `gearlessLevelCap` — `3` for every MVP class. Read by `class-progression.getMaxLevelForClass`. Will become gear-dependent later.
@@ -31,8 +31,9 @@ Each class file in `shared/data/classes/` exports a const (see `fighter.js` / `m
 | Fighter | Second Wind (heal 1d10 + fighter class level, 1/rest), Dueling | Action Surge (`applyActionSurge`: reset attack timer, 1/rest) | Champion via `champion_sigil` — crit on 19–20 (`attacker.critRange`; a 19 crits only if the total also hits — nat-20-only auto-hit preserved) |
 | Barbarian | Rage (+2 melee dmg, resist physical, 30s), Unarmored Defense (CON) | Reckless Attack (hotbar **toggle**, `'reckless'` in `conditions` with no timer: adv on your melee attacks, foes gain adv on you; cleared on long rest), Danger Sense (advantage on DEX saves — wired into trap saves via `resolveSave({ advantage })`) | Berserker via `berserker_totem` — Frenzy: one extra main-weapon attack per Attack event while raging; rage pool 2 → 3 |
 | Monk | Unarmored Defense (WIS), Martial Arts (bonus unarmed strike — gated on **any monk level**, not primary class) | Ki (`kiPoints`/`kiMax` = monk level, refilled on long rest) fueling Flurry of Blows (2 bonus unarmed strikes, `applyFlurryOfBlows`), Patient Defense (attackers disadv, timed condition), Step of the Wind (`'dash'` condition — ×2 speed in MovementSystem); Unarmored Movement +10 ft while no armor/shield | Way of the Open Hand via `open_hand_manual` — flurry hits stagger the target (`attackCooldownMs` pushed to `OPEN_HAND_STAGGER_MS`) |
+| Rogue | Sneak Attack (passive — see §Sneak Attack below; gated on **any rogue level**) | Cunning Action (hotbar Dash: `'dash'` condition for `CUNNING_ACTION_DASH_MS`, lockout via synced `cunningActionCooldownMs` = `CUNNING_ACTION_COOLDOWN_MS`, ticked in MovementSystem, cleared by long rest; Disengage/Hide deferred — no AoO/stealth systems) | Skirmisher via `skirmisher_spurs` — Skirmish: Sneak Attack also eligible when attacker **and** target are both moving; Sneak Attack scales to 2d6 |
 
-Ki abilities cost `KI_ABILITY_COST` (1). Tuning constants (`PATIENT_DEFENSE_DURATION_MS`, `STEP_OF_WIND_DURATION_MS`, `OPEN_HAND_STAGGER_MS`, `SUBCLASS_UNLOCK_LEVEL`) live in `shared/data/constants.js`.
+Ki abilities cost `KI_ABILITY_COST` (1). Tuning constants (`PATIENT_DEFENSE_DURATION_MS`, `STEP_OF_WIND_DURATION_MS`, `OPEN_HAND_STAGGER_MS`, `SUBCLASS_UNLOCK_LEVEL`, `CUNNING_ACTION_DASH_MS`, `CUNNING_ACTION_COOLDOWN_MS`, `SNEAK_ATTACK_DIE_SIDES`, `ALLY_ADJACENT_PX`) live in `shared/data/constants.js`.
 
 ## Subclass Unlock (emblem items)
 
@@ -65,8 +66,9 @@ Derived features (`getDerivedClassFeatures(player)`) — consult instead of `CLA
 | `critRange` | Min across taken subclasses' `grants.critRange`, default `DEFAULT_CRIT_RANGE` (20) | `playerToAttacker` → `resolveAttack` |
 | `frenzy` | OR across taken subclasses | `CombatSystem.playerAttack` (extra attack while raging) |
 | `openHandTechnique` | OR across taken subclasses | `applyFlurryOfBlows` (stagger on hit) |
+| `skirmish` | OR across taken subclasses | `CombatSystem.playerAttack` (Sneak Attack both-moving leg) |
 
-Resource-pool helpers: `getKiMax(player)` (= monk level at 2+, else 0) and `getRageUsesMax(player)` — used by both `applyClassLevel` (seed) and `_longRest` (refill).
+Resource-pool helpers: `getKiMax(player)` (= monk level at 2+, else 0) and `getRageUsesMax(player)` — used by both `applyClassLevel` (seed) and `_longRest` (refill). `getSneakAttackDice(player)` (= ⌈rogue level / 2⌉ d6, 0 without rogue levels) is read by `CombatSystem.playerAttack`.
 
 ## Loadout Model
 `DungeonRoom.onJoin` branches on the raider pack loaded from `playerStore`:
@@ -92,6 +94,18 @@ Class default gear extracted at run-end enters the raider pack normally and trig
   - **Long-range** disadvantage — ranged attacks where distance > `weapon.range.normal` and ≤ `weapon.range.long`.
   - **Foe-adjacent** disadvantage — ranged attacks with any living non-target enemy within `ADJACENT_FOE_PX` of the attacker.
 - Combat log renders `d20:N [adv: a, b — high-ground]` or `d20:N [dis: a, b — long range, foe adjacent]`. Cancelled sources don't appear.
+
+## Sneak Attack (Rogue)
+
+Once per Attack event, the **first eligible hit** — main hand, else offhand (the SRD once-per-turn rule; offhand fishing after a main-hand miss works) — adds `getSneakAttackDice(player)` d6 (⌈rogue level/2⌉; dice count doubled on crit). Damage is added before `applyDamage`, so resistances/DR apply to the total. Log tag: `(sneak +N — reason)`.
+
+Eligibility is the pure helper `sneakAttackEligibility(...)` in `shared/logic/combat.js`; `CombatSystem.playerAttack` assembles the context. Requires a **finesse or ranged** weapon, then the first leg that applies wins:
+
+1. `advantage` — the resolved `rollMode` is advantage (post-cancellation).
+2. `ally adjacent` — another living **player** within `ALLY_ADJACENT_PX` of the target, and no disadvantage.
+3. `skirmish` — Skirmisher subclass only: attacker and target are **both moving** (`vx`/`vy` non-zero at resolution tick), and no disadvantage. Works in melee and at range; long-range disadvantage therefore blocks it. Moving-window spec + 1–10 design: `docs/design/skirmisher-progression.md`.
+
+Frenzy and Martial Arts bonus attacks never carry sneak dice (once-per-event is consumed by main/offhand, and MA is unarmed anyway).
 
 ## Attack Dispatch (`pickAttackMode`)
 - `pickAttackMode(weapon, distance)` in `shared/logic/combat.js` returns `'melee' | 'ranged' | 'thrown' | null`. Single source of truth for the dispatch branch in `playerAttack`.

@@ -5,7 +5,7 @@
 // named class grants the named subclass (see trySubclassUnlock in
 // shared/logic/class-progression.js).
 //
-// Each of the three MVP classes seeds its basic emblem into the free starter
+// Each class seeds its basic emblem into the free starter
 // loadout (classDef.startingItemIds, empty-raider-pack joins only), so every
 // fresh character can reach its basic subclass at class level 3. Enhancement
 // bonuses and higher-tier unlock items (level caps past 3) are the itemization
@@ -41,8 +41,19 @@ export const OPEN_HAND_MANUAL = {
   note:      'Flurry hits stagger the target',
 };
 
+export const SKIRMISHER_SPURS = {
+  id:        'skirmisher_spurs',
+  category:  'emblem',
+  label:     "Skirmisher's Spurs",
+  unlocks:   { classId: 'rogue', subclassId: 'skirmisher' },
+  goldValue: 100,
+  sortKey:   630,
+  note:      'Sneak Attack while you and your target both move',
+};
+
 export const EMBLEM_REGISTRY = {
   champion_sigil:   CHAMPION_SIGIL,
   berserker_totem:  BERSERKER_TOTEM,
   open_hand_manual: OPEN_HAND_MANUAL,
+  skirmisher_spurs: SKIRMISHER_SPURS,
 };

@@ -18,6 +18,7 @@ const SUITES = [
   'server/tests/loot-flow.test.js',
   'server/tests/target-selection.test.js',
   'server/tests/ranged-combat.test.js',
+  'server/tests/sneak-attack.test.js',
   'server/tests/level-up-flow.test.js',
   'server/tests/auth.test.js',
   'server/tests/with-retry.test.js',

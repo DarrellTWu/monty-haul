@@ -8,7 +8,7 @@
 // never called in these tests.
 
 import assert from 'node:assert/strict';
-import { resolveAttack, applyDamage, rollDice, getModifier, getProficiencyBonus, resolveRollMode, pickAttackMode, resolveSave } from '../logic/combat.js';
+import { resolveAttack, applyDamage, rollDice, getModifier, getProficiencyBonus, resolveRollMode, pickAttackMode, resolveSave, sneakAttackEligibility } from '../logic/combat.js';
 import { ft } from '../data/constants.js';
 
 // ─── Deterministic RNG helpers ────────────────────────────────────────────────
@@ -686,6 +686,67 @@ test('normal save rolls a single d20', () => {
   });
   assert.equal(save.roll, 4);
   assert.equal(save.success, false);
+});
+
+// ─── Sneak Attack eligibility (Rogue + Skirmisher) ────────────────────────────
+
+console.log('\nsneakAttackEligibility');
+
+const FINESSE_WEAPON = { id: 'shortsword', type: 'melee', properties: ['finesse', 'light'] };
+const RANGED_WEAPON  = { id: 'shortbow',   type: 'ranged', properties: ['two-handed'] };
+const HEAVY_WEAPON   = { id: 'greatsword', type: 'melee', properties: ['two-handed', 'heavy'] };
+
+test('sneak: non-finesse melee weapon (and unarmed) never qualifies', () => {
+  assert.equal(sneakAttackEligibility({ weapon: HEAVY_WEAPON, rollMode: 'advantage' }), null);
+  assert.equal(sneakAttackEligibility({ weapon: null, rollMode: 'advantage' }), null);
+});
+
+test('sneak: advantage qualifies finesse and ranged weapons', () => {
+  assert.equal(sneakAttackEligibility({ weapon: FINESSE_WEAPON, rollMode: 'advantage' }), 'advantage');
+  assert.equal(sneakAttackEligibility({ weapon: RANGED_WEAPON, rollMode: 'advantage' }), 'advantage');
+});
+
+test('sneak: ally adjacent qualifies on a normal roll, blocked by disadvantage', () => {
+  assert.equal(sneakAttackEligibility({ weapon: FINESSE_WEAPON, rollMode: 'normal', allyAdjacent: true }), 'ally adjacent');
+  assert.equal(
+    sneakAttackEligibility({ weapon: FINESSE_WEAPON, rollMode: 'disadvantage', allyAdjacent: true }),
+    null,
+  );
+});
+
+test('sneak: no eligibility path → null', () => {
+  assert.equal(sneakAttackEligibility({ weapon: FINESSE_WEAPON, rollMode: 'normal' }), null);
+});
+
+test('skirmish: both moving qualifies; either stationary does not', () => {
+  const base = { weapon: RANGED_WEAPON, rollMode: 'normal', skirmish: true };
+  assert.equal(sneakAttackEligibility({ ...base, attackerMoving: true, targetMoving: true }), 'skirmish');
+  assert.equal(sneakAttackEligibility({ ...base, attackerMoving: true, targetMoving: false }), null);
+  assert.equal(sneakAttackEligibility({ ...base, attackerMoving: false, targetMoving: true }), null);
+});
+
+test('skirmish: requires the subclass grant', () => {
+  assert.equal(
+    sneakAttackEligibility({ weapon: RANGED_WEAPON, rollMode: 'normal', skirmish: false, attackerMoving: true, targetMoving: true }),
+    null,
+  );
+});
+
+test('skirmish: disadvantage blocks the both-moving leg', () => {
+  assert.equal(
+    sneakAttackEligibility({ weapon: RANGED_WEAPON, rollMode: 'disadvantage', skirmish: true, attackerMoving: true, targetMoving: true }),
+    null,
+  );
+});
+
+test('sneak: advantage reported over ally adjacent / skirmish when multiple apply', () => {
+  assert.equal(
+    sneakAttackEligibility({
+      weapon: FINESSE_WEAPON, rollMode: 'advantage',
+      allyAdjacent: true, skirmish: true, attackerMoving: true, targetMoving: true,
+    }),
+    'advantage',
+  );
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────

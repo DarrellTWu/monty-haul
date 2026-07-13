@@ -138,6 +138,7 @@ Before any game logic task, read these files:
 Marked as **DEFERRED** in relevant agent-context docs. When you add code that overlaps with one, drop a `// TODO(deferred): <description> — see docs/agent-context/<file>.md` comment.
 
 - Debug Mode OFF (production gameplay path) — locked toggle, awaits matchmaking + production loot tuning. See `agent-context/hub-economy.md`.
+- Swashbuckler subclass (melee half of the Rogue pair) — Skirmisher shipped first. See `docs/design/gdd.md` §Rogue and `docs/design/skirmisher-progression.md`.
 
 ## Keeping Docs Current
 After completing any task, flag to the user if the changes warrant updates. Triggers:

@@ -44,6 +44,13 @@ export const ADJACENT_FOE_PX = MELEE_HIT_RANGE_PX; // SRD "5 ft" adjacency for r
                                                     // disadvantage. Aliased so a future melee-reach
                                                     // tune doesn't silently change SRD semantics.
 
+// ROGUE (levels 1–3) — see docs/design/skirmisher-progression.md
+export const SNEAK_ATTACK_DIE_SIDES = 6;            // Sneak Attack rolls d6s; count = ceil(rogue level / 2)
+export const ALLY_ADJACENT_PX = MELEE_HIT_RANGE_PX; // SRD "ally within 5 ft of the target" Sneak Attack leg
+export const CUNNING_ACTION_DASH_MS     = 3000;     // Cunning Action: Dash duration
+export const CUNNING_ACTION_COOLDOWN_MS = 9000;     // lockout from use (33% uptime) — first cooldown-limited
+                                                    // bonus action; GDD flags rate limits for PvP review
+
 // Feet → pixels. Project canon is 5 px/ft (BASE_SPEED_PX_PER_SEC = 150 = 30 ft).
 // Helper `ft()` lets weapon defs read as SRD: `range: { normal: ft(80), long: ft(320) }`.
 export const PX_PER_FOOT = 5;

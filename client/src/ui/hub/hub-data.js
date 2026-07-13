@@ -76,4 +76,13 @@ export const CLASS_DISPLAY = {
     ],
     defaultScores: { str: 15, dex: 13, con: 14, int: 8, wis: 10, cha: 12 },
   },
+  rogue: {
+    label: 'Rogue',
+    traits: [
+      'Shortsword · Leather',
+      'Sneak Attack — +1d6 with advantage or ally adjacent',
+      'Cunning Action at 2 — Dash on demand',
+    ],
+    defaultScores: { str: 10, dex: 15, con: 14, int: 13, wis: 12, cha: 8 },
+  },
 };

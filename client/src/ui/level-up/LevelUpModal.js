@@ -13,9 +13,11 @@ import { HP_MULTIPLIER, SUBCLASS_UNLOCK_LEVEL } from '../../../../shared/data/co
 import { getModifier }    from '../../../../shared/logic/combat.js';
 import { sendChooseLevelUp } from '../../network/ColyseusClient.js';
 
-const W = 720;
 const H = 360;
-const COLS = 3;
+const COLS  = 4; // one card per class; canvas (1280) fits four 200px cards
+const CARD_W = 200;
+const CARD_H = 220;
+const CARD_GAP = 16;
 
 /**
  * Open the level-up modal. `eligibleClassIds` lists the classes the player
@@ -23,6 +25,10 @@ const COLS = 3;
  * set for the preview). Returns { destroy }.
  */
 export function openLevelUpModal(scene, { player, eligibleClassIds, newTotalLevel }) {
+  // Modal width tracks the actual card count so a 3-card row (one class
+  // capped) doesn't sit in an oversized frame.
+  const cardCount = Math.min(eligibleClassIds.length, COLS);
+  const W = Math.max(720, cardCount * CARD_W + (cardCount - 1) * CARD_GAP + 56);
   const cam = scene.cameras.main;
   const cx  = cam.width / 2;
   const cy  = cam.height / 2;
@@ -54,10 +60,10 @@ export function openLevelUpModal(scene, { player, eligibleClassIds, newTotalLeve
   })).setOrigin(0.5).setScrollFactor(0).setDepth(1002);
 
   // Cards.
-  const cardW = 200;
-  const cardH = 220;
-  const gap   = 16;
-  const totalRowW = COLS * cardW + (COLS - 1) * gap;
+  const cardW = CARD_W;
+  const cardH = CARD_H;
+  const gap   = CARD_GAP;
+  const totalRowW = cardCount * cardW + (cardCount - 1) * gap;
   const rowX0 = cx - totalRowW / 2;
   const rowY  = y0 + 80;
 
@@ -108,6 +114,7 @@ export function openLevelUpModal(scene, { player, eligibleClassIds, newTotalLeve
     }
     if (grants.fightingStyle) lines.push(`Style: ${grants.fightingStyle}`);
     if (grants.dangerSense)   lines.push('Danger Sense (adv on DEX saves)');
+    if (grants.sneakAttack)   lines.push(`Sneak Attack (+${Math.ceil(nextLvl / 2)}d6 — adv or ally adjacent)`);
     if (grants.ki)            lines.push(`Ki pool (${nextLvl} pts / rest)`);
     if (grants.unarmoredMovementFt) lines.push(`+${grants.unarmoredMovementFt}ft speed unarmored`);
     if (grants.rageUses)      lines.push(`Rage ×${grants.rageUses} / rest`);

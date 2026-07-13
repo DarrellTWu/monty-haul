@@ -6,7 +6,7 @@ import {
   totalLevel, getClassLevel, getEligibleClassChoicesForLevelUp,
   getGrantedFeatures, getDerivedClassFeatures, applyClassLevel,
   computeHpGainForLevel, getMaxLevelForClass,
-  getKiMax, getRageUsesMax, trySubclassUnlock, DEFAULT_CRIT_RANGE,
+  getKiMax, getRageUsesMax, getSneakAttackDice, trySubclassUnlock, DEFAULT_CRIT_RANGE,
 } from '../logic/class-progression.js';
 import { CLASS_REGISTRY } from '../data/classes/index.js';
 import { ITEM_REGISTRY } from '../data/items/index.js';
@@ -224,6 +224,50 @@ test('derived: berserker frenzy and open hand technique flags', () => {
   applyClassLevel(m, 'monk');
   trySubclassUnlock(m, 'monk', ['open_hand_manual'], ITEM_REGISTRY);
   assertEq(getDerivedClassFeatures(m).openHandTechnique, true);
+});
+
+test('getSneakAttackDice: 0 without rogue levels, ceil(level/2) with', () => {
+  const p = mkPlayer();
+  assertEq(getSneakAttackDice(p), 0);
+  applyClassLevel(p, 'fighter');
+  assertEq(getSneakAttackDice(p), 0, 'non-rogue class grants no sneak dice');
+  applyClassLevel(p, 'rogue');
+  assertEq(getSneakAttackDice(p), 1, 'rogue 1 → 1d6');
+  applyClassLevel(p, 'rogue');
+  assertEq(getSneakAttackDice(p), 1, 'rogue 2 → 1d6');
+  applyClassLevel(p, 'rogue');
+  assertEq(getSneakAttackDice(p), 2, 'rogue 3 → 2d6');
+});
+
+test('rogue 2 grants cunning_action feature', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'rogue');
+  const r = applyClassLevel(p, 'rogue');
+  assertTrue(r.ok);
+  assertTrue(r.features.includes('cunning_action'));
+  assertTrue(getGrantedFeatures(p).has('cunning_action'));
+});
+
+test('trySubclassUnlock: skirmisher via spurs at rogue 3; derived skirmish flag', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'rogue');
+  applyClassLevel(p, 'rogue');
+  assertEq(trySubclassUnlock(p, 'rogue', ['skirmisher_spurs'], ITEM_REGISTRY), null, 'below level 3');
+  applyClassLevel(p, 'rogue');
+  assertEq(getDerivedClassFeatures(p).skirmish, false, 'no subclass yet');
+  const r = trySubclassUnlock(p, 'rogue', ['skirmisher_spurs'], ITEM_REGISTRY);
+  assertTrue(r !== null);
+  assertEq(r.subclassId, 'skirmisher');
+  assertEq(p.subclasses.get('rogue'), 'skirmisher');
+  assertEq(getDerivedClassFeatures(p).skirmish, true);
+});
+
+test('derived: rogue canClimb ORs across taken classes', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'fighter');
+  assertEq(getDerivedClassFeatures(p).canClimb, false);
+  applyClassLevel(p, 'rogue');
+  assertEq(getDerivedClassFeatures(p).canClimb, true);
 });
 
 test('getMaxLevelForClass returns gearless cap 3', () => {

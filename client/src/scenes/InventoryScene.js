@@ -542,6 +542,12 @@ export class InventoryScene extends Phaser.Scene {
         const on = player.conditions?.includes('reckless');
         text.setText(`💢 Reckless Attack  [${on ? 'ON' : 'OFF'}]`)
           .setColor(sel ? '#88ddff' : (on ? '#ff4444' : '#ffdd88'));
+      } else if (key === 'cunning_action') {
+        const cd      = player.cunningActionCooldownMs ?? 0;
+        const dashing = player.conditions?.includes('dash');
+        const status  = dashing ? 'DASHING' : cd > 0 ? `CD ${Math.ceil(cd / 1000)}s` : 'READY';
+        text.setText(`🗡 Cunning Action  [${status}]`)
+          .setColor(sel ? '#88ddff' : (cd > 0 && !dashing ? '#665533' : '#ffdd88'));
       } else if (key === 'flurry_of_blows' || key === 'patient_defense' || key === 'step_of_wind') {
         const icon  = key === 'flurry_of_blows' ? '👊' : key === 'patient_defense' ? '🛡' : '💨';
         const label = key === 'flurry_of_blows' ? 'Flurry of Blows' : key === 'patient_defense' ? 'Patient Defense' : 'Step of the Wind';
@@ -1088,6 +1094,9 @@ export class InventoryScene extends Phaser.Scene {
       this._leftVp.track(this.add.text(lx, ly, '+2 dmg (one-hand, no weapon offhand)', STYLE_NOTE)); ly += 17;
       ly = this._renderAbilityWidget('second_wind', '⚡ Second Wind  [READY]', lx, ly);
       this._leftVp.track(this.add.text(lx, ly, 'Heal 1d10+lvl HP (1/rest)  drag→hotbar', STYLE_NOTE)); ly += 17;
+    } else if (classId === 'rogue') {
+      this._leftVp.track(this.add.text(lx, ly, 'Sneak Attack', STYLE_BODY)); ly += 13;
+      this._leftVp.track(this.add.text(lx, ly, `+${Math.ceil(lvl / 2)}d6 on adv or ally-adjacent hit (finesse/ranged)`, STYLE_NOTE)); ly += 17;
     }
 
     // ── Level 2 features ──────────────────────────────────────────────────────
@@ -1108,6 +1117,9 @@ export class InventoryScene extends Phaser.Scene {
         this._leftVp.track(this.add.text(lx, ly, 'Attackers have disadv (6s)  drag→hotbar', STYLE_NOTE)); ly += 17;
         ly = this._renderAbilityWidget('step_of_wind', '💨 Step of the Wind  [1 ki]', lx, ly);
         this._leftVp.track(this.add.text(lx, ly, 'Dash: double speed (6s)  drag→hotbar', STYLE_NOTE)); ly += 17;
+      } else if (classId === 'rogue') {
+        ly = this._renderAbilityWidget('cunning_action', '🗡 Cunning Action  [READY]', lx, ly);
+        this._leftVp.track(this.add.text(lx, ly, 'Dash: double speed (3s, 9s cd)  drag→hotbar', STYLE_NOTE)); ly += 17;
       }
     }
 
@@ -1120,7 +1132,8 @@ export class InventoryScene extends Phaser.Scene {
         const grantNote =
           subDef.grants?.critRange         ? `Crit on ${subDef.grants.critRange}–20` :
           subDef.grants?.frenzy            ? 'Frenzy: extra attack while raging' :
-          subDef.grants?.openHandTechnique ? 'Flurry hits stagger the target' : '';
+          subDef.grants?.openHandTechnique ? 'Flurry hits stagger the target' :
+          subDef.grants?.skirmish          ? 'Sneak Attack while you + target both move' : '';
         if (grantNote) { this._leftVp.track(this.add.text(lx, ly, grantNote, STYLE_NOTE)); ly += 17; }
       } else {
         this._leftVp.track(this.add.text(lx, ly, 'Subclass slot open — carry the class emblem when leveling', STYLE_NOTE)); ly += 17;

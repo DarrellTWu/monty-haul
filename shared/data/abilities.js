@@ -54,6 +54,13 @@ export const ABILITY_REGISTRY = {
     kiCost: true,
     note: 'Attackers have disadvantage for 6s (1 ki)',
   },
+  cunning_action: {
+    id: 'cunning_action',
+    label: 'Cunning Action',
+    hotbarShort: 'Cunning',
+    icon: '🗡',
+    note: 'Dash: double speed for 3s (9s cooldown)',
+  },
   step_of_wind: {
     id: 'step_of_wind',
     label: 'Step of the Wind',
