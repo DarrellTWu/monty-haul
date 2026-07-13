@@ -2,6 +2,7 @@ import { createRequire } from 'module';
 const express = createRequire(import.meta.url)('express');
 
 import * as store from '../store/playerStore.js';
+import { issueToken, requireAuth } from '../auth/tokens.js';
 
 const router = express.Router();
 
@@ -38,14 +39,27 @@ function asyncRoute(handler) {
   };
 }
 
-// POST /hub/login  { username }
-// Upsert player by username. Returns full hub state.
+// POST /hub/login  { username, password }
+// Register-or-authenticate by username+password (legacy passwordless accounts
+// adopt the first password presented — see playerStore.authenticate). Returns
+// full hub state plus the session token every other route requires.
 router.post('/login', asyncRoute(async (req, res) => {
   const username = req.body?.username?.trim();
-  if (!username) return res.status(400).json({ ok: false, error: 'username required' });
-  const p = await store.getOrCreate(username);
-  res.json({ ok: true, playerId: p.playerId, username: p.username, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack });
+  const password = String(req.body?.password ?? '');
+  if (!username)            return res.status(400).json({ ok: false, error: 'username required' });
+  if (password.length < 6)  return res.status(400).json({ ok: false, error: 'password must be at least 6 characters' });
+  const result = await store.authenticate(username, password);
+  if (!result.ok) return res.status(401).json({ ok: false, error: result.error });
+  const p = result.player;
+  res.json({
+    ok: true, token: issueToken(p.playerId),
+    playerId: p.playerId, username: p.username, stash: p.stash, gold: p.gold, raiderPack: p.raiderPack,
+  });
 }));
+
+// Everything below /login requires a valid Bearer token whose playerId
+// matches the :playerId in the path (401 bad token, 403 someone else's).
+router.use('/:playerId', requireAuth);
 
 // GET /hub/:playerId
 // Load current hub state for an existing player.

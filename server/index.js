@@ -48,4 +48,17 @@ gameServer.listen(PORT).then(async () => {
   } catch (err) {
     console.error('[startup] dead-letter count check failed:', err);
   }
+  // Auth schema probe: login reads player_profiles.password_hash. If migration
+  // 004 hasn't been applied, every login 500s — say so at boot, loudly.
+  try {
+    const { supabase } = await import('./persistence/supabase.js');
+    const { error } = await supabase.from('player_profiles').select('password_hash').limit(1);
+    if (error) {
+      console.error('[startup] ⚠ player_profiles.password_hash probe failed — apply ' +
+        'supabase/migrations/004_password_auth.sql in the SQL Editor. Logins will fail until then. ' +
+        `(${error.message})`);
+    }
+  } catch (err) {
+    console.error('[startup] auth schema probe failed:', err);
+  }
 });

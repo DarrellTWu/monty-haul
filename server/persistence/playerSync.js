@@ -27,10 +27,10 @@ import { withRetry }  from './withRetry.js';
 // Caller is responsible for checking the username doesn't already exist (via
 // loadPlayerByUsername). If a race inserts the same username concurrently the
 // UNIQUE constraint will reject the second insert with a Postgres 23505 error.
-export async function createProfile(username, initialStash = []) {
+export async function createProfile(username, initialStash = [], passwordHash = null) {
   const { data: profile, error: e1 } = await supabase
     .from('player_profiles')
-    .insert({ username })
+    .insert({ username, password_hash: passwordHash })
     .select('id, username')
     .single();
   if (e1) throw e1;
@@ -61,11 +61,25 @@ export async function createProfile(username, initialStash = []) {
 
   return {
     playerId,
-    username:   profile.username,
-    stash:      initialStash.map(e => ({ ...e })),
-    gold:       0,
-    raiderPack: [],
+    username:     profile.username,
+    passwordHash,
+    stash:        initialStash.map(e => ({ ...e })),
+    gold:         0,
+    raiderPack:   [],
   };
+}
+
+// Set/replace a player's password hash (auth: registration happens in
+// createProfile; this covers the legacy-account link-on-first-authed-login
+// path). Idempotent — safe under withRetry.
+export async function updatePasswordHash(playerId, passwordHash) {
+  await withRetry(async () => {
+    const { error } = await supabase
+      .from('player_profiles')
+      .update({ password_hash: passwordHash })
+      .eq('id', playerId);
+    if (error) throw error;
+  });
 }
 
 // Persist the player's current stash + gold + raiderPack to Supabase.

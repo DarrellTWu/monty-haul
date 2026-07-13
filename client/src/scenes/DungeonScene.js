@@ -18,7 +18,7 @@ import { InputHandler } from '../input/InputHandler.js';
 import { CHEST_LOOT_RANGE_PX, TRAP_RADIUS_PX, MELEE_SELECT_RANGE_PX } from '../../../shared/data/constants.js';
 import { WEAPON_REGISTRY } from '../../../shared/data/weapons/index.js';
 import { FLOOR_REGISTRY } from '../../../shared/data/floors/index.js';
-import { getPlayerId } from '../store/stash.js';
+import { getAuthToken } from '../store/stash.js';
 import { drawRoom, drawDoorBand } from '../rendering/RoomRenderer.js';
 import { openLevelUpModal } from '../ui/level-up/LevelUpModal.js';
 import { getEligibleClassChoicesForLevelUp } from '../../../shared/logic/class-progression.js';
@@ -54,13 +54,14 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   init(data) {
-    // Server loads the raider pack from playerStore using playerId — no items passed.
+    // Server resolves identity from the verified session token (onAuth) and
+    // loads the raider pack from playerStore — no items or playerId passed.
     // `mode` ('quick' | 'party' | 'joincode') + `joinCode` route the join call;
     // they're client-side routing hints, not join options for the server.
     const { mode, joinCode, ...opts } = data ?? {};
     this._joinMode = mode ?? 'quick';
     this._joinCode = joinCode ?? null;
-    this._joinOpts = { ...opts, playerId: getPlayerId() };
+    this._joinOpts = { ...opts, token: getAuthToken() };
   }
 
   async create() {

@@ -7,7 +7,8 @@
 //
 // All exports are async. Callers must await.
 import { loadPlayer, loadPlayerByUsername } from '../persistence/playerLoad.js';
-import { createProfile, syncStashAndMeta, renameUsername }  from '../persistence/playerSync.js';
+import { createProfile, syncStashAndMeta, renameUsername, updatePasswordHash }  from '../persistence/playerSync.js';
+import { hashPassword, verifyPassword }     from '../auth/passwords.js';
 import { insertRunHistory }                 from '../persistence/runCommit.js';
 import { appendDeadLetter }                 from '../persistence/deadLetter.js';
 import { BUYABLE_PRICES }                   from '../../shared/data/shop.js';
@@ -103,6 +104,40 @@ export async function getOrCreate(username) {
 
   const created = await createProfile(username, INITIAL_STASH);
   return _cache(created);
+}
+
+/**
+ * Authenticate (or register) `username` with `password`. Single entry point
+ * for the /hub/login route:
+ *   - unknown username            → create the account with this password
+ *   - known, passwordHash = null  → legacy trust-on-first-use account: this
+ *     password becomes theirs (roadmap Sprint D link-by-username migration)
+ *   - known, hash present         → verify; reject on mismatch
+ *
+ * Returns { ok: true, player } or { ok: false, error: 'invalid_credentials' }.
+ */
+export async function authenticate(username, password) {
+  const cachedId = _byUsername.get(username);
+  const existing = cachedId ? _players.get(cachedId) : await loadPlayerByUsername(username);
+
+  if (!existing) {
+    const created = await createProfile(username, INITIAL_STASH, await hashPassword(password));
+    return { ok: true, player: _cache(created) };
+  }
+
+  _cache(existing);
+  if (!existing.passwordHash) {
+    const hash = await hashPassword(password);
+    await updatePasswordHash(existing.playerId, hash);
+    existing.passwordHash = hash;
+    console.log(`[playerStore] legacy account "${username}" linked to a password on first authed login`);
+    return { ok: true, player: existing };
+  }
+
+  if (!(await verifyPassword(password, existing.passwordHash))) {
+    return { ok: false, error: 'invalid_credentials' };
+  }
+  return { ok: true, player: existing };
 }
 
 export async function getPlayer(playerId) {

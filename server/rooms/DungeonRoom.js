@@ -48,6 +48,7 @@ import {
   playerAttack, enemyAttack, applySecondWind, applyActionSurge, applyFlurryOfBlows,
 } from '../systems/CombatSystem.js';
 import { getPlayer, commitExtract, commitDeath } from '../store/playerStore.js';
+import { verifyToken } from '../auth/tokens.js';
 
 const WALL = 40; // px wall thickness on every floor
 
@@ -287,13 +288,28 @@ export class DungeonRoom extends Room {
     );
   }
 
+  /**
+   * Join gate: a valid session token (issued by /hub/login) is required.
+   * Throwing rejects the join; the return value lands on client.auth.
+   * The token's playerId is the ONLY identity the room trusts — onJoin
+   * ignores any client-supplied playerId.
+   */
+  onAuth(client, options) {
+    const payload = verifyToken(options?.token);
+    if (!payload) throw new Error('unauthorized');
+    return payload;
+  }
+
   async onJoin(client, options = {}) {
     const classDef = CLASS_REGISTRY[options.class] ?? DEFAULT_CLASS;
 
+    // Identity comes from the verified token (onAuth), never join options.
+    const playerId = client.auth?.playerId ?? null;
+
     // Load raider pack from the server-side player store.
-    // Falls back to empty (class defaults) if no playerId or player not found.
-    const storePlayer = options.playerId ? await getPlayer(options.playerId) : null;
-    this._playerIds.set(client.sessionId, options.playerId ?? null);
+    // Falls back to empty (class defaults) if player not found.
+    const storePlayer = playerId ? await getPlayer(playerId) : null;
+    this._playerIds.set(client.sessionId, playerId);
     const raiderItems = storePlayer
       ? storePlayer.raiderPack.flatMap(({ id, qty }) => Array(qty).fill(id))
       : [];

@@ -3,40 +3,54 @@
 // Sync reads return from cache. Async mutations call the server and update cache.
 // This is the only file that changes when the backing store changes (was localStorage).
 
-import { HubAPI } from '../network/HubAPI.js';
+import { HubAPI, setTokenProvider } from '../network/HubAPI.js';
 
-const PLAYER_ID_KEY = 'mh_player_id';
+const PLAYER_ID_KEY  = 'mh_player_id';
+const AUTH_TOKEN_KEY = 'mh_auth_token';
 
-let _playerId = localStorage.getItem(PLAYER_ID_KEY) ?? null;
-let _username = null;
-let _cache    = { stash: [], gold: 0, raiderPack: [] };
+let _playerId  = localStorage.getItem(PLAYER_ID_KEY) ?? null;
+let _authToken = localStorage.getItem(AUTH_TOKEN_KEY) ?? null;
+let _username  = null;
+let _cache     = { stash: [], gold: 0, raiderPack: [] };
+
+// HubAPI attaches the Bearer token to every request; provider injection
+// avoids a store ↔ network import cycle.
+setTokenProvider(() => _authToken);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 /**
  * Called by HubScene after login or state load.
- * Populates the cache and persists the playerId for the next session.
+ * Populates the cache and persists playerId + session token for next session.
+ * `token` is present on login responses only — state loads keep the existing one.
  */
-export function initFromServer(playerId, { username, stash, gold, raiderPack }) {
+export function initFromServer(playerId, { username, stash, gold, raiderPack, token }) {
   _playerId = playerId;
   _username = username ?? null;
   localStorage.setItem(PLAYER_ID_KEY, playerId);
+  if (token) {
+    _authToken = token;
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
+  }
   _cache = { stash: stash ?? [], gold: gold ?? 0, raiderPack: raiderPack ?? [] };
 }
 
-export function getPlayerId() { return _playerId; }
-export function getUsername() { return _username; }
+export function getPlayerId()  { return _playerId; }
+export function getUsername()  { return _username; }
+export function getAuthToken() { return _authToken; }
 
 /**
- * Clear the client session. The server has no per-session state to tear down —
- * the playerId in localStorage is the only token. After this returns, HubScene
- * can route to the login screen via getPlayerId() === null.
+ * Clear the client session (playerId + session token). The token simply
+ * expires server-side; nothing to revoke. After this returns, HubScene
+ * routes to the login screen via getPlayerId() === null.
  */
 export function logout() {
-  _playerId = null;
-  _username = null;
-  _cache    = { stash: [], gold: 0, raiderPack: [] };
+  _playerId  = null;
+  _authToken = null;
+  _username  = null;
+  _cache     = { stash: [], gold: 0, raiderPack: [] };
   localStorage.removeItem(PLAYER_ID_KEY);
+  localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
 // ── Sync reads (from cache) ───────────────────────────────────────────────────

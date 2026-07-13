@@ -42,11 +42,12 @@ async function _loadStateForProfile(profile) {
   ]);
 
   return {
-    playerId:   profile.id,
-    username:   profile.username,
-    stash:      _aggregateStash(stashRows),
-    gold:       metaRow?.gold ?? 0,
-    raiderPack: metaRow?.raider_pack ?? [],
+    playerId:     profile.id,
+    username:     profile.username,
+    passwordHash: profile.password_hash ?? null,
+    stash:        _aggregateStash(stashRows),
+    gold:         metaRow?.gold ?? 0,
+    raiderPack:   metaRow?.raider_pack ?? [],
   };
 }
 
@@ -55,7 +56,7 @@ export async function loadPlayer(playerId) {
   const profile = await withRetry(async () => {
     const { data, error } = await supabase
       .from('player_profiles')
-      .select('id, username')
+      .select('id, username, password_hash')
       .eq('id', playerId)
       .maybeSingle();
     if (error) throw error;
@@ -70,7 +71,7 @@ export async function loadPlayerByUsername(username) {
   const profile = await withRetry(async () => {
     const { data, error } = await supabase
       .from('player_profiles')
-      .select('id, username')
+      .select('id, username, password_hash')
       .eq('username', username)
       .maybeSingle();
     if (error) throw error;
