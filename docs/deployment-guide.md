@@ -1,12 +1,30 @@
 ---
-status: in-progress
-updated: 2026-07-07
-purpose: Operational guide — how to deploy the game off localhost onto hosted infrastructure (server, client, database), what must change in code first, and how to verify the deployment. Flip status to shipped after the first successful hosted smoke test.
+status: shipped
+updated: 2026-07-12
+purpose: Operational guide — how the game is deployed (server, client, database), the live URLs, and how to verify a deployment. First hosted deploy completed + smoke-tested 2026-07-12.
 ---
 
 # Deployment Guide
 
-Goal: the full loop (login → hub → dungeon → extract/death → stash persists) running on public URLs instead of localhost. Written 2026-07-07 against commit `2ba3ec4` + floor-3 work.
+Goal: the full loop (login → hub → dungeon → extract/death → stash persists) running on public URLs instead of localhost. Written 2026-07-07; executed 2026-07-12.
+
+## Live deployment (since 2026-07-12)
+
+| Piece | URL / detail |
+|---|---|
+| Client | https://monty-haul.pages.dev (Cloudflare Pages, auto-deploys on push to `main`) |
+| Server | `https://server-production-c772.up.railway.app` — `/healthz` for liveness; WebSocket at `wss://` same host (Railway, US West, auto-deploys on push to `main`) |
+| Database | Supabase project `xnwiuaqslbpdkvjccqol` (free tier), RLS deny-all applied (migration 003) |
+
+Deviations from the guide as written:
+- **API key:** Railway's `SUPABASE_SERVICE_ROLE_KEY` holds one of Supabase's newer **secret keys** (`sb_secret_…`), not the legacy `service_role` JWT — Supabase now recommends these; drop-in compatible (verified via smoke test with `supabase-js` 2.103.0). Same env-var name.
+- **Free-tier pause:** the Supabase project auto-pauses after ~1 week of inactivity and drops off DNS (`ENOTFOUND <ref>.supabase.co`, hub routes 500). Restore from the dashboard; schema and data survive.
+
+⚠️ Operational notes:
+- **Every push to `main` redeploys both Railway and Pages.** A Railway redeploy restarts the server and disconnects anyone mid-run (in-run progress lost, hub state safe). Push when nobody's playing.
+- The URL runs **trust-on-first-use auth** and **one global room** — closed playtest only until roadmap Sprints C + D land. Don't post it publicly.
+- CORS is still `*`; tighten in Sprint C (§8).
+- After each playtest, skim Railway logs for dead-letter warnings (§8).
 
 **Recommended stack** (matches the intent in `tech_spec.md` §1, chosen here for lowest ops burden):
 

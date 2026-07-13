@@ -21,7 +21,7 @@ The uncommitted working-tree changes implement steps 1–4 of [`floor-3-sprint-p
 
 **Done when:** smoke checklist passes locally; working tree clean; plan archived.
 
-## Sprint B — First hosted deploy
+## Sprint B — First hosted deploy ✅ *(completed 2026-07-12 — live URLs in `deployment-guide.md`)*
 
 Execute [`deployment-guide.md`](deployment-guide.md) end to end. Closes H3, H4, M1, M5, L1.
 
