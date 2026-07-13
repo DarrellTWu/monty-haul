@@ -11,7 +11,7 @@ import { StairState }  from '../state/StairState.js';
 import { DoorState }   from '../state/DoorState.js';
 
 import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.js';
-import { GOBLIN, DOG, SKELETON }     from '../../shared/data/enemies/tier1.js';
+import { ENEMY_REGISTRY }            from '../../shared/data/enemies/tier1.js';
 import { FLOOR_REGISTRY }            from '../../shared/data/floors/index.js';
 import { getModifier, resolveSave, rollDice } from '../../shared/logic/combat.js';
 import { applyDeathLoot }            from '../../shared/logic/loot.js';
@@ -39,6 +39,7 @@ import {
   TRAP_DAMAGE, TRAP_SAVE_DC, TRAP_RADIUS_PX, TRAP_COOLDOWN_MS,
   RAGE_DURATION_MS, RAGE_DAMAGE_BONUS,
   PATIENT_DEFENSE_DURATION_MS, STEP_OF_WIND_DURATION_MS, KI_ABILITY_COST,
+  MAX_PLAYERS_PER_ROOM,
 } from '../../shared/data/constants.js';
 
 import * as MovementSystem from '../systems/MovementSystem.js';
@@ -48,13 +49,18 @@ import {
 } from '../systems/CombatSystem.js';
 import { getPlayer, commitExtract, commitDeath } from '../store/playerStore.js';
 
-// type string → enemy stat block. Used by _loadFloor when reading floor data.
-const ENEMY_REGISTRY = { goblin: GOBLIN, dog: DOG, skeleton: SKELETON };
-
 const WALL = 40; // px wall thickness on every floor
 
 export class DungeonRoom extends Room {
   onCreate(options) {
+    // Tier-1 party cap (GDD §2: 4 players per cohort on floors 1–3). Colyseus
+    // routes a 5th joinOrCreate to a fresh room automatically.
+    this.maxClients = MAX_PLAYERS_PER_ROOM;
+    // Private party room: created via client `create('dungeon', { private: true })`.
+    // setPrivate excludes it from joinOrCreate matchmaking; friends join with
+    // the room id as a party code via joinById. Quick-start rooms stay public.
+    if (options?.private) this.setPrivate(true);
+
     this.setState(new GameState());
     this._enemyDefs       = new Map();
     this._conditionTimers = new Map(); // `${sessionId}_${condition}` → remainingMs

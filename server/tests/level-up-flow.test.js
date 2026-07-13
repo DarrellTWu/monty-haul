@@ -109,9 +109,17 @@ console.log('\nineligible classId rejected');
   check('unknown classId rejected, state untouched',
     !rUnknown.accepted && p.level === 1 && p.pendingLevelUp === true);
 
-  const rDup = applyChooseLevelUp(p, 'fighter'); // already taken (eligibility filter excludes)
-  check('already-taken classId rejected (MVP forced-multiclass)',
-    !rDup.accepted && p.classLevels.get('fighter') === 1 && p.pendingLevelUp === true);
+  const rSame = applyChooseLevelUp(p, 'fighter'); // continuing a taken class is allowed below the cap
+  check('same-class re-level accepted below the gearless cap',
+    rSame.accepted && p.classLevels.get('fighter') === 2 && p.pendingLevelUp === false);
+
+  // At the cap (3), the same class becomes ineligible again.
+  p.pendingLevelUp = true;
+  applyChooseLevelUp(p, 'fighter'); // fighter 3
+  p.pendingLevelUp = true;
+  const rCapped = applyChooseLevelUp(p, 'fighter');
+  check('class at gearless cap 3 rejected',
+    !rCapped.accepted && p.classLevels.get('fighter') === 3 && p.pendingLevelUp === true);
 }
 
 // ── eligible choice mutates state + grants level-1 features + bumps HP ───────

@@ -5,9 +5,21 @@ import * as store from '../store/playerStore.js';
 
 const router = express.Router();
 
-// Allow requests from the Vite dev client (localhost:5173).
+// CORS: allowlist from ALLOWED_ORIGINS env (comma-separated origins, e.g.
+// "https://montyhaul.pages.dev,http://localhost:5173"). Unset → wildcard,
+// which keeps local dev zero-config; hosted deploys must set the env var
+// (deployment-guide §8). Disallowed origins get no CORS headers — the
+// browser blocks the response.
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
+  .split(',').map(s => s.trim()).filter(Boolean);
+
 router.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (allowedOrigins.length === 0) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else if (allowedOrigins.includes(req.headers.origin)) {
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.sendStatus(204);

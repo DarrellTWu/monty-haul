@@ -13,6 +13,7 @@ const SUITES = [
   'shared/tests/conditions.test.js',
   'shared/tests/class-progression.test.js',
   'shared/tests/items.test.js',
+  'shared/tests/floors.test.js',
   'server/tests/container-lock.test.js',
   'server/tests/loot-flow.test.js',
   'server/tests/target-selection.test.js',

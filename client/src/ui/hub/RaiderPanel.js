@@ -52,12 +52,14 @@ export function renderRaiderPanel(scene) {
   }).setOrigin(1, 0));
   y += 15;
 
-  // Pinned UI below the pack list: dump button and Enter Dungeon button. The
-  // viewport occupies the space between `y` (current cursor) and the dump
-  // button — pack rows scroll, dump and Enter Dungeon stay fixed and reachable
-  // even when the pack overflows.
+  // Pinned UI below the pack list: dump button and the three entry buttons
+  // (quick start / create party / join by code). The viewport occupies the
+  // space between `y` (current cursor) and the dump button — pack rows
+  // scroll, the pinned buttons stay fixed and reachable even when the pack
+  // overflows.
   const active     = !!scene._selectedClass;
-  const enterBtnY  = RP.y + RP.h - 36;
+  const partyBtnY  = RP.y + RP.h - 22;
+  const enterBtnY  = partyBtnY - 32;
   const dumpBtnY   = enterBtnY - 28;
   const vpTop      = y;
   const vpBottom   = dumpBtnY - 6;
@@ -111,13 +113,11 @@ export function renderRaiderPanel(scene) {
     });
   }
 
-  const btnY = enterBtnY;
-  const enterBtn = scene._r(scene.add.text(RP.x + RP.w / 2, btnY, '[ Enter Dungeon ]', {
-    fontSize: '18px', color: active ? '#ffcc44' : '#334455', fontFamily: 'monospace',
-  }).setOrigin(0.5).setInteractive());
-  enterBtn.on('pointerover',  () => { if (active) enterBtn.setColor('#ffffff'); });
-  enterBtn.on('pointerout',   () => { enterBtn.setColor(active ? '#ffcc44' : '#334455'); });
-  enterBtn.on('pointerdown',  () => {
+  // Shared launch path for all three entry modes. Validates scores once,
+  // then starts DungeonScene with the routing hints it forwards to
+  // ColyseusClient (quick = joinOrCreate public, party = create private,
+  // joincode = joinById).
+  const launch = (mode, joinCode = null) => {
     if (!active) return;
     const scores = scene._abilityScores ?? { ...CLASS_DISPLAY[scene._selectedClass].defaultScores };
     // Pre-submit assert against the same rule the server enforces. The UI's
@@ -128,6 +128,31 @@ export function renderRaiderPanel(scene) {
       console.warn('[HubScene] refusing to enter with invalid abilityScores:', check.error);
       return;
     }
-    scene.scene.start('DungeonScene', { class: scene._selectedClass, abilityScores: scores });
+    scene.scene.start('DungeonScene', {
+      class: scene._selectedClass, abilityScores: scores, mode, joinCode,
+    });
+  };
+
+  const mkBtn = (x, y, label, fontSize, onClick) => {
+    const btn = scene._r(scene.add.text(x, y, label, {
+      fontSize, color: active ? '#ffcc44' : '#334455', fontFamily: 'monospace',
+    }).setOrigin(0.5).setInteractive());
+    btn.on('pointerover', () => { if (active) btn.setColor('#ffffff'); });
+    btn.on('pointerout',  () => { btn.setColor(active ? '#ffcc44' : '#334455'); });
+    btn.on('pointerdown', onClick);
+    return btn;
+  };
+
+  mkBtn(RP.x + RP.w / 2, enterBtnY, '[ Enter Dungeon ]', '18px', () => launch('quick'));
+
+  // Party stopgap (roadmap Sprint C): leader creates a private room and reads
+  // the party code off the in-dungeon banner; friends paste it here.
+  // window.prompt is deliberate MVP plumbing — replace with an in-canvas
+  // input when the party UX gets its own design pass.
+  mkBtn(RP.x + RP.w / 4 + 10, partyBtnY, '[ Create Party ]', '12px', () => launch('party'));
+  mkBtn(RP.x + (3 * RP.w) / 4 - 10, partyBtnY, '[ Join by Code ]', '12px', () => {
+    if (!active) return;
+    const code = window.prompt('Party code:')?.trim();
+    if (code) launch('joincode', code);
   });
 }

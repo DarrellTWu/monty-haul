@@ -19,13 +19,37 @@ function getClient() {
 }
 
 /**
- * Join (or create) the dungeon room.
+ * Quick start: join any public dungeon room with a free slot, or create one.
+ * Private party rooms are excluded from this matchmaking (setPrivate).
  * @returns {Promise<import('colyseus.js').Room>}
  */
 export async function joinDungeon(opts = {}) {
   if (_room) return _room;
   _room = await getClient().joinOrCreate('dungeon', opts);
   console.log('[ColyseusClient] Joined dungeon room:', _room.sessionId);
+  return _room;
+}
+
+/**
+ * Create a private party room. The returned room's `roomId` is the party
+ * code friends use with joinDungeonByCode.
+ * @returns {Promise<import('colyseus.js').Room>}
+ */
+export async function createPartyDungeon(opts = {}) {
+  if (_room) return _room;
+  _room = await getClient().create('dungeon', { ...opts, private: true });
+  console.log('[ColyseusClient] Created party room:', _room.roomId);
+  return _room;
+}
+
+/**
+ * Join a specific room by its party code (Colyseus roomId).
+ * @returns {Promise<import('colyseus.js').Room>}
+ */
+export async function joinDungeonByCode(code, opts = {}) {
+  if (_room) return _room;
+  _room = await getClient().joinById(code, opts);
+  console.log('[ColyseusClient] Joined party room:', _room.roomId);
   return _room;
 }
 

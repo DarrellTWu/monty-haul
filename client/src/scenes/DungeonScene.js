@@ -10,7 +10,10 @@
 // PLACEHOLDER ROOM: the room boundary is a simple rectangle.
 // When tilemaps arrive, replace drawRoom() in client/src/rendering/RoomRenderer.js with a Tilemap layer.
 
-import { joinDungeon, sendDescend, sendUseHotbar, sendAttack, leave as leaveRoom } from '../network/ColyseusClient.js';
+import {
+  joinDungeon, createPartyDungeon, joinDungeonByCode,
+  sendDescend, sendUseHotbar, sendAttack, leave as leaveRoom,
+} from '../network/ColyseusClient.js';
 import { InputHandler } from '../input/InputHandler.js';
 import { CHEST_LOOT_RANGE_PX, TRAP_RADIUS_PX, MELEE_SELECT_RANGE_PX } from '../../../shared/data/constants.js';
 import { WEAPON_REGISTRY } from '../../../shared/data/weapons/index.js';
@@ -52,7 +55,12 @@ export class DungeonScene extends Phaser.Scene {
 
   init(data) {
     // Server loads the raider pack from playerStore using playerId — no items passed.
-    this._joinOpts = { ...(data ?? {}), playerId: getPlayerId() };
+    // `mode` ('quick' | 'party' | 'joincode') + `joinCode` route the join call;
+    // they're client-side routing hints, not join options for the server.
+    const { mode, joinCode, ...opts } = data ?? {};
+    this._joinMode = mode ?? 'quick';
+    this._joinCode = joinCode ?? null;
+    this._joinOpts = { ...opts, playerId: getPlayerId() };
   }
 
   async create() {
@@ -82,13 +90,24 @@ export class DungeonScene extends Phaser.Scene {
     }).setOrigin(0.5).setScrollFactor(0);
 
     try {
-      this._room = await joinDungeon(this._joinOpts);
+      if      (this._joinMode === 'party')    this._room = await createPartyDungeon(this._joinOpts);
+      else if (this._joinMode === 'joincode') this._room = await joinDungeonByCode(this._joinCode, this._joinOpts);
+      else                                    this._room = await joinDungeon(this._joinOpts);
       this._statusText.destroy();
       this._statusText = null;
     } catch (err) {
       this._statusText.setText(`Connection failed:\n${err.message}`);
       console.error('[DungeonScene] Failed to join room:', err);
       return;
+    }
+
+    // Party rooms: surface the join code so the leader can share it. Fixed
+    // screen space, top-left, below wherever the floor label sits.
+    if (this._joinMode === 'party' || this._joinMode === 'joincode') {
+      this.add.text(10, 6, `PARTY CODE: ${this._room.roomId}`, {
+        fontSize: '13px', color: '#ffcc44', fontFamily: 'monospace',
+        backgroundColor: '#00000088', padding: { x: 6, y: 3 },
+      }).setScrollFactor(0).setDepth(900);
     }
 
     this._applyFloorLayout(this._room.state.floor);

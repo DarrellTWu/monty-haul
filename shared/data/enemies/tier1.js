@@ -2,6 +2,12 @@
 // Floor 1-3 enemy roster. Individual stat blocks live in their own files
 // for easy per-enemy tuning.
 
-export { default as GOBLIN }   from './goblin.js';
-export { default as DOG }      from './dog.js';
-export { default as SKELETON } from './skeleton.js';
+import GOBLIN   from './goblin.js';
+import DOG      from './dog.js';
+import SKELETON from './skeleton.js';
+
+export { GOBLIN, DOG, SKELETON };
+
+// type string → stat block. Single source of truth for "what can the server
+// spawn?" — used by DungeonRoom._loadFloor and the boot-time floor validator.
+export const ENEMY_REGISTRY = { goblin: GOBLIN, dog: DOG, skeleton: SKELETON };
