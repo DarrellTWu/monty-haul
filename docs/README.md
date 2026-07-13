@@ -27,7 +27,13 @@ purpose: Docs index. First stop for "which doc do I need?"
 
 ## Architecture & review
 - [`tech_spec.md`](tech_spec.md) — high-level architecture, target/planned systems, design rationale
-- [`architecture-review-2026-05-14.md`](architecture-review-2026-05-14.md) — current code/docs critique with prioritized recommendations
+- [`architecture-review-2026-07-07.md`](architecture-review-2026-07-07.md) — current review: deployment-readiness findings (H1–H4, M1–M6), process guidance, scorecard
+- [`architecture-review-2026-05-14.md`](architecture-review-2026-05-14.md) — prior review; all HIGH/MEDIUM findings closed, kept for the audit trail
+
+## Operations & planning
+- [`deployment-guide.md`](deployment-guide.md) — how to deploy off localhost (Railway + Cloudflare Pages + Supabase): pre-deploy code checklist, RLS migration, CI workflow, hosted smoke test
+- [`roadmap-2026-07.md`](roadmap-2026-07.md) — next ~8 sprints in two tracks (deploy/harden/auth; art+floor+monster content enablement) with success criteria per sprint
+- [`content-pipeline-enablement.md`](content-pipeline-enablement.md) — getting art, floors + monsters designer-ready: pipeline assessment, capability gaps, agentic authoring workflows (W1–W8)
 
 ## Design (intent — not yet implementation)
 > These describe scope larger than what is built. Use as design context, not binding spec.
