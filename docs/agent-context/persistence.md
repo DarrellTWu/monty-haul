@@ -1,7 +1,7 @@
 ---
 status: shipped
-updated: 2026-05-14
-purpose: Supabase plumbing, retry, dead-letter, run history. Read when the task touches the persistence layer.
+updated: 2026-07-13
+purpose: Supabase plumbing, auth (passwords + session tokens), retry, dead-letter, run history. Read when the task touches the persistence layer or login.
 ---
 
 # Persistence Layer
@@ -18,7 +18,10 @@ History + design rationale: `archive/server-persistence-plan.md` (Phase 0–3).
 - On miss: `loadPlayer` / `loadPlayerByUsername` populate from `gear_stash` + `meta_progression`.
 - Every mutation modifies the cached state then `await`s `syncStashAndMeta` to persist.
 - **All exports are async.** Mutations return `{ ok, stash, gold, raiderPack }` (except `renameUser` — full server result).
-- New players (no DB row) get `INITIAL_STASH` seeded via `createProfile` on first `getOrCreate`.
+- New players (no DB row) get `INITIAL_STASH` seeded via `createProfile` on first `getOrCreate` / `authenticate`.
+
+### Auth (`authenticate`, Sprint D 2026-07-13)
+`authenticate(username, password)` is the single entry for `/hub/login`: unknown username → register (scrypt hash into `player_profiles.password_hash`, migration 004); known + `passwordHash === null` → legacy account adopts this password (link-by-first-authed-login); known + hash → verify, `{ ok: false, error: 'invalid_credentials' }` on mismatch. Hashing/verify in `server/auth/passwords.js`; session tokens (HMAC, 7-day TTL, `AUTH_TOKEN_SECRET` env) + `requireAuth` middleware in `server/auth/tokens.js`; `DungeonRoom.onAuth` verifies the same token on room join. Design rationale + upgrade path to Supabase Auth: header comment of `tokens.js` and `agent-context/protocol.md` §HTTP.
 
 ### Per-player mutation lock (`_withLock`)
 Serializes concurrent mutations for the same `playerId` so `syncStashAndMeta`'s DELETE+INSERT can't interleave. Other players still mutate in parallel.
@@ -47,8 +50,8 @@ When `savePlayer` throws after `withRetry` exhausts (sustained Supabase outage):
 |---|---|
 | `supabase.js` | Singleton client from `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`. Server-only, bypasses RLS. |
 | `withRetry.js` | Generic 3-attempt 100/200/400 ms backoff HOF. Default predicate skips errors with 5-digit Postgres SQLSTATE (UNIQUE/FK/etc.). **Only wrap idempotent ops** — wrapping a bare INSERT can produce duplicate rows on post-commit blip + retry. |
-| `playerLoad.js` | `loadPlayer(playerId)`, `loadPlayerByUsername(username)`. Aggregates `gear_stash` rows by `item_id`. All SELECTs wrapped in `withRetry`. |
-| `playerSync.js` | Write-side. `createProfile` (un-retried, one-shot). `syncStashAndMeta` (UPSERT items by `(player_id, item_id)`, DELETE-NOT-IN, UPSERT meta by PK — UPSERT-first so a mid-sync crash leaves ghost rows but never wipes owned items). `renameUsername` (catches PG 23505 → `{ok:false, error:'username_taken'}`). All wrapped in `withRetry`. Requires migration `002_unique_stash.sql`. |
+| `playerLoad.js` | `loadPlayer(playerId)`, `loadPlayerByUsername(username)`. Selects `password_hash` (migration 004) into `passwordHash`. Aggregates `gear_stash` rows by `item_id`. All SELECTs wrapped in `withRetry`. |
+| `playerSync.js` | Write-side. `createProfile(username, initialStash, passwordHash)` (un-retried, one-shot). `syncStashAndMeta` (UPSERT items by `(player_id, item_id)`, DELETE-NOT-IN, UPSERT meta by PK — UPSERT-first so a mid-sync crash leaves ghost rows but never wipes owned items). `renameUsername` (catches PG 23505 → `{ok:false, error:'username_taken'}`). `updatePasswordHash` (idempotent, retried). All wrapped in `withRetry`. Requires migrations `002_unique_stash.sql` + `004_password_auth.sql`. |
 | `runCommit.js` | `insertRunHistory(...)`. Throws on Supabase error; caller wraps in try/catch. **Un-retried** — losing a telemetry row is preferable to duplicating one. |
 | `deadLetter.js` | Append-only JSONL at `server/.deadletter.jsonl` (gitignored; override path with `MH_DEAD_LETTER_PATH` for tests). Format: `{ kind: 'extract' \| 'death', playerId, payload, error, ts }`. Recovery is operator-driven — no auto-replay. Server `index.js` logs a startup warning if the file is non-empty. |
 
@@ -71,8 +74,8 @@ This was a deliberate pick over an audit-trail interpretation because it mirrors
 - See `supabase/migrations/`.
 
 ## Known Limitations
-- **Username login is trust-on-first-use.** Anyone with a username can become that player. Real auth (Supabase Auth) is future work.
-- **`run_history.kills` always 0.** Column exists; attribution deferred.
+- **No token refresh or revocation list.** Sessions last 7 days; revocation only via `AUTH_TOKEN_SECRET` rotation (logs everyone out). Acceptable for the closed playtest; swap `verifyToken` internals for `supabase.auth.getUser(jwt)` if/when Supabase Auth lands.
+- **Server startup probes for migration 004** and warns loudly if `password_hash` is missing (logins fail until applied).
 
 ## See also — historical context
 `archive/server-persistence-plan.md` — Phase 0–3 build plan + post-implementation audit. Read only if you need: the original Phase 1/2/3 decomposition and rationale, the 2026-05-09 audit findings (snapshot-replace row-op waste, etc.), the full Phase 3 hardening pre-flight list (per-player lock, server-authoritative pricing, retry, dead-letter, atomic-safe sync — all shipped), the future `gear_events` table sketch, or the Supabase Auth migration notes. Frozen at Phase 3 completion (2026-05-10).

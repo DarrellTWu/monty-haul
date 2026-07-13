@@ -1,12 +1,26 @@
 ---
 status: shipped
-updated: 2026-05-18
-purpose: Client↔server WebSocket message protocol + Hub HTTP routes. Read when the task adds, removes, or modifies a message/route.
+updated: 2026-07-13
+purpose: Client↔server WebSocket message protocol + Hub HTTP routes + auth. Read when the task adds, removes, or modifies a message/route.
 ---
 
 # Client-Server Protocol
 
-## WebSocket (Colyseus)
+## Room join + auth (Colyseus)
+
+Every join carries `options.token` — the session token issued by `POST /hub/login`. `DungeonRoom.onAuth` verifies it (`server/auth/tokens.js`) and rejects the join with `unauthorized` otherwise; the verified payload lands on `client.auth`, and **`client.auth.playerId` is the only identity `onJoin` trusts** (a client-supplied `playerId` join option is ignored).
+
+Three join modes (client routing in `ColyseusClient.js`, selected by `DungeonScene.init` data `{ mode, joinCode }` from the hub's entry buttons):
+
+| Mode | Client call | Server behavior |
+|---|---|---|
+| `quick` (default) | `joinOrCreate('dungeon', opts)` | Matches any public room with a free slot or creates one |
+| `party` | `create('dungeon', { ...opts, private: true })` | Room calls `setPrivate(true)` — excluded from matchmaking; its `roomId` is the party code (shown as an in-game banner) |
+| `joincode` | `joinById(code, opts)` | Joins the named room; works for private rooms |
+
+`maxClients = MAX_PLAYERS_PER_ROOM` (4 — GDD tier-1 cohort). A 5th quick-start client lands in a fresh room.
+
+## WebSocket messages
 All messages handled in `DungeonRoom.js` `onCreate`.
 
 ### Client → Server
@@ -24,9 +38,9 @@ All messages handled in `DungeonRoom.js` `onCreate`.
 | `take_gold` | `{ sourceId }` | Transfer all gold from a corpse to the player. Validates lock and range |
 | `drop_item` | `{ sourceKind, sourceId, inventoryIndex }` | Move item at inventory index → container. Validates lock and range; clears hotbar binding if last copy of that item |
 | `descend` | `{ stairId }` | Validates exists, !locked, in range. Swaps floor for everyone in the room |
-| `assign_hotbar` | `{ itemId, slot }` | Bind ability/consumable id to hotbar index 0–9 |
-| `use_hotbar` | `{ slot }` | Activate hotbar slot 0–9. Consumable types: `healing`, `bless`, `longstrider`, `false_life`, `extract` (run terminator) |
-| `choose_level_up` | `{ classId }` | Resolve a pending descend-triggered level-up. Only honored while `player.pendingLevelUp`; `classId` must be in `getEligibleClassChoicesForLevelUp(player)`. Silently dropped otherwise. See `agent-context/combat.md` (Level-Up + Multiclass). |
+| `assign_hotbar` | `{ itemId, slot }` | Bind an id to hotbar index 0–9. Whitelist: `ABILITY_REGISTRY` (shared/data/abilities.js) ∪ `CONSUMABLE_REGISTRY`. Binding is unguarded; **use** is gated. |
+| `use_hotbar` | `{ slot }` | Activate hotbar slot 0–9. Abilities dispatch via `DungeonRoom._useAbility` and require the feature in `getGrantedFeatures(player)` (binding alone isn't enough): `second_wind`, `rage`, `action_surge`, `reckless_attack` (toggle), `flurry_of_blows` / `patient_defense` / `step_of_wind` (1 ki each). Consumable types: `healing`, `bless`, `longstrider`, `false_life`, `extract` (run terminator) |
+| `choose_level_up` | `{ classId }` | Resolve a pending descend-triggered level-up. Only honored while `player.pendingLevelUp`; `classId` must be in `getEligibleClassChoicesForLevelUp(player)` (any class below its per-class cap of 3 — same-class re-leveling allowed). On reaching class level 3 with the matching emblem item carried, the subclass is granted in the same handler. Silently dropped otherwise. See `agent-context/combat.md` (Level-Up + Multiclass). |
 
 ### Server → Client
 
@@ -43,11 +57,13 @@ Server validates all inputs. If invalid (item not in bag, two-handed + offhand c
 Open gap: server-side ability score validation only checks keys exist, not budget/range. See architecture review §3.2.
 
 ## HTTP (Express `/hub`)
-Router at `server/routes/hub.js`. CORS-enabled for Vite dev.
+Router at `server/routes/hub.js`. CORS: allowlist from `ALLOWED_ORIGINS` env (comma-separated); unset → wildcard for local dev.
+
+**Auth:** every route except `POST /login` requires `Authorization: Bearer <token>` and the token's playerId must equal the path's `:playerId` (`requireAuth` in `server/auth/tokens.js`; 401 bad/missing token, 403 someone else's). Tokens are HMAC-SHA256-signed `{ pid, exp }`, 7-day TTL, secret from `AUTH_TOKEN_SECRET` env (ephemeral + warning if unset). Passwords: scrypt hashes in `player_profiles.password_hash` (migration 004); a legacy passwordless account adopts the first password presented at login.
 
 | Route | Body | Returns |
 |---|---|---|
-| `POST /login` | `{ username }` | `{ playerId, username, stash, gold, raiderPack }` |
+| `POST /login` | `{ username, password }` (password ≥ 6 chars; unknown username registers) | `{ token, playerId, username, stash, gold, raiderPack }`; 401 `invalid_credentials` on mismatch |
 | `GET /:playerId` | — | `{ playerId, username, stash, gold, raiderPack }` |
 | `POST /:playerId/raider/add` | `{ itemId }` | Updated state |
 | `POST /:playerId/raider/remove` | `{ itemId }` | Updated state |
@@ -60,5 +76,5 @@ Router at `server/routes/hub.js`. CORS-enabled for Vite dev.
 Each route is wrapped in an `asyncRoute` helper that catches throws (e.g. Supabase outage) and returns 500.
 
 ## Client API Wrappers
-- `client/src/network/HubAPI.js` — thin async fetch wrapper for `/hub`. Used exclusively by `store/stash.js`.
-- `client/src/network/ColyseusClient.js` — `joinDungeon(opts)` forwards `{ class, playerId, abilityScores }`; container protocol senders; `sendDescend`; `sendChooseLevelUp(classId)`.
+- `client/src/network/HubAPI.js` — thin async fetch wrapper for `/hub`. Attaches the Bearer token via a provider injected by `store/stash.js` (`setTokenProvider` — avoids an import cycle). Used exclusively by `store/stash.js`, which persists the token in localStorage (`mh_auth_token`) and clears it on logout.
+- `client/src/network/ColyseusClient.js` — `joinDungeon(opts)` / `createPartyDungeon(opts)` / `joinDungeonByCode(code, opts)` forward `{ class, abilityScores, token }`; container protocol senders; `sendDescend`; `sendChooseLevelUp(classId)`.

@@ -1,7 +1,7 @@
 ---
 status: shipped
-updated: 2026-05-18
-purpose: Combat resolution (melee + ranged + advantage/disadvantage tri-state), target selection, class schema, loadout, ability scores, level-up / multiclass. Read when the task touches attacks, classes, or character creation.
+updated: 2026-07-13
+purpose: Combat resolution (melee + ranged + advantage/disadvantage tri-state), target selection, class schema, levels 1–3 features, subclasses + emblem unlocks, loadout, ability scores, level-up / multiclass. Read when the task touches attacks, classes, or character creation.
 ---
 
 # Combat, Classes, Loadout
@@ -17,10 +17,26 @@ Each class file in `shared/data/classes/` exports a const (see `fighter.js` / `m
 - `startingWeaponId`, `startingArmorId` — item ids (`''` = none)
 - `unarmoredDefense` — optional string key (e.g. `'wis'` for monk). AC = 10 + DEX mod + [stat] mod when no armor and no shield. **Activates if any taken class grants it** (see `getDerivedClassFeatures`); applied inside `recomputeStats`.
 - `saveProficiencies` — array of ability keys. **First-class only post-multiclass** (SRD rule); reads off `player.class` (the primary class).
-- `levels: { [n]: { features, grants } }` — per-level progression table. `features` is the list of ability ids granted at level `n` (seeded onto the hotbar by `applyClassLevel` on the **first** time a player takes any level in that class). `grants` carries passive metadata (`fightingStyle`, `feat`). MVP only fills level 1; 2 and 3 are explicit stubs.
-- `rageUses` — Barbarian per-class resource pool. Top-level (not per-level). `applyClassLevel` seeds `rageUsesRemaining` from this on the first Barbarian level; `_longRest` refills it on descend.
+- `levels: { [n]: { features, grants } }` — per-level progression table, filled for levels 1–3. `features` is the list of ability ids granted at level `n` (must exist in `ABILITY_REGISTRY`, `shared/data/abilities.js`; seeded onto the hotbar by the `choose_level_up` handler when `applyClassLevel` returns them). `grants` carries passive metadata: `fightingStyle`, `feat`, `dangerSense`, `ki`, `unarmoredMovementFt`, `rageUses` (absolute override), `subclassChoice`.
+- `subclasses: { [subclassId]: { id, name, grants } }` — subclasses reachable at `SUBCLASS_UNLOCK_LEVEL` (3). Subclass `grants`: `critRange` (Champion 19), `frenzy` (Berserker), `openHandTechnique` (Open Hand).
+- `startingItemIds` — extra bag items for the free starter loadout (empty-raider-pack joins only). Each class seeds its basic subclass emblem here.
+- `rageUses` — Barbarian resource pool at level 1; `levels[3].grants.rageUses = 3` overrides upward. Read through `getRageUsesMax(player)`; `_longRest` refills from it on descend.
 - `gearlessLevelCap` — `3` for every MVP class. Read by `class-progression.getMaxLevelForClass`. Will become gear-dependent later.
 - `canClimb: bool` — Monk true; Fighter/Barbarian false. **OR across all taken classes** via `getDerivedClassFeatures`. Read at call time by `MovementSystem`/`AISystem`. **Not synced.**
+
+## Level 1–3 Features (current roster)
+
+| Class | 1 | 2 | 3 |
+|---|---|---|---|
+| Fighter | Second Wind (heal 1d10 + fighter class level, 1/rest), Dueling | Action Surge (`applyActionSurge`: reset attack timer, 1/rest) | Champion via `champion_sigil` — crit on 19–20 (`attacker.critRange`; a 19 crits only if the total also hits — nat-20-only auto-hit preserved) |
+| Barbarian | Rage (+2 melee dmg, resist physical, 30s), Unarmored Defense (CON) | Reckless Attack (hotbar **toggle**, `'reckless'` in `conditions` with no timer: adv on your melee attacks, foes gain adv on you; cleared on long rest), Danger Sense (advantage on DEX saves — wired into trap saves via `resolveSave({ advantage })`) | Berserker via `berserker_totem` — Frenzy: one extra main-weapon attack per Attack event while raging; rage pool 2 → 3 |
+| Monk | Unarmored Defense (WIS), Martial Arts (bonus unarmed strike — gated on **any monk level**, not primary class) | Ki (`kiPoints`/`kiMax` = monk level, refilled on long rest) fueling Flurry of Blows (2 bonus unarmed strikes, `applyFlurryOfBlows`), Patient Defense (attackers disadv, timed condition), Step of the Wind (`'dash'` condition — ×2 speed in MovementSystem); Unarmored Movement +10 ft while no armor/shield | Way of the Open Hand via `open_hand_manual` — flurry hits stagger the target (`attackCooldownMs` pushed to `OPEN_HAND_STAGGER_MS`) |
+
+Ki abilities cost `KI_ABILITY_COST` (1). Tuning constants (`PATIENT_DEFENSE_DURATION_MS`, `STEP_OF_WIND_DURATION_MS`, `OPEN_HAND_STAGGER_MS`, `SUBCLASS_UNLOCK_LEVEL`) live in `shared/data/constants.js`.
+
+## Subclass Unlock (emblem items)
+
+`trySubclassUnlock(player, classId, carriedItemIds, itemRegistry)` in `class-progression.js` — called by the `choose_level_up` handler after `applyClassLevel`. Grants the subclass when: class level ≥ `SUBCLASS_UNLOCK_LEVEL`, no subclass yet for that class, and the player carries (bag or equipped slots) an `emblem`-category item whose `unlocks: { classId, subclassId }` matches. Result stored in `PlayerState.subclasses` (MapSchema classId → subclassId, synced). No retroactive unlock — acquiring the emblem after taking level 3 does nothing until a future pass (deliberate MVP cut). Emblems live in `shared/data/items/emblems.js`; each class's basic emblem is in its free starter loadout, so death → fresh character always re-seeds it, and extraction carries it through the raider pack.
 
 ## Level-Up + Multiclass (`shared/logic/class-progression.js`)
 
@@ -28,21 +44,29 @@ Pure module — no framework or RNG deps. Owns the single mutation path for char
 
 - `PlayerState.classLevels: MapSchema<string, number>` — per-class totals; source of truth for build state.
 - `PlayerState.levelUpHistory: ArraySchema<string>` — ordered class ids; index `i` = class chosen at level `i+1`. `levelUpHistory[0]` is the **primary class** (used for starting equipment + save proficiencies only).
+- `PlayerState.subclasses: MapSchema<string, string>` — classId → subclassId; written only by `trySubclassUnlock`.
 - `PlayerState.pendingLevelUp: boolean` — true between descend and `choose_level_up`. While set, server drops `move` / `attack` messages and client locks input + opens `LevelUpModal`.
 - `PlayerState.level` — cached `sum(classLevels.values)`. Invariant: only `applyClassLevel` mutates this trio.
 
 Flow:
-1. `DungeonRoom.onJoin` calls `applyClassLevel(player, classId)` to seed level 1 — this initializes `classLevels`, `levelUpHistory`, `level`, and (on first-in-class) seeds the per-class resource pool (`rageUsesRemaining`, `secondWindAvailable`). HP for the join seed is then patched to `classDef.getStartingHp(conMod)` (max-die formula, level-1 only).
+1. `DungeonRoom.onJoin` calls `applyClassLevel(player, classId)` to seed level 1 — this initializes `classLevels`, `levelUpHistory`, `level`, and seeds feature-keyed resource pools (`rageUsesRemaining`, `secondWindAvailable`, `actionSurgeAvailable`, ki). HP for the join seed is then patched to `classDef.getStartingHp(conMod)` (max-die formula, level-1 only).
 2. `_descendTo` runs `_longRest` on every alive player, then sets `pendingLevelUp = true`.
-3. `choose_level_up { classId }` validates eligibility via `getEligibleClassChoicesForLevelUp` (MVP: untaken classes only), calls `applyClassLevel`, calls `recomputeStats`, clears the flag, seeds new features onto the first empty hotbar slot (or emits a `combat_log` notice if none), and broadcasts the build summary.
+3. `choose_level_up { classId }` validates eligibility via `getEligibleClassChoicesForLevelUp` (any class below its per-class cap of 3 — continuing a taken class and multiclassing are both legal), calls `applyClassLevel` (returns the **new level's** features for hotbar seeding), calls `recomputeStats`, attempts `trySubclassUnlock` at class level 3, clears the flag, seeds new features onto the first empty hotbar slot (or emits a `combat_log` notice if none), and broadcasts the build summary.
 
-Derived features (`getDerivedClassFeatures(player)`) — consult instead of `CLASS_REGISTRY[player.class].X` for any passive that should activate after multiclass:
+Derived features (`getDerivedClassFeatures(player)`) — consult instead of `CLASS_REGISTRY[player.class].X` for any passive that should activate after multiclass. Stable shape; reads `classLevels` + `subclasses`:
 
 | Field | Rule | Callsite |
 |---|---|---|
 | `fightingStyle` | First non-null `levels[n].grants.fightingStyle` across taken classes | `CombatSystem.playerAttack` (Dueling) |
-| `unarmoredDefense` | First non-null `def.unarmoredDefense` across taken classes | `equipment.recomputeStats` (AC) |
+| `unarmoredDefense` | First non-null `def.unarmoredDefense` across taken classes ('wis' Monk, 'con' Barbarian) | `equipment.recomputeStats` (AC) |
 | `canClimb` | OR across all taken classes | `MovementSystem.update` |
+| `dangerSense` | OR across `levels[n].grants.dangerSense` at reached levels | `DungeonRoom._checkTraps` (DEX save advantage) |
+| `unarmoredMovementFt` | Max across `levels[n].grants.unarmoredMovementFt` | `MovementSystem.update` (speed, no armor/shield) |
+| `critRange` | Min across taken subclasses' `grants.critRange`, default `DEFAULT_CRIT_RANGE` (20) | `playerToAttacker` → `resolveAttack` |
+| `frenzy` | OR across taken subclasses | `CombatSystem.playerAttack` (extra attack while raging) |
+| `openHandTechnique` | OR across taken subclasses | `applyFlurryOfBlows` (stagger on hit) |
+
+Resource-pool helpers: `getKiMax(player)` (= monk level at 2+, else 0) and `getRageUsesMax(player)` — used by both `applyClassLevel` (seed) and `_longRest` (refill).
 
 ## Loadout Model
 `DungeonRoom.onJoin` branches on the raider pack loaded from `playerStore`:
@@ -63,6 +87,8 @@ Class default gear extracted at run-end enters the raider pack normally and trig
 - Disadvantage path: 2d20 keep lower; nat-1 if either die is 1; nat-20 only if both are 20.
 - Sources are assembled where they're computed (no registry). Today's wired-up sources:
   - **High-ground** advantage — `attacker.elevation === 1 && target.elevation === 0`. Player main/offhand/MA and enemy attacks all check this. Asymmetric: no reverse disadvantage. See `agent-context/geometry-elevation.md`.
+  - **Reckless** advantage — melee attacks while `'reckless'` is in the player's conditions (Barbarian 2 toggle); enemy attacks against a reckless player also gain advantage.
+  - **Patient-defense** disadvantage — enemy attacks against a player with the `'patient_defense'` condition (Monk ki ability).
   - **Long-range** disadvantage — ranged attacks where distance > `weapon.range.normal` and ≤ `weapon.range.long`.
   - **Foe-adjacent** disadvantage — ranged attacks with any living non-target enemy within `ADJACENT_FOE_PX` of the attacker.
 - Combat log renders `d20:N [adv: a, b — high-ground]` or `d20:N [dis: a, b — long range, foe adjacent]`. Cancelled sources don't appear.
@@ -90,8 +116,8 @@ Class default gear extracted at run-end enters the raider pack normally and trig
 - Selection is **client-side only**, lives on `DungeonScene._selectedEnemyId`. Not on `PlayerState`; other players don't see your reticle.
 - Client controls: pointer-down hit-tests living enemies (hit → select, miss → clear); Tab cycles enemies sorted by distance. **Tab range is weapon-aware**: ranged weapons use `weapon.range.long`, else `MELEE_SELECT_RANGE_PX`. Selection auto-clears when the target dies or the floor changes.
 
-## Kill Attribution (DEFERRED)
-`PlayerState.kills` not implemented. `run_history.kills` always 0; column exists for future use. `_buildRunMeta` returns `kills: 0` literally. When attribution lands, increment in `CombatSystem` on enemy death.
+## Kill Attribution (shipped 2026-07-13)
+`PlayerState.kills` (synced) increments at every enemy-death site in `CombatSystem` (main hand, offhand, frenzy, martial arts, flurry) and flows into `run_history.kills` via `_buildRunMeta`. Traps and other non-attack deaths don't attribute (no such death paths exist for enemies today).
 
 ## Reference Files (read before coding)
 - `shared/types/player.js` and `shared/data/constants.js` (shapes + tuning)

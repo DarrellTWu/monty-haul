@@ -1,12 +1,12 @@
 ---
 status: shipped
-updated: 2026-05-17
-purpose: How items are defined, displayed, sorted, and referenced. Read when the task touches item data, display strings, gold values, stash layout, vendors, or crafting recipes.
+updated: 2026-07-13
+purpose: How items are defined, displayed, sorted, and referenced. Read when the task touches item data, display strings, gold values, stash layout, vendors, crafting recipes, or subclass emblems.
 ---
 
 # Itemization
 
-The single registry of every item — weapon, armor, shield, consumable, material — is `ITEM_REGISTRY` in `shared/data/items/index.js`. It is the union of the five type-specific registries (`WEAPON_REGISTRY`, `ARMOR_REGISTRY`, `SHIELD_REGISTRY`, `CONSUMABLE_REGISTRY`, `MATERIAL_REGISTRY`), each owning the equip / hotbar / AC-math semantics for its category.
+The single registry of every item — weapon, armor, shield, consumable, material, emblem — is `ITEM_REGISTRY` in `shared/data/items/index.js`. It is the union of the six type-specific registries (`WEAPON_REGISTRY`, `ARMOR_REGISTRY`, `SHIELD_REGISTRY`, `CONSUMABLE_REGISTRY`, `MATERIAL_REGISTRY`, `EMBLEM_REGISTRY`), each owning the equip / hotbar / AC-math semantics for its category.
 
 Every display string in the game is derived from the item def via `shared/logic/item-display.js`. There are no hand-maintained label/detail/sort tables anywhere else.
 
@@ -21,6 +21,9 @@ Every item def carries `category` (top-level discriminator) and — where it add
 | `consumable` | `'healing' \| 'bless' \| 'longstrider' \| 'false_life' \| 'extract'` | server consume branch     |
 | `shield`     | —                                                                    | (category alone suffices) |
 | `material`   | —                                                                    | (category alone suffices) |
+| `emblem`     | —                                                                    | (category alone suffices; carries `unlocks: { classId, subclassId }`) |
+
+Emblems (`shared/data/items/emblems.js`) are bag items — never equipped, consumed, or hotbar-bound. While carried, taking `SUBCLASS_UNLOCK_LEVEL` (3) in `unlocks.classId` grants `unlocks.subclassId` (see `agent-context/combat.md` §Subclass Unlock). The validator asserts each emblem's `unlocks` target resolves in `CLASS_REGISTRY` + that class's `subclasses`.
 
 Validator (`shared/tests/items.test.js`) enforces both axes.
 
@@ -39,7 +42,7 @@ Per-category required fields are listed in the validator. Add a sixth field on a
 
 ## Adding a new item — three steps
 
-1. **Write the def** in the right file (`shared/data/weapons/{melee,ranged}.js`, `shared/data/armor/armor.js`, or `shared/data/items/{shields,consumables,materials}.js`). Include every required field above; for the type-specific fields see a sibling def.
+1. **Write the def** in the right file (`shared/data/weapons/{melee,ranged}.js`, `shared/data/armor/armor.js`, or `shared/data/items/{shields,consumables,materials,emblems}.js`). Include every required field above; for the type-specific fields see a sibling def.
 2. **Add it to the type-specific registry** in the same file (e.g. `WEAPON_REGISTRY = { ..., new_thing: NEW_THING }`).
 3. *(Buyable only)* Add the id to a vendor's id list in `shared/data/shop.js`.
 
@@ -112,6 +115,7 @@ Current group conventions:
 | 300–399 | shields    |
 | 400–499 | consumables |
 | 500–599 | materials  |
+| 600–699 | emblems    |
 
 ## Gold value
 
@@ -128,15 +132,15 @@ When a future recipe produces an equippable item (e.g. a Forge Sword recipe outp
 Eight suites, all pure data checks — run as part of `node shared/tests/items.test.js`:
 
 1. Every item has the required base fields (`id`, `category`, `label`, `goldValue`, `sortKey`).
-2. Per-category required fields (weapon: `type`+`damageDice`+`damageType`+`attackAbility`, ranged also `range`; armor: `type`+`baseAC`; shield: `acBonus`; consumable: `type`; material: base only).
+2. Per-category required fields (weapon: `type`+`damageDice`+`damageType`+`attackAbility`, ranged also `range`; armor: `type`+`baseAC`; shield: `acBonus`; consumable: `type`; material: base only; emblem: `unlocks` resolving in `CLASS_REGISTRY[...].subclasses`).
 3. `def.id === key` for every type-specific registry entry.
-4. Disjoint id namespace across the five type-specific registries.
+4. Disjoint id namespace across the six type-specific registries.
 5. `getItemDisplay` returns a complete shape for every item.
 6. Reference integrity: every chest item in `FLOOR_REGISTRY`, every literal loot-table itemId (skipping `@pool_name` refs), every vendor id resolves in `ITEM_REGISTRY`.
 7. Recipe input/output ids resolve in `ITEM_REGISTRY`; output `category` is in the known whitelist.
 8. Recipe `bench` resolves in `BENCH_REGISTRY`.
 
-99 assertions today.
+109 assertions today.
 
 ## See also
 

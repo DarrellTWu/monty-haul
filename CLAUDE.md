@@ -74,9 +74,10 @@ D&D 5e SRD mechanics adapted for real-time play.
 - `npm start` — starts both server and client together (via concurrently). Server is launched with `--env-file=server/.env` so `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` load automatically.
 - `npm run dev` — Vite dev server (client) only
 - `npm run server` — Colyseus server only (also passes `--env-file=server/.env`)
+- `npm run test:all` — every offline suite (shared + server unit tests + validators)
 - `node shared/tests/combat.test.js` — run combat tests
-- `node shared/tests/loot.test.js` — run loot tests
 - `node shared/tests/items.test.js` — run itemization validator (covers floors/loot/vendor/recipe reference integrity)
+- `node scripts/balance-sim.mjs [--seed N] [--trials N]` — deterministic Monte Carlo balance report (class × level × enemy × pack size)
 - `node server/tests/supabase-smoke.js` — round-trip a temp player through Supabase (requires `server/.env`)
 
 ## File Structure
@@ -118,9 +119,12 @@ Before any game logic task, read these files:
   - `inventory` — ArraySchema of item id strings
   - `hotbar` — ArraySchema[10] of ability/consumable ids or `''`
   - `conditions` — ArraySchema of active condition id strings
-  - `secondWindAvailable, blessRemainingMs, longstriderRemainingMs, falseLifeRemainingMs, tempHp`
+  - `secondWindAvailable, actionSurgeAvailable, blessRemainingMs, longstriderRemainingMs, falseLifeRemainingMs, patientDefenseRemainingMs, dashRemainingMs, tempHp`
   - `rageRemainingMs, rageUsesRemaining` — Barbarian rage tracking (synced for HUD ring + inventory)
+  - `kiPoints, kiMax` — Monk ki pool (= monk class level at 2+; refilled on long rest)
+  - `classLevels, levelUpHistory, subclasses, pendingLevelUp` — build state; mutate only via `shared/logic/class-progression.js` (see `docs/agent-context/combat.md`)
   - `gold` — run-scope wallet; committed via `playerStore.commitExtract` on extract, lost on death/disconnect
+  - `kills` — enemies killed this run; feeds `run_history.kills`
   - `str, dex, con, int, wis, cha` — ability scores; set on join from client point-buy (validated server-side via `validateAbilityScores` in `shared/logic/character.js`); fall back to `classDef.baseAbilityScores` if invalid. Mutable during run. Call `recomputeStats(player)` (from `shared/logic/equipment.js`) after any change.
   - `elevation` — 0 = ground, 1 = elevated. Synced. Seeded on join + descend by `DungeonRoom._spawnElevation(x, y)`; mutated each tick by `MovementSystem.tryAutoClimb`. See `docs/agent-context/geometry-elevation.md`.
 - `server/state/EnemyState.js` — synced enemy schema:

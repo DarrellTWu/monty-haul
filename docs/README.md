@@ -72,4 +72,4 @@ Features that are described in docs but not built should be marked **DEFERRED** 
 ```js
 // TODO(deferred): <short description> — see docs/agent-context/<file>.md
 ```
-Current deferred items: kill attribution, Debug Mode OFF (production gameplay path).
+Current deferred items: Debug Mode OFF (production gameplay path).

@@ -1,6 +1,6 @@
 ---
 status: in-progress
-updated: 2026-07-07
+updated: 2026-07-13
 purpose: Sprint roadmap for the next ~8 sprints, sequenced around two goals — first hosted deployment, then designer-ready content pipelines (art, floors, monsters). Each sprint gets its own detailed plan doc when it starts (per DOC_PRINCIPLES §"Adding a new system"); this doc holds goals, scope boundaries, and success criteria only.
 ---
 
@@ -12,9 +12,9 @@ Cross-references: findings labeled H*/M*/L* are from [`architecture-review-2026-
 
 ---
 
-## Sprint A — Ship floor 3 *(in flight, ~90% done)*
+## Sprint A — Ship floor 3 *(code committed 2026-07-12; plan not yet archived)*
 
-The uncommitted working-tree changes implement steps 1–4 of [`floor-3-sprint-plan.md`](floor-3-sprint-plan.md). Remaining:
+Floor 3 landed in commit `12349a7`. Remaining housekeeping from [`floor-3-sprint-plan.md`](floor-3-sprint-plan.md):
 
 - Run the plan's step-5 end-to-end smoke (floor 1 → 2 → 3, permanent-lock stair, extraction, death row).
 - Commit; archive the plan to `docs/archive/` with `status: archived`; flag the doc updates the plan already lists (`PROJECT_STRUCTURE.md` floors row, `agent-context/floors.md` permanentLock note).
@@ -46,7 +46,7 @@ Client-only; slots anywhere after A (recommended here, so every hosted playtest 
 
 **Out of scope:** animations beyond idle (facing/walk cycles are a follow-up once the pack's frames are wired), audio, Tiled-as-authoring-format, R2.
 
-## Sprint C — Room lifecycle + production hygiene
+## Sprint C — Room lifecycle + production hygiene ✅ *(completed 2026-07-13)*
 
 Make the hosted build safe for multiple *groups*. Closes H2, part of H1's exposure, M3's validation half.
 
@@ -58,19 +58,20 @@ Make the hosted build safe for multiple *groups*. Closes H2, part of H1's exposu
 
 **Watch:** the hub → dungeon handoff (`HubScene` → `joinDungeon` opts) and `run_history` semantics for late joiners both change shape here; check `agent-context/protocol.md` triggers.
 
-## Sprint D — Real auth
+## Sprint D — Real auth ✅ *(completed 2026-07-13 — verified on the hosted URL)*
 
-Replace trust-on-first-use login. Closes H1. The biggest sprint on this list — plan doc mandatory, and consider splitting server-verification from client-UI.
+Replace trust-on-first-use login. Closes H1.
 
-- Recommended shape: **Supabase Auth** (email magic-link, or anonymous sign-in upgraded later) issuing a JWT; client sends it on `/hub` requests (Authorization header) and in Colyseus join options; server verifies via `supabase.auth.getUser(jwt)` and maps auth uid → `player_profiles`. The alternative — hand-rolled session tokens — is less work up front but re-implements expiry/refresh/revocation; decide in the sprint plan, not by default.
-- Migration path for existing playtest accounts (link-by-username on first authed login, or accept a wipe — decide with testers).
-- Keeps: playerId-keyed store internals; server-side pricing/validation (unchanged).
+- **Shipped shape: hand-rolled session tokens** (HMAC-SHA256, 7-day TTL) over username+password (scrypt hashes, migration 004) — chosen over Supabase Auth because magic-link needs an email provider and anonymous sign-in needs dashboard config + the anon key in the client. Trade-off accepted: no refresh, revocation via `AUTH_TOKEN_SECRET` rotation only. `verifyToken` (`server/auth/tokens.js`) is the single seam to swap for `supabase.auth.getUser(jwt)` later.
+- Migration path shipped as link-by-username: a legacy passwordless account adopts the first password presented at login.
+- Kept: playerId-keyed store internals; server-side pricing/validation (unchanged).
+- Done-when met: no/expired/forged tokens rejected on every `/hub` route and on room join (`onAuth`); cross-account access 403s; `server/tests/auth.test.js` covers the rejection matrix (offline rather than as anti-cheat smoke extensions).
 
-**Done when:** a request with no/expired/forged token is rejected on every `/hub` route and on room join; two accounts cannot touch each other's stash; anti-cheat smoke suite extended with auth rejection cases.
-
-## Sprint E — Floor-authoring foundation + floor 4
+## Sprint E — Floor-authoring foundation + floor 4 *(partially pulled forward 2026-07-13)*
 
 Content track begins. Closes M3's builder half, M4, and the deferred unlock-condition stopgap; unblocks workflow W2 (Floor Architect) in `content-pipeline-enablement.md`.
+
+> Already shipped ahead of this sprint: the **unlock-condition system** (`shared/logic/unlock.js` — both stopgaps removed), **kill attribution** (`PlayerState.kills` → `run_history.kills`), and boot-time floor validation (Sprint C). Remaining here: shared floor builders, SVG preview script, floor 4, run_history multiclass column (M4).
 
 - Extract shared floor builders (`cluster`/`buildArm`/walled-room helpers duplicated across floors 2–3) to `shared/data/floors/builders.js`; floors become short declarative files. The walled-room builder emits consistent wall segments + door rects + `rooms[].doors` entries from one declaration — the hand-correlated-geometry problem disappears into tested helpers.
 - General stair/door **unlock-condition system** replacing both `lockedUntilAllEnemiesDead` and the `_permanentlyLockedStairs` Set stopgap (the `TODO(deferred)` sites in `DungeonRoom`). Data-driven: `unlock: { kind: 'enemies_cleared' | 'never' | ... }`.
@@ -95,7 +96,7 @@ Closes M2; unblocks workflow W1 (Monster Smith) and gives W4 its behavior vocabu
 
 The proof sprint: use the tooling to ship real content via the agentic workflows. Unblocks W3 (Balance Auditor) and writes W5 (authoring guide).
 
-- **Balance sim harness:** headless Monte Carlo over `shared/logic/combat.js` (pure, RNG-injected — no game boot). `node scripts/balance-sim.js` → per class-loadout × monster (and pack sizes): hit rates, TTK both directions, player death probability. Deterministic seed for reproducible reports.
+- **Balance sim harness:** ✅ *(pulled forward 2026-07-13 — `scripts/balance-sim.mjs`)* headless Monte Carlo over `shared/logic/combat.js` (pure, RNG-injected — no game boot) → per class-loadout (levels 1–3 incl. subclasses) × monster × pack size: hit rates, TTK, player death probability. Deterministic seed for reproducible reports.
 - **Target bands as data:** a small file declaring intended difficulty per monster (e.g. "goblin: level-1 fighter TTK 2–4 attacks"); the sim report flags out-of-band pairs.
 - **Pilot content wave, run as the workflows dictate:** 2–3 new tier-1 monsters via W1 briefs (at least one using the ranged behavior), one new floor via a W2 sketch→preview→approve loop, tuned via W3. One agent session per item.
 - **`docs/design/authoring-guide.md` (W5):** the designer-facing brief formats, how to read sim reports and previews, the behavior vocabulary — written now, against real tooling.

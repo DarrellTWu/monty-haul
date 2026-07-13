@@ -22,8 +22,8 @@ Deviations from the guide as written:
 
 ⚠️ Operational notes:
 - **Every push to `main` redeploys both Railway and Pages.** A Railway redeploy restarts the server and disconnects anyone mid-run (in-run progress lost, hub state safe). Push when nobody's playing.
-- The URL runs **trust-on-first-use auth** and **one global room** — closed playtest only until roadmap Sprints C + D land. Don't post it publicly.
-- CORS is still `*`; tighten in Sprint C (§8).
+- **Sprints C + D shipped 2026-07-13** (password auth + session tokens, 4-player room cap, private party rooms, CORS allowlist). Requires migration `004_password_auth.sql` (applied to the live DB 2026-07-13; the server probes at boot and warns if missing). Set on Railway: `AUTH_TOKEN_SECRET` (unset → ephemeral secret; every redeploy silently logs everyone out) and `ALLOWED_ORIGINS` (`https://monty-haul.pages.dev,http://localhost:5173`; unset → wildcard).
+- Legacy playtest accounts are passwordless until their next login — the first password typed for that username becomes theirs. Announce before the next session.
 - After each playtest, skim Railway logs for dead-letter warnings (§8).
 
 **Recommended stack** (matches the intent in `tech_spec.md` §1, chosen here for lowest ops burden):
