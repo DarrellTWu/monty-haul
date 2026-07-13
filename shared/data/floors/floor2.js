@@ -87,15 +87,14 @@ export const FLOOR_2 = {
     items: ENTRY_CHEST_ITEMS,
   }],
   traps: [],
-  // Stair down to floor 3, unlocked from spawn so testers can descend
-  // immediately. Sits inside the central walled room, south of spawn —
-  // unambiguously closer to the player than the entry chest at (+80, 0).
+  // Stair down to floor 3, unlocked from spawn (no unlock condition) so
+  // testers can descend immediately. Sits inside the central walled room,
+  // south of spawn — unambiguously closer to the player than the entry chest.
   stairs: [{
     id: 'stair_floor2_down',
     x: CENTER.x,
     y: CENTER.y + 60,
     toFloor: 3,
-    lockedUntilAllEnemiesDead: false,
   }],
   // Walled center room: each face is a wall band split into two segments
   // around a centered door opening.

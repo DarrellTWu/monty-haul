@@ -27,6 +27,7 @@ import {
   tryTakeItem, tryTakeGold, tryDropItem,
 } from '../../shared/logic/loot-window.js';
 import { applyCondition, tickConditions, clearPlayerConditions } from '../../shared/logic/conditions.js';
+import { startsLocked, shouldUnlock } from '../../shared/logic/unlock.js';
 import { LOOT_TABLE_REGISTRY }       from '../../shared/data/loot/tier1.js';
 import { ARMOR_REGISTRY }            from '../../shared/data/armor/armor.js';
 import { WEAPON_REGISTRY }           from '../../shared/data/weapons/index.js';
@@ -77,10 +78,10 @@ export class DungeonRoom extends Room {
     this._floorWalls      = [];
     this._floorPlatforms  = [];
     this._floorRooms      = [];
-    // Stair ids that should never auto-unlock on enemies-cleared. Cleared and
-    // repopulated by _loadFloor. Stopgap for debug floor 3's stair-to-floor-4;
-    // TODO(deferred): replace with a general stair/door unlock-condition system.
-    this._permanentlyLockedStairs = new Set();
+    // Unlock conditions for the current floor's stairs + doors, keyed
+    // 'stair:<id>' / 'door:<id>' → unlock def (shared/logic/unlock.js).
+    // Repopulated by _loadFloor; evaluated each tick against floor context.
+    this._unlockDefs = new Map();
 
     this._loadFloor(1);
 
@@ -485,15 +486,15 @@ export class DungeonRoom extends Room {
       trap.cooldownMs = 0;
       this.state.traps.set(t.id, trap);
     }
-    this._permanentlyLockedStairs.clear();
+    this._unlockDefs.clear();
     for (const s of floor.stairs) {
       const stair = new StairState();
       stair.id      = s.id;
       stair.x       = s.x;
       stair.y       = s.y;
       stair.toFloor = s.toFloor;
-      stair.locked  = !!(s.lockedUntilAllEnemiesDead || s.permanentLock);
-      if (s.permanentLock) this._permanentlyLockedStairs.add(s.id);
+      stair.locked  = startsLocked(s.unlock);
+      if (s.unlock) this._unlockDefs.set(`stair:${s.id}`, s.unlock);
       this.state.stairs.set(s.id, stair);
     }
     for (const d of floor.doors ?? []) {
@@ -503,7 +504,10 @@ export class DungeonRoom extends Room {
       door.y      = d.y;
       door.w      = d.w;
       door.h      = d.h;
-      door.locked = !!d.locked;
+      // Doors lock via a static flag (never opens without an unlock def) or
+      // an unlock condition; either starts the door locked.
+      door.locked = !!d.locked || startsLocked(d.unlock);
+      if (d.unlock) this._unlockDefs.set(`door:${d.id}`, d.unlock);
       this.state.doors.set(d.id, door);
     }
 
@@ -631,22 +635,20 @@ export class DungeonRoom extends Room {
         console.log(`[DungeonRoom] ${type} (${id}) dropped: ${gold} gp, items=[${items.join(', ')}]`));
     tickContainerLocks(this.state, CHEST_LOOT_RANGE_PX);
 
-    // Stair unlock: any stair gated on enemies-dead flips open the first tick
-    // after the last enemy dies. The transition fires once per stair (locked=false
-    // is the gate to the broadcast). A floor with no stairs is a no-op.
-    if (this.state.stairs.size > 0) {
-      const allDead = [...this.state.enemies.values()].every(e => !e.alive);
-      if (allDead) {
-        for (const [, stair] of this.state.stairs) {
-          // TODO(deferred): replace this enemies-cleared gate with a general
-          // unlock-condition system; the Set skip below is a stopgap.
-          if (stair.locked && !this._permanentlyLockedStairs.has(stair.id)) {
-            stair.locked = false;
-            this.broadcast('combat_log', {
-              message: `Stair to Floor ${stair.toFloor} unlocked.`,
-            });
-          }
-        }
+    // Unlock conditions: evaluate every locked stair/door with an unlock def
+    // against the current floor context. Each transition fires exactly once
+    // (locked=false gates the broadcast). Fail-closed: 'never' and unknown
+    // kinds simply never evaluate true.
+    if (this._unlockDefs.size > 0) {
+      const ctx = { allEnemiesDead: [...this.state.enemies.values()].every(e => !e.alive) };
+      for (const [key, unlock] of this._unlockDefs) {
+        const [kind, id] = key.split(':');
+        const entity = kind === 'stair' ? this.state.stairs.get(id) : this.state.doors.get(id);
+        if (!entity?.locked || !shouldUnlock(unlock, ctx)) continue;
+        entity.locked = false;
+        this.broadcast('combat_log', {
+          message: kind === 'stair' ? `Stair to Floor ${entity.toFloor} unlocked.` : 'A door unlocks.',
+        });
       }
     }
   }

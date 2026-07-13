@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 
 import { validateFloorData } from '../logic/validate-floors.js';
+import { startsLocked, shouldUnlock } from '../logic/unlock.js';
 import { FLOOR_REGISTRY }    from '../data/floors/index.js';
 import { ENEMY_REGISTRY }    from '../data/enemies/tier1.js';
 import { isKnownItem }       from '../data/items/index.js';
@@ -35,7 +36,7 @@ const validFloor = () => ({
   enemies: [{ id: 'g0', type: 'goblin', x: 100, y: 100 }],
   chests:  [{ id: 'c0', x: 200, y: 200, items: ['healing_potion'] }],
   traps:   [{ id: 't0', x: 300, y: 300 }],
-  stairs:  [{ id: 's0', x: 500, y: 300, toFloor: 2, lockedUntilAllEnemiesDead: true }],
+  stairs:  [{ id: 's0', x: 500, y: 300, toFloor: 2, unlock: { kind: 'enemies_cleared' } }],
   walls:   [{ x: 0, y: 0, w: 800, h: 40 }],
   doors:   [{ id: 'd0', x: 380, y: 0, w: 80, h: 40 }],
   platforms: [{ id: 'p0', x: 100, y: 400, w: 200, h: 100, elevation: 1, steps: [{ id: 'st0', x: 200, y: 400 }] }],
@@ -77,12 +78,33 @@ test('stair to a missing floor is a named error', () => {
   assert.match(errors[0], /targets missing floor 99/);
 });
 
-test('permanentLock stair may target a missing floor', () => {
+test("unlock 'never' stair may target a missing floor", () => {
   const errors = validateFloorData(
-    twoFloors(r => { r[2].stairs = [{ id: 's9', x: 1, y: 1, toFloor: 99, permanentLock: true }]; }),
+    twoFloors(r => { r[2].stairs = [{ id: 's9', x: 1, y: 1, toFloor: 99, unlock: { kind: 'never' } }]; }),
     refs,
   );
   assert.deepEqual(errors, []);
+});
+
+test('unknown unlock kind is a named error', () => {
+  const errors = validateFloorData(
+    twoFloors(r => { r[1].stairs[0].unlock = { kind: 'lever' }; }),
+    refs,
+  );
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /unknown unlock kind "lever"/);
+});
+
+test('unlock logic: startsLocked + shouldUnlock semantics', () => {
+  assert.equal(startsLocked(undefined), false);
+  assert.equal(startsLocked({ kind: 'enemies_cleared' }), true);
+  assert.equal(startsLocked({ kind: 'never' }), true);
+  assert.equal(shouldUnlock({ kind: 'enemies_cleared' }, { allEnemiesDead: false }), false);
+  assert.equal(shouldUnlock({ kind: 'enemies_cleared' }, { allEnemiesDead: true }), true);
+  assert.equal(shouldUnlock({ kind: 'never' }, { allEnemiesDead: true }), false);
+  assert.equal(shouldUnlock(undefined, { allEnemiesDead: true }), false);
+  // Unknown kinds fail closed.
+  assert.equal(shouldUnlock({ kind: 'lever' }, { allEnemiesDead: true }), false);
 });
 
 test('malformed wall rect is a named error', () => {

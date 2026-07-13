@@ -7,6 +7,8 @@
 // on any error, so a broken floor file fails with a named error instead of a
 // mid-tick crash.
 
+import { isValidUnlock, UNLOCK_KINDS } from './unlock.js';
+
 /** True iff `r` is a well-formed rect { x, y, w, h } with positive size. */
 function isRect(r) {
   return r && typeof r.x === 'number' && typeof r.y === 'number' &&
@@ -92,10 +94,13 @@ export function validateFloorData(floorRegistry, { enemyTypes, isKnownItem }) {
     for (const s of floor.stairs ?? []) {
       checkId('stair', s.id);
       if (!isPoint(s)) err(floorNum, `stair "${s.id}" needs numeric x/y`);
-      // A stair must lead somewhere loadable — unless it's a permanent lock
+      if (!isValidUnlock(s.unlock)) {
+        err(floorNum, `stair "${s.id}" has unknown unlock kind "${s.unlock?.kind}" (known: ${[...UNLOCK_KINDS].join(', ')})`);
+      }
+      // A stair must lead somewhere loadable — unless it never unlocks
       // (decoration for a not-yet-built floor, e.g. floor 3's stair down).
-      if (!s.permanentLock && !floorNums.has(String(s.toFloor))) {
-        err(floorNum, `stair "${s.id}" targets missing floor ${s.toFloor} (add the floor or set permanentLock)`);
+      if (s.unlock?.kind !== 'never' && !floorNums.has(String(s.toFloor))) {
+        err(floorNum, `stair "${s.id}" targets missing floor ${s.toFloor} (add the floor or set unlock: { kind: 'never' })`);
       }
     }
 
@@ -103,6 +108,9 @@ export function validateFloorData(floorRegistry, { enemyTypes, isKnownItem }) {
     for (const d of floor.doors ?? []) {
       checkId('door', d.id);
       if (!isRect(d)) err(floorNum, `door "${d.id}" must be a rect { x, y, w, h } with positive size`);
+      if (!isValidUnlock(d.unlock)) {
+        err(floorNum, `door "${d.id}" has unknown unlock kind "${d.unlock?.kind}" (known: ${[...UNLOCK_KINDS].join(', ')})`);
+      }
     }
     (floor.walls ?? []).forEach((w, i) => {
       if (!isRect(w)) err(floorNum, `walls[${i}] must be a rect { x, y, w, h } with positive size`);

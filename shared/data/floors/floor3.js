@@ -8,9 +8,8 @@
 // 6, 8, 10 enemies. Identical to floor 2 — see floor2.js for layout notes.
 //
 // Stair to floor 4 sits inside the central walled room, north of spawn. It
-// starts permanentLock=true and is skipped by the enemies-cleared auto-unlock
-// loop in DungeonRoom._tick. Will be replaced when the general unlock-condition
-// system lands.
+// carries unlock: { kind: 'never' } — visible but permanently locked until
+// floor 4 ships (see shared/logic/unlock.js).
 
 const CENTER = { x: 2000, y: 2000 };
 const SUBROOM_COUNTS = [1, 2, 4, 6, 8, 10];
@@ -78,14 +77,14 @@ export const FLOOR_3 = {
     items: ENTRY_CHEST_ITEMS,
   }],
   traps: [],
-  // Stair down to floor 4: permanentLock=true. The enemies-cleared auto-unlock
-  // tick skips it (see DungeonRoom._tick). Floor 4 doesn't exist yet.
+  // Stair down to floor 4: unlock 'never' — visible but permanently locked
+  // (floor 4 doesn't exist yet; the validator allows the missing target).
   stairs: [{
     id: 'stair_floor3_down',
     x: CENTER.x,
     y: CENTER.y - 60,
     toFloor: 4,
-    permanentLock: true,
+    unlock: { kind: 'never' },
   }],
   walls: [
     { id: 'wall_n_left',  x: ROOM_LEFT,            y: ROOM_TOP - WALL_OFFSET, w: ROOM_HALF - DOOR_HALF, h: WALL_THICK },

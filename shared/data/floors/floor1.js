@@ -32,7 +32,7 @@ export const FLOOR_1 = {
     id: 'stair_floor1_down',
     x: 760, y: 600,           // on the platform, west of spawn; clear of step_w
     toFloor: 2,
-    lockedUntilAllEnemiesDead: true,
+    unlock: { kind: 'enemies_cleared' },
   }],
   walls: [],                  // no walls this floor — the platform edge IS the choke point
   doors: [],
