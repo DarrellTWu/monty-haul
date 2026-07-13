@@ -39,6 +39,7 @@ export class PlayerState extends Schema {
     this.rageRemainingMs          = 0; // synced for HUD ring display
     this.rageUsesRemaining        = 0; // remaining rage activations this run
     this.gold                     = 0; // run-scope wallet; transferred to hub on extract, lost on death
+    this.kills                    = 0; // enemies killed this run (feeds run_history.kills)
     // Ability scores — set at join from player's point-buy choices, mutable during run
     // (potions, ASIs, racial bonuses, conditions). _recomputeStats(player) must be called
     // after any change so derived values (AC, etc.) stay in sync.
@@ -85,6 +86,7 @@ defineTypes(PlayerState, {
   rageRemainingMs:          'number',
   rageUsesRemaining:        'number',
   gold:                     'number',
+  kills:                    'number',
   str:                      'number',
   dex:                      'number',
   con:                      'number',

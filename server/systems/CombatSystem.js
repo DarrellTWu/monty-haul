@@ -204,6 +204,7 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
       target.state.alive = false;
       target.state.vx    = 0;
       target.state.vy    = 0;
+      player.kills += 1;
     }
     const tag = _damageTag(applied, result.crit);
     logs.push(`${pLabel} → ${tLabel}: hit (${rollStr(result, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac}), ${result.damage}${tag} ${weapon.damageType}`);
@@ -244,6 +245,7 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
         target.state.alive = false;
         target.state.vx    = 0;
         target.state.vy    = 0;
+        player.kills += 1;
       }
       const tag = _damageTag(applied, offResult.crit);
       logs.push(`${pLabel} [off] → ${tLabel}: hit (${rollStr(offResult, profBonus, offAbilMod, offAbilKey)} vs AC ${target.state.ac}), ${offRawDamage}${tag} ${offWeapon.damageType}`);
@@ -268,6 +270,7 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
         target.state.alive = false;
         target.state.vx    = 0;
         target.state.vy    = 0;
+        player.kills += 1;
       }
       const tag = _damageTag(applied, fzResult.crit);
       logs.push(`${pLabel} [frenzy] → ${tLabel}: hit (${rollStr(fzResult, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac}), ${fzResult.damage}${tag} ${weapon.damageType}`);
@@ -307,6 +310,7 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
         target.state.alive = false;
         target.state.vx    = 0;
         target.state.vy    = 0;
+        player.kills += 1;
       }
       const tag = _damageTag(applied, maResult.crit);
       logs.push(`${pLabel} [MA] → ${tLabel}: hit (${rollStr(maResult, profBonus, maAbilMod, maAbilKey)} vs AC ${target.state.ac}), ${maResult.damage}${tag} ${maWeapon.damageType}`);
@@ -509,6 +513,7 @@ export function applyFlurryOfBlows(state, sessionId, enemyDefs = new Map()) {
         target.state.alive = false;
         target.state.vx    = 0;
         target.state.vy    = 0;
+        player.kills += 1;
       }
       let staggerTag = '';
       if (derived.openHandTechnique && target.state.alive) {

@@ -788,8 +788,7 @@ export class DungeonRoom extends Room {
     return {
       classId:       player?.class || 'unknown',
       floorsReached: this._maxFloor.get(sessionId) ?? 1,
-      // TODO(deferred): kill attribution — see docs/agent-context/combat.md §Kill Attribution.
-      kills:         0,
+      kills:         player?.kills ?? 0,
       runDurationS:  Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
     };
   }
