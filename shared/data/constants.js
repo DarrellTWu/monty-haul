@@ -94,6 +94,9 @@ export const MAX_PLAYERS_PER_ROOM = 4;   // Tier-1 party cap (GDD: 4 per cohort,
 export const BANK_SLOTS_PER_RUN = 2;     // Max items a player can bank mid-run
 export const LONG_REST_ON_LEVEL_UP = true; // Full HP/resource restore on each floor clear
 
+// ACCOUNTS
+export const USERNAME_MAX_LENGTH = 20; // enforced server-side on login + rename; client inputs cap to match
+
 // CHARACTER CREATION — POINT BUY
 // Players distribute POINT_BUY_BUDGET points across the six ability scores.
 // The standard array [15,14,13,12,10,8] costs exactly 27 pts and is the class default.

@@ -1,10 +1,10 @@
 // shared/tests/character.test.js
 // ─────────────────────────────────────────────────────────────────
-// Tests for shared/logic/character.js (validateAbilityScores).
+// Tests for shared/logic/character.js (validateAbilityScores, validateUsername).
 // Run with: node shared/tests/character.test.js
 
-import { validateAbilityScores } from '../logic/character.js';
-import { POINT_BUY_BUDGET, SCORE_MIN, SCORE_MAX } from '../data/constants.js';
+import { validateAbilityScores, validateUsername } from '../logic/character.js';
+import { POINT_BUY_BUDGET, SCORE_MIN, SCORE_MAX, USERNAME_MAX_LENGTH } from '../data/constants.js';
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -63,6 +63,37 @@ test(`error string mentions budget ${POINT_BUY_BUDGET}`, () => {
   if (!r.error?.includes(String(POINT_BUY_BUDGET))) {
     throw new Error(`error string should mention budget: ${r.error}`);
   }
+});
+
+console.log('\nvalidateUsername');
+test('plain name passes and is returned as-is', () => {
+  const r = validateUsername('raider_one');
+  assertEq(r.ok, true);
+  assertEq(r.username, 'raider_one');
+});
+test('surrounding whitespace is trimmed', () => {
+  const r = validateUsername('  bob  ');
+  assertEq(r.ok, true);
+  assertEq(r.username, 'bob');
+});
+test(`exactly ${USERNAME_MAX_LENGTH} chars is valid`, () => {
+  assertEq(validateUsername('x'.repeat(USERNAME_MAX_LENGTH)).ok, true);
+});
+test(`${USERNAME_MAX_LENGTH + 1} chars is rejected`, () => {
+  const r = validateUsername('x'.repeat(USERNAME_MAX_LENGTH + 1));
+  assertEq(r.ok, false);
+  assertEq(r.error, 'invalid_username');
+});
+test('empty and whitespace-only are rejected', () => {
+  assertEq(validateUsername('').ok, false);
+  assertEq(validateUsername('   ').ok, false);
+});
+test('non-strings are rejected (no String() coercion to "[object Object]")', () => {
+  assertEq(validateUsername(null).ok, false);
+  assertEq(validateUsername(undefined).ok, false);
+  assertEq(validateUsername(123).ok, false);
+  assertEq(validateUsername({}).ok, false);
+  assertEq(validateUsername(['a']).ok, false);
 });
 
 console.log('\n──────────────────────────────────────────────────');

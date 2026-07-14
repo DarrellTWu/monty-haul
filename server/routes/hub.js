@@ -46,12 +46,16 @@ function asyncRoute(handler) {
 // adopt the first password presented — see playerStore.authenticate). Returns
 // full hub state plus the session token every other route requires.
 router.post('/login', asyncRoute(async (req, res) => {
-  const username = req.body?.username?.trim();
+  const username = req.body?.username;
   const password = String(req.body?.password ?? '');
-  if (!username)            return res.status(400).json({ ok: false, error: 'username required' });
   if (password.length < 6)  return res.status(400).json({ ok: false, error: 'password must be at least 6 characters' });
+  // Username shape (trim, non-empty, ≤ USERNAME_MAX_LENGTH) is enforced in
+  // store.authenticate via the shared validateUsername — same rule as rename.
   const result = await store.authenticate(username, password);
-  if (!result.ok) return res.status(401).json({ ok: false, error: result.error });
+  if (!result.ok) {
+    const status = result.error === 'invalid_username' ? 400 : 401;
+    return res.status(status).json({ ok: false, error: result.error });
+  }
   const p = result.player;
   res.json({
     ok: true, token: issueToken(p.playerId),

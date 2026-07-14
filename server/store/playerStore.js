@@ -9,6 +9,7 @@
 import { loadPlayer, loadPlayerByUsername } from '../persistence/playerLoad.js';
 import { createProfile, syncStashAndMeta, renameUsername, updatePasswordHash }  from '../persistence/playerSync.js';
 import { hashPassword, verifyPassword }     from '../auth/passwords.js';
+import { validateUsername }                 from '../../shared/logic/character.js';
 import { insertRunHistory }                 from '../persistence/runCommit.js';
 import { appendDeadLetter }                 from '../persistence/deadLetter.js';
 import { BUYABLE_PRICES }                   from '../../shared/data/shop.js';
@@ -114,15 +115,31 @@ export async function getOrCreate(username) {
  *     password becomes theirs (roadmap Sprint D link-by-username migration)
  *   - known, hash present         → verify; reject on mismatch
  *
- * Returns { ok: true, player } or { ok: false, error: 'invalid_credentials' }.
+ * Returns { ok: true, player } or
+ * { ok: false, error: 'invalid_credentials' | 'invalid_username' }.
  */
-export async function authenticate(username, password) {
+export async function authenticate(rawUsername, password) {
+  const v = validateUsername(rawUsername);
+  if (!v.ok) return { ok: false, error: 'invalid_username' };
+  const username = v.username;
+
   const cachedId = _byUsername.get(username);
-  const existing = cachedId ? _players.get(cachedId) : await loadPlayerByUsername(username);
+  let existing = cachedId ? _players.get(cachedId) : await loadPlayerByUsername(username);
 
   if (!existing) {
-    const created = await createProfile(username, INITIAL_STASH, await hashPassword(password));
-    return { ok: true, player: _cache(created) };
+    try {
+      const created = await createProfile(username, INITIAL_STASH, await hashPassword(password));
+      return { ok: true, player: _cache(created) };
+    } catch (err) {
+      // Registration race: two first-time logins for the same new name both
+      // observed "not found"; the loser's INSERT hits the UNIQUE constraint
+      // (PG 23505). Re-read the winner's row and fall through to the normal
+      // existing-account path — the outcome is a clean login attempt (or
+      // invalid_credentials), never a 500.
+      if (err?.code !== '23505') throw err;
+      existing = await loadPlayerByUsername(username);
+      if (!existing) throw err; // constraint fired but row unreadable — genuine failure
+    }
   }
 
   _cache(existing);
@@ -247,9 +264,9 @@ export async function craftRecipe(playerId, recipeId) {
 // race-safe gate — concurrent renames to the same name surface as
 // { ok: false, error: 'username_taken' }.
 export async function renamePlayer(playerId, newUsername) {
-  const cleaned = String(newUsername ?? '').trim();
-  if (!cleaned)              return { ok: false, error: 'invalid_username' };
-  if (cleaned.length > 20)   return { ok: false, error: 'invalid_username' };
+  const v = validateUsername(newUsername);
+  if (!v.ok) return { ok: false, error: 'invalid_username' };
+  const cleaned = v.username;
 
   return _withLock(playerId, async () => {
     const p = await getPlayer(playerId);
