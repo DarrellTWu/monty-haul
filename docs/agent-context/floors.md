@@ -59,7 +59,7 @@ Broadcasts a long-rest combat-log line at the start of descent.
 ## Extraction (Scroll of Extraction)
 - `extraction_scroll` is a `type: 'extract'` consumable in `shared/data/items/consumables.js`.
 - `use_hotbar { slot }` with an `extract` consumable sets `state.phase = 'complete'`, ending the run.
-- Server commits stash + gold via `playerStore.commitExtract` (in the per-player lock; failure logs to dead-letter).
+- Server commits stash + gold via `playerStore.commitExtract` (in the per-player lock; failure logs to dead-letter). When the commit settles, the extracting client alone receives `extract_committed { ok }` — the run summary shows a save-status line until it arrives (see `agent-context/protocol.md`).
 - The `@potion_any` loot pool filters out `type === 'extract'` (Scroll is run-control, not loot).
 
 ## Floor 2 Tuning

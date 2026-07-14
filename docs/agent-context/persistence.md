@@ -21,7 +21,7 @@ History + design rationale: `archive/server-persistence-plan.md` (Phase 0–3).
 - New players (no DB row) get `INITIAL_STASH` seeded via `createProfile` on first `getOrCreate` / `authenticate`.
 
 ### Auth (`authenticate`, Sprint D 2026-07-13)
-`authenticate(username, password)` is the single entry for `/hub/login`: unknown username → register (scrypt hash into `player_profiles.password_hash`, migration 004); known + `passwordHash === null` → legacy account adopts this password (link-by-first-authed-login); known + hash → verify, `{ ok: false, error: 'invalid_credentials' }` on mismatch. Hashing/verify in `server/auth/passwords.js`; session tokens (HMAC, 7-day TTL, `AUTH_TOKEN_SECRET` env) + `requireAuth` middleware in `server/auth/tokens.js`; `DungeonRoom.onAuth` verifies the same token on room join. Design rationale + upgrade path to Supabase Auth: header comment of `tokens.js` and `agent-context/protocol.md` §HTTP.
+`authenticate(username, password)` is the single entry for `/hub/login`: username validated first via shared `validateUsername` (trim, non-empty, ≤ `USERNAME_MAX_LENGTH` — same rule as rename; `{ ok: false, error: 'invalid_username' }` → HTTP 400); unknown username → register (scrypt hash into `player_profiles.password_hash`, migration 004); known + `passwordHash === null` → legacy account adopts this password (link-by-first-authed-login); known + hash → verify, `{ ok: false, error: 'invalid_credentials' }` on mismatch. A registration race (two concurrent first-time logins, same name) is absorbed: the loser's PG 23505 falls through to a re-read + the normal existing-account path instead of a 500. Hashing/verify in `server/auth/passwords.js`; session tokens (HMAC, 7-day TTL, `AUTH_TOKEN_SECRET` env) + `requireAuth` middleware in `server/auth/tokens.js`; `DungeonRoom.onAuth` verifies the same token on room join. Design rationale + upgrade path to Supabase Auth: header comment of `tokens.js` and `agent-context/protocol.md` §HTTP.
 
 ### Per-player mutation lock (`_withLock`)
 Serializes concurrent mutations for the same `playerId` so `syncStashAndMeta`'s DELETE+INSERT can't interleave. Other players still mutate in parallel.
@@ -56,7 +56,7 @@ When `savePlayer` throws after `withRetry` exhausts (sustained Supabase outage):
 | `deadLetter.js` | Append-only JSONL at `server/.deadletter.jsonl` (gitignored; override path with `MH_DEAD_LETTER_PATH` for tests). Format: `{ kind: 'extract' \| 'death', playerId, payload, error, ts }`. Recovery is operator-driven — no auto-replay. Server `index.js` logs a startup warning if the file is non-empty. |
 
 ## Rename Flow
-1. `renamePlayer(playerId, newUsername)` trims + validates non-empty and ≤20 chars server-side.
+1. `renamePlayer(playerId, newUsername)` validates via shared `validateUsername` (trim, non-empty, ≤ `USERNAME_MAX_LENGTH`, strings only).
 2. Dispatches to `renameUsername`.
 3. On success, evicts the old `_byUsername` entry and registers the new one.
 4. A no-op rename (current name) is a fast-path success.

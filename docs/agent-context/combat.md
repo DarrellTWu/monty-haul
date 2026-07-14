@@ -46,7 +46,7 @@ Pure module — no framework or RNG deps. Owns the single mutation path for char
 - `PlayerState.classLevels: MapSchema<string, number>` — per-class totals; source of truth for build state.
 - `PlayerState.levelUpHistory: ArraySchema<string>` — ordered class ids; index `i` = class chosen at level `i+1`. `levelUpHistory[0]` is the **primary class** (used for starting equipment + save proficiencies only).
 - `PlayerState.subclasses: MapSchema<string, string>` — classId → subclassId; written only by `trySubclassUnlock`.
-- `PlayerState.pendingLevelUp: boolean` — true between descend and `choose_level_up`. While set, server drops `move` / `attack` messages and client locks input + opens `LevelUpModal`.
+- `PlayerState.pendingLevelUp: boolean` — true between descend and `choose_level_up`. While set, server drops `move` / `attack` / `use_hotbar` messages and client locks input + opens `LevelUpModal`.
 - `PlayerState.level` — cached `sum(classLevels.values)`. Invariant: only `applyClassLevel` mutates this trio.
 
 Flow:
