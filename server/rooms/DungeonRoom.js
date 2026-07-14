@@ -54,7 +54,29 @@ import { verifyToken } from '../auth/tokens.js';
 
 const WALL = 40; // px wall thickness on every floor
 
+// Message payloads are attacker-controlled: a client can send null, a string,
+// or any JSON in place of the object a handler expects. Coerce to a plain
+// object before destructuring so shape errors degrade to no-ops, not throws.
+const asObj = (payload) => (payload !== null && typeof payload === 'object' ? payload : {});
+
+// Hotbar slot from an untrusted payload field: integer 0–9 or null.
+const asSlotIndex = (raw) => {
+  const s = Math.floor(Number(raw));
+  return Number.isInteger(s) && s >= 0 && s <= 9 ? s : null;
+};
+
 export class DungeonRoom extends Room {
+  /**
+   * Colyseus wraps onMessage handlers (and the simulation tick) in try/catch
+   * ONLY when this method is defined — without it, a handler throw escapes the
+   * ws 'message' event and kills the whole Node process: one malformed packet
+   * from any client would end every room on the server. Handlers below also
+   * validate payload shape so this is the backstop, not the plan.
+   */
+  onUncaughtException(err, methodName) {
+    console.error(`[DungeonRoom] uncaught exception in ${methodName}:`, err);
+  }
+
   onCreate(options) {
     // Tier-1 party cap (GDD §2: 4 players per cohort on floors 1–3). Colyseus
     // routes a 5th joinOrCreate to a fresh room automatically.
@@ -87,10 +109,14 @@ export class DungeonRoom extends Room {
     this._loadFloor(1);
 
     // ── Movement ──────────────────────────────────────────────────────────────────
-    this.onMessage('move', (client, { dx, dy }) => {
+    this.onMessage('move', (client, payload) => {
       const player = this.state.players.get(client.sessionId);
       if (!player || !player.alive) return;
       if (player.pendingLevelUp) { player.vx = 0; player.vy = 0; return; }
+      const { dx, dy } = asObj(payload);
+      // Non-finite input would integrate NaN into x/y and survive clamping —
+      // permanently poisoning position and every distance check against it.
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) { player.vx = 0; player.vy = 0; return; }
       const len = Math.sqrt(dx * dx + dy * dy);
       if (len === 0) { player.vx = 0; player.vy = 0; }
       else           { player.vx = dx / len; player.vy = dy / len; }
@@ -102,10 +128,10 @@ export class DungeonRoom extends Room {
     });
 
     // ── Combat ────────────────────────────────────────────────────────────────────
-    this.onMessage('attack', (client, payload = {}) => {
+    this.onMessage('attack', (client, payload) => {
       const p = this.state.players.get(client.sessionId);
       if (p?.pendingLevelUp) return;
-      const targetId = payload.targetId ?? null;
+      const targetId = asObj(payload).targetId ?? null;
       // Build the LoS obstacle list once per attack: static walls + currently-locked
       // doors. Unlocked doors don't block LoS (consistent with movement rules).
       const obstacles = [...this._floorWalls];
@@ -126,15 +152,17 @@ export class DungeonRoom extends Room {
     // logic is testable and shared with any future client-side preview.
     // 'equip'  payload: { itemId, slot? }  — slot auto-detected if omitted
     // 'unequip' payload: { slot }          — 'weapon' | 'offhand' | 'armor'
-    this.onMessage('equip', (client, { itemId, slot }) => {
+    this.onMessage('equip', (client, payload) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
+      const { itemId, slot } = asObj(payload);
       equipItem(player, { itemId, slot });
     });
 
-    this.onMessage('unequip', (client, { slot }) => {
+    this.onMessage('unequip', (client, payload) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
+      const { slot } = asObj(payload);
       unequipItem(player, { slot });
     });
 
@@ -142,7 +170,8 @@ export class DungeonRoom extends Room {
     // First player to send `open_container` claims the lock; others are denied
     // until the locker closes, walks out of range, dies, descends, or disconnects.
     // The lock is the gate for take_item / take_gold / drop_item below.
-    this.onMessage('open_container', (client, { sourceKind, sourceId }) => {
+    this.onMessage('open_container', (client, payload) => {
+      const { sourceKind, sourceId } = asObj(payload);
       const result = tryOpenContainer(this.state, client.sessionId, sourceKind, sourceId, CHEST_LOOT_RANGE_PX);
       if (!result.ok) {
         if (result.reason === 'denied') {
@@ -153,7 +182,8 @@ export class DungeonRoom extends Room {
       console.log(`[DungeonRoom] ${client.sessionId} locked ${sourceKind} ${sourceId}`);
     });
 
-    this.onMessage('close_container', (client, { sourceKind, sourceId }) => {
+    this.onMessage('close_container', (client, payload) => {
+      const { sourceKind, sourceId } = asObj(payload);
       if (tryCloseContainer(this.state, client.sessionId, sourceKind, sourceId)) {
         console.log(`[DungeonRoom] ${client.sessionId} released ${sourceKind} ${sourceId}`);
       }
@@ -163,22 +193,26 @@ export class DungeonRoom extends Room {
     // All three handlers route through shared/logic/loot-window.js — the gate
     // (alive, source present, corpse dead, in range, lock owned) is one predicate
     // there, not duplicated here.
-    this.onMessage('take_item', (client, { sourceKind, sourceId, itemIndex }) => {
+    this.onMessage('take_item', (client, payload) => {
+      const { sourceKind, sourceId, itemIndex } = asObj(payload);
       tryTakeItem(this.state, client.sessionId, sourceKind, sourceId, itemIndex, CHEST_LOOT_RANGE_PX);
     });
 
-    this.onMessage('take_gold', (client, { sourceId }) => {
+    this.onMessage('take_gold', (client, payload) => {
+      const { sourceId } = asObj(payload);
       tryTakeGold(this.state, client.sessionId, sourceId, CHEST_LOOT_RANGE_PX);
     });
 
-    this.onMessage('drop_item', (client, { sourceKind, sourceId, inventoryIndex }) => {
+    this.onMessage('drop_item', (client, payload) => {
+      const { sourceKind, sourceId, inventoryIndex } = asObj(payload);
       tryDropItem(this.state, client.sessionId, sourceKind, sourceId, inventoryIndex, CHEST_LOOT_RANGE_PX);
     });
 
     // ── Descend stairs ────────────────────────────────────────────────────────────
     // Handler only validates the request (alive, stair exists, unlocked, in range)
     // and forwards to `_descendTo`, which performs the floor swap.
-    this.onMessage('descend', (client, { stairId }) => {
+    this.onMessage('descend', (client, payload) => {
+      const { stairId } = asObj(payload);
       const player = this.state.players.get(client.sessionId);
       const stair  = this.state.stairs.get(String(stairId));
       if (!player || !player.alive || !stair) return;
@@ -193,10 +227,10 @@ export class DungeonRoom extends Room {
     // While `pendingLevelUp` is true, the player can't move or attack. The
     // choice resolves synchronously here; eligibility comes from the
     // progression module (MVP: untaken classes only).
-    this.onMessage('choose_level_up', (client, payload = {}) => {
+    this.onMessage('choose_level_up', (client, payload) => {
       const player = this.state.players.get(client.sessionId);
       if (!player || !player.pendingLevelUp) return;
-      const classId = String(payload.classId ?? '');
+      const classId = String(asObj(payload).classId ?? '');
       const eligible = getEligibleClassChoicesForLevelUp(player);
       if (!eligible.includes(classId)) return;
 
@@ -253,10 +287,12 @@ export class DungeonRoom extends Room {
     });
 
     // ── Hotbar management ─────────────────────────────────────────────────────────
-    this.onMessage('assign_hotbar', (client, { itemId, slot }) => {
+    this.onMessage('assign_hotbar', (client, payload) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
-      const s  = Math.max(0, Math.min(9, Math.floor(Number(slot))));
+      const { itemId, slot } = asObj(payload);
+      const s = asSlotIndex(slot);
+      if (s === null) return;
       const id = String(itemId);
       if (ABILITY_REGISTRY[id] || CONSUMABLE_REGISTRY[id]) {
         // Each item may occupy only one hotbar slot — clear any existing binding first.
@@ -267,10 +303,15 @@ export class DungeonRoom extends Room {
       }
     });
 
-    this.onMessage('use_hotbar', (client, { slot }) => {
+    this.onMessage('use_hotbar', (client, payload) => {
       const player = this.state.players.get(client.sessionId);
       if (!player || !player.alive) return;
-      const s       = Math.max(0, Math.min(9, Math.floor(Number(slot))));
+      // Same action lock as move/attack: no abilities or consumables while a
+      // level-up choice is pending (was a bypass — Flurry could deal damage
+      // "during" the lock).
+      if (player.pendingLevelUp) return;
+      const s = asSlotIndex(asObj(payload).slot);
+      if (s === null) return;
       const binding = player.hotbar[s] ?? '';
       if (!binding) return;
 
