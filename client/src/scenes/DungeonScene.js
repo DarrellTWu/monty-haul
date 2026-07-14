@@ -34,6 +34,11 @@ const HP_BAR_WIDTH    = 32;
 const HP_BAR_HEIGHT   = 5;
 const HP_BAR_OFFSET_Y = 22;
 
+// How long the run summary waits for the server's extract_committed ack before
+// showing the "not confirmed" warning (retry backoff worst case is ~700 ms;
+// this leaves headroom for a slow Supabase round-trip).
+const EXTRACT_ACK_TIMEOUT_MS = 8000;
+
 // Room geometry rendering (walls, platforms, step strips, doors) lives in
 // client/src/rendering/RoomRenderer.js. Visual constants for that module are
 // owned there; this scene only references entity-rendering constants below.
@@ -77,6 +82,10 @@ export class DungeonScene extends Phaser.Scene {
     this._input       = null;
     this._runEnded    = false;
     this._lastHitBy   = 'an enemy';
+    // Extraction persistence ack: null = awaiting server confirm, true/false =
+    // extract_committed result, 'timeout' = no ack within EXTRACT_ACK_TIMEOUT_MS.
+    this._extractSaveStatus = null;
+    this._saveStatusText    = null;
     this._selectedEnemyId = null;
     // Level-up modal: opened while pendingLevelUp is true AND the floor-load
     // has rendered. _pendingLevelUpQueued covers the case where the schema
@@ -184,6 +193,14 @@ export class DungeonScene extends Phaser.Scene {
     });
 
     this._room.onMessage('projectile_fired', (p) => this._renderProjectile(p));
+
+    // Extraction persistence result — sent only to the extracting client once
+    // commitExtract settles. May arrive before or after the summary renders;
+    // _renderSaveStatus tolerates both orders.
+    this._room.onMessage('extract_committed', ({ ok }) => {
+      this._extractSaveStatus = !!ok;
+      this._renderSaveStatus();
+    });
 
     // Pointer-down: hit-test enemies in world space. Hit → select. Miss → clear.
     // Suppressed while inventory/loot overlay is up so its own clicks don't leak.
@@ -683,6 +700,7 @@ export class DungeonScene extends Phaser.Scene {
       titleColor: '#88ffaa',
       bodyLines:  ['Extraction successful.', '', 'Extracting with:'],
       packLines,
+      saveStatus: true,
     });
   }
 
@@ -695,7 +713,7 @@ export class DungeonScene extends Phaser.Scene {
     });
   }
 
-  _showRunSummary({ title, titleColor, bodyLines, packLines }) {
+  _showRunSummary({ title, titleColor, bodyLines, packLines, saveStatus = false }) {
     this._input.enabled = false;
     if (this.scene.isActive('InventoryScene')) this.scene.stop('InventoryScene');
     if (this.scene.isActive('HUDScene'))       this.scene.stop('HUDScene');
@@ -735,6 +753,21 @@ export class DungeonScene extends Phaser.Scene {
       ty += 16;
     }
 
+    // Persistence status (extraction only): the server confirms commitExtract
+    // per-client via `extract_committed`; until then the run is only promised.
+    if (saveStatus) {
+      this._saveStatusText = this.add.text(SW / 2, PY + PH - 52, '', {
+        fontSize: '12px', fontFamily: 'monospace',
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1);
+      this._renderSaveStatus();
+      this.time.delayedCall(EXTRACT_ACK_TIMEOUT_MS, () => {
+        if (this._extractSaveStatus === null) {
+          this._extractSaveStatus = 'timeout';
+          this._renderSaveStatus();
+        }
+      });
+    }
+
     this.add.text(SW / 2, PY + PH - 28, '[ click or press any key to return to hub ]', {
       fontSize: '12px', color: '#6688aa', fontFamily: 'monospace',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1);
@@ -744,6 +777,21 @@ export class DungeonScene extends Phaser.Scene {
       this.input.once('pointerdown', () => this._exitToHub());
       this.input.keyboard.once('keydown', () => this._exitToHub());
     });
+  }
+
+  /** Repaint the extraction save-status line from _extractSaveStatus. */
+  _renderSaveStatus() {
+    if (!this._saveStatusText?.active) return;
+    const s = this._extractSaveStatus;
+    if (s === true) {
+      this._saveStatusText.setText('✓ Run saved to vault').setColor('#88ffaa');
+    } else if (s === false) {
+      this._saveStatusText.setText('⚠ Save failed — run logged for recovery. Tell an admin.').setColor('#ffaa44');
+    } else if (s === 'timeout') {
+      this._saveStatusText.setText('⚠ Save not confirmed — check your vault in the hub.').setColor('#ffaa44');
+    } else {
+      this._saveStatusText.setText('Saving run to vault…').setColor('#8899bb');
+    }
   }
 
   _collectItems(player) {

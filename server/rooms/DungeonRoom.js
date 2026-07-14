@@ -807,18 +807,31 @@ export class DungeonRoom extends Room {
           survivingItems,
           goldEarned:     player.gold,
           ...this._buildRunMeta(sessionId, player),
+        }).then(() => {
+          // Per-client ack: the run summary shows "saving…" until this lands.
+          this._sendExtractCommitted(sessionId, true);
         }).catch(err => {
           // Failure here means Supabase couldn't be reached after withRetry
           // exhausted. The payload was logged to the dead-letter queue inside
-          // playerStore — surface a warning to the player so they know their
-          // stash may not reflect this run until ops replays the queue.
+          // playerStore — tell the extractor directly (they may have left; the
+          // room broadcast is the fallback for anyone still connected).
           console.error('[DungeonRoom] commitExtract failed:', err);
+          this._sendExtractCommitted(sessionId, false);
           this.broadcast('combat_log', {
             message: '⚠ Save to server failed — your run was logged for recovery. Tell an admin.',
           });
         });
       }
     }
+  }
+
+  /**
+   * Tell one client whether its extraction persisted. No-op if the client
+   * already left (dead-letter + operator replay still protect the data).
+   */
+  _sendExtractCommitted(sessionId, ok) {
+    const client = this.clients.find(c => c.sessionId === sessionId);
+    client?.send('extract_committed', { ok });
   }
 
   /**
