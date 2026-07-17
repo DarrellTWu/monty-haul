@@ -25,7 +25,7 @@ import { enemyAttack } from './CombatSystem.js';
  * @param {number} dt - delta time in ms
  * @param {Map<string, object>} enemyDefs - map of enemyId → static enemy def
  * @param {number} melee - center-to-center melee range in px
- * @param {{ walls?: Array, platforms?: Array, rooms?: Array }} [geometry]
+ * @param {{ walls?: Array, platforms?: Array, rooms?: Array, bounds?: object }} [geometry]
  * @returns {string[]} combat log messages generated this tick
  */
 export function update(state, dt, enemyDefs, melee, geometry = null) {
@@ -33,6 +33,8 @@ export function update(state, dt, enemyDefs, melee, geometry = null) {
   const walls     = geometry?.walls     ?? [];
   const platforms = geometry?.platforms ?? [];
   const rooms     = geometry?.rooms     ?? [];
+  // Terrain for hit knockback (enemyAttack shoves the player on hit).
+  const terrain = { walls, platforms, bounds: geometry?.bounds ?? null };
 
   // Live-state doors: only locked doors are obstacles.
   const lockedDoors = [];
@@ -79,7 +81,7 @@ export function update(state, dt, enemyDefs, melee, geometry = null) {
     if (dist <= melee) {
       enemy.vx = 0;
       enemy.vy = 0;
-      const result = enemyAttack(state, enemy, def, nearest.player);
+      const result = enemyAttack(state, enemy, def, nearest.player, terrain);
       if (result?.log) logs.push(result.log);
       continue;
     }

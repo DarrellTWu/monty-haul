@@ -6,7 +6,7 @@
 import { getRoom } from '../network/ColyseusClient.js';
 import {
   ATTACK_COOLDOWN_MS, RAGE_DURATION_MS,
-  PATIENT_DEFENSE_DURATION_MS, STEP_OF_WIND_DURATION_MS,
+  PATIENT_DEFENSE_DURATION_MS, STEP_OF_WIND_DURATION_MS, CLIMB_FATIGUE_MAX_MS,
 } from '../../../shared/data/constants.js';
 import {
   BLESS_POTION, LONGSTRIDER_POTION, FALSE_LIFE_POTION,
@@ -60,6 +60,12 @@ const CONDITION_META = {
     durationMs:   STEP_OF_WIND_DURATION_MS,
     getRemaining: (p) => p.dashRemainingMs ?? 0,
     timerText:    (p) => `${((p.dashRemainingMs ?? 0) / 1000).toFixed(0)}s`,
+  },
+  climb_fatigue: {
+    label: 'CLB', color: 0xccaa66, dimColor: 0x332a11, colorHex: '#ccaa66',
+    durationMs:   CLIMB_FATIGUE_MAX_MS,
+    getRemaining: (p) => p.climbFatigueRemainingMs ?? 0,
+    timerText:    (p) => `${((p.climbFatigueRemainingMs ?? 0) / 1000).toFixed(0)}s`,
   },
   // Reckless Attack is a toggle, not a timer — render a full ring while active.
   reckless: {

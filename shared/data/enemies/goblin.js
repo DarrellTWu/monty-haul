@@ -91,4 +91,7 @@ export default {
   // Geometry: can scale platform perimeters without using a step.
   // Stub for the climbing-skill system; see docs/agent-context/geometry-elevation.md.
   canClimb: true,
+
+  // Knockback level scaling (docs/design/dynamic-combat.md §Pillar 1).
+  level: 1,
 };

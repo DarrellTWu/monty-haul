@@ -7,6 +7,7 @@ import {
   getGrantedFeatures, getDerivedClassFeatures, applyClassLevel,
   computeHpGainForLevel, getMaxLevelForClass,
   getKiMax, getRageUsesMax, getSneakAttackDice, trySubclassUnlock, DEFAULT_CRIT_RANGE,
+  getKnockbackProfile, getClimbLevel,
 } from '../logic/class-progression.js';
 import { CLASS_REGISTRY } from '../data/classes/index.js';
 import { ITEM_REGISTRY } from '../data/items/index.js';
@@ -268,6 +269,43 @@ test('derived: rogue canClimb ORs across taken classes', () => {
   assertEq(getDerivedClassFeatures(p).canClimb, false);
   applyClassLevel(p, 'rogue');
   assertEq(getDerivedClassFeatures(p).canClimb, true);
+});
+
+test('getKnockbackProfile: barbarian levels drive the push bonus', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'barbarian');
+  applyClassLevel(p, 'barbarian');
+  applyClassLevel(p, 'barbarian');
+  const prof = getKnockbackProfile(p);
+  assertEq(prof.bonusPx, 36, '3 × 12 px');
+  assertEq(prof.bonusClassLevel, 3);
+  assertEq(prof.resistFraction, 0, 'no fighter levels → no resist');
+});
+
+test('getKnockbackProfile: fighter levels + shield drive the resist', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'fighter');
+  applyClassLevel(p, 'fighter');
+  assertEq(getKnockbackProfile(p, false).resistFraction, 0.3, '2 × 0.15');
+  assertEq(getKnockbackProfile(p, true).resistFraction, 0.5, '+0.20 shield');
+  assertEq(getKnockbackProfile(p, true).resistClassLevel, 2);
+});
+
+test('getKnockbackProfile: shield alone grants nothing without fighter levels', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'monk');
+  assertEq(getKnockbackProfile(p, true).resistFraction, 0);
+});
+
+test('getClimbLevel: max level across canClimb classes, 0 otherwise', () => {
+  const p = mkPlayer();
+  applyClassLevel(p, 'fighter');
+  assertEq(getClimbLevel(p), 0, 'fighter cannot climb');
+  applyClassLevel(p, 'rogue');
+  assertEq(getClimbLevel(p), 1);
+  applyClassLevel(p, 'monk');
+  applyClassLevel(p, 'monk');
+  assertEq(getClimbLevel(p), 2, 'monk 2 beats rogue 1');
 });
 
 test('getMaxLevelForClass returns gearless cap 3', () => {

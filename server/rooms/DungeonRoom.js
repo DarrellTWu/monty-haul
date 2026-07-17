@@ -138,7 +138,8 @@ export class DungeonRoom extends Room {
       for (const [, door] of this.state.doors) {
         if (door.locked) obstacles.push({ x: door.x, y: door.y, w: door.w, h: door.h });
       }
-      const result = playerAttack(this.state, client.sessionId, this._enemyDefs, targetId, { obstacles });
+      const result = playerAttack(this.state, client.sessionId, this._enemyDefs, targetId,
+        { obstacles, terrain: this._terrain() });
       if (result.denied) {
         client.send('attack_denied', { reason: result.denied });
         return;
@@ -654,16 +655,35 @@ export class DungeonRoom extends Room {
 
   // ── Per-tick logic ────────────────────────────────────────────────────────────
 
+  /** Static floor terrain for knockback resolution (walls/platforms/bounds). */
+  _terrain() {
+    return { walls: this._floorWalls, platforms: this._floorPlatforms, bounds: this._bounds };
+  }
+
   _tick(dt) {
-    MovementSystem.update(this.state, dt, this._bounds, {
+    const moveEvents = MovementSystem.update(this.state, dt, this._bounds, {
       walls:     this._floorWalls,
       platforms: this._floorPlatforms,
-    }, this._enemyDefs);
+    }, this._enemyDefs) ?? [];
+    for (const ev of moveEvents) {
+      if (ev.type !== 'climb_fatigue') continue;
+      const p = this.state.players.get(ev.sessionId);
+      if (!p) continue;
+      const alreadyFatigued = p.conditions.includes('climb_fatigue');
+      applyCondition(p, 'climb_fatigue', ev.durationMs, this._conditionTimers, ev.sessionId);
+      if (!alreadyFatigued) {
+        const cn = p.class ? p.class[0].toUpperCase() + p.class.slice(1) : 'Player';
+        this.broadcast('combat_log', {
+          message: `${cn} clambers up awkwardly (slowed ${(ev.durationMs / 1000).toFixed(0)}s).`,
+        });
+      }
+    }
 
     const aiLogs = AISystem.update(this.state, dt, this._enemyDefs, MELEE_HIT_RANGE_PX, {
       walls:     this._floorWalls,
       platforms: this._floorPlatforms,
       rooms:     this._floorRooms,
+      bounds:    this._bounds,
     });
     for (const msg of aiLogs) this.broadcast('combat_log', { message: msg });
 
@@ -891,7 +911,7 @@ export class DungeonRoom extends Room {
         this.broadcast('combat_log', { message: `${cn} steadies their stance (Reckless Attack off).` });
       }
     } else if (abilityId === 'flurry_of_blows') {
-      const result = applyFlurryOfBlows(this.state, sessionId, this._enemyDefs);
+      const result = applyFlurryOfBlows(this.state, sessionId, this._enemyDefs, this._terrain());
       if (result.denied) return;
       for (const msg of result.logs) this.broadcast('combat_log', { message: msg });
     } else if (abilityId === 'patient_defense') {

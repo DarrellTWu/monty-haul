@@ -35,6 +35,7 @@ export class PlayerState extends Schema {
     this.falseLifeRemainingMs     = 0; // synced each tick for client HUD ring display
     this.patientDefenseRemainingMs = 0; // synced for HUD ring display
     this.dashRemainingMs          = 0; // synced for HUD ring display (Step of the Wind)
+    this.climbFatigueRemainingMs  = 0; // synced for HUD ring display (underleveled climb slow)
     this.tempHp                   = 0; // temporary HP (absorbed before regular HP)
     this.rageRemainingMs          = 0; // synced for HUD ring display
     this.rageUsesRemaining        = 0; // remaining rage activations this run
@@ -83,6 +84,7 @@ defineTypes(PlayerState, {
   falseLifeRemainingMs:     'number',
   patientDefenseRemainingMs: 'number',
   dashRemainingMs:          'number',
+  climbFatigueRemainingMs:  'number',
   tempHp:                   'number',
   rageRemainingMs:          'number',
   rageUsesRemaining:        'number',

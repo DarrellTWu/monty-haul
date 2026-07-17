@@ -12,7 +12,11 @@
 // at callsite, not here, since equipment.js owns AC derivation).
 
 import { CLASS_REGISTRY } from '../data/classes/index.js';
-import { HP_MULTIPLIER, SUBCLASS_UNLOCK_LEVEL } from '../data/constants.js';
+import {
+  HP_MULTIPLIER, SUBCLASS_UNLOCK_LEVEL,
+  KNOCKBACK_BARBARIAN_PER_LEVEL_PX, KNOCKBACK_RESIST_PER_FIGHTER_LEVEL,
+  KNOCKBACK_RESIST_SHIELD_BONUS, KNOCKBACK_RESIST_CAP,
+} from '../data/constants.js';
 import { getModifier } from './combat.js';
 
 /** Total character level across all classes. */
@@ -112,6 +116,53 @@ export function getGrantedFeatures(player) {
 export function getSneakAttackDice(player) {
   const lvl = getClassLevel(player, 'rogue');
   return lvl > 0 ? Math.ceil(lvl / 2) : 0;
+}
+
+/**
+ * Knockback class profile (docs/design/dynamic-combat.md §Pillar 1) — the only
+ * place class identity enters the knockback system. Feeds computeKnockbackPx
+ * in shared/logic/knockback.js, which applies the underlevel scaling.
+ *
+ *   - Barbarian: push farther on hit (+px per Barbarian level).
+ *   - Fighter:   pushed less when hit; the shield bonus requires at least one
+ *                Fighter level (bracing is trained, not just carried).
+ *
+ * @param {object} player  PlayerState-shaped (classLevels readable)
+ * @param {boolean} [hasShield=false]  shield in the offhand slot
+ * @returns {{ bonusPx: number, bonusClassLevel: number,
+ *             resistFraction: number, resistClassLevel: number }}
+ */
+export function getKnockbackProfile(player, hasShield = false) {
+  const barbLevel    = getClassLevel(player, 'barbarian');
+  const fighterLevel = getClassLevel(player, 'fighter');
+  const resistFraction = fighterLevel > 0
+    ? Math.min(
+        KNOCKBACK_RESIST_CAP,
+        fighterLevel * KNOCKBACK_RESIST_PER_FIGHTER_LEVEL
+          + (hasShield ? KNOCKBACK_RESIST_SHIELD_BONUS : 0),
+      )
+    : 0;
+  return {
+    bonusPx: barbLevel * KNOCKBACK_BARBARIAN_PER_LEVEL_PX,
+    bonusClassLevel: barbLevel,
+    resistFraction,
+    resistClassLevel: fighterLevel,
+  };
+}
+
+/**
+ * Climb level: highest class level among taken classes that grant canClimb
+ * (Monk, Rogue). Drives climb fatigue — climbing a platform wall on a floor
+ * deeper than this level applies a slow (see MovementSystem). 0 = no climbing
+ * classes taken.
+ */
+export function getClimbLevel(player) {
+  let best = 0;
+  if (!player.classLevels) return best;
+  for (const [classId, lvl] of player.classLevels) {
+    if (CLASS_REGISTRY[classId]?.canClimb && lvl > best) best = lvl;
+  }
+  return best;
 }
 
 /** Default critical-hit threshold (natural 20) when no subclass improves it. */

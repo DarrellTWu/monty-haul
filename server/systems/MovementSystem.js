@@ -22,11 +22,14 @@ import {
   LONGSTRIDER_SPEED_BONUS_PX,
   DASH_SPEED_MULTIPLIER,
   PX_PER_FOOT,
+  CLIMB_FATIGUE_SPEED_MULT,
+  CLIMB_FATIGUE_MS_PER_FLOOR_DEFICIT,
+  CLIMB_FATIGUE_MAX_MS,
 } from '../../shared/data/constants.js';
 import {
-  resolveWallCollision, tryAutoClimb, platformPerimeterRects,
+  resolveWallCollision, tryAutoClimb, platformPerimeterRects, isLineBlocked,
 } from '../../shared/logic/geometry.js';
-import { getDerivedClassFeatures } from '../../shared/logic/class-progression.js';
+import { getDerivedClassFeatures, getClimbLevel } from '../../shared/logic/class-progression.js';
 import { SHIELD_REGISTRY } from '../../shared/data/items/shields.js';
 
 /**
@@ -38,8 +41,11 @@ import { SHIELD_REGISTRY } from '../../shared/data/items/shields.js';
  *   Locked doors are read from state.doors (synced).
  * @param {Map<string, object>} [enemyDefs]
  *   Map of enemyId → enemy def. Used to look up `canClimb` per enemy.
+ * @returns {Array<{ sessionId: string, type: 'climb_fatigue', durationMs: number }>}
+ *   Movement events for the room to convert into conditions + log lines.
  */
 export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
+  const events = [];
   const dtSec = dt / 1000;
   const walls     = geometry?.walls ?? [];
   const platforms = geometry?.platforms ?? [];
@@ -62,7 +68,7 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
   }
 
   // ── Players ────────────────────────────────────────────────────────────────
-  for (const [, player] of state.players) {
+  for (const [sessionId, player] of state.players) {
     if (!player.alive) continue;
 
     if (player.attackCooldownMs > 0) {
@@ -87,6 +93,8 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
       }
       // Dash (Step of the Wind): multiplier applies after flat bonuses.
       if (player.conditions?.includes('dash')) speed *= DASH_SPEED_MULTIPLIER;
+      // Climb fatigue: an underleveled climber who just scaled a wall is slowed.
+      if (player.conditions?.includes('climb_fatigue')) speed *= CLIMB_FATIGUE_SPEED_MULT;
       player.x = player.x + player.vx * speed * dtSec;
       player.y = player.y + player.vy * speed * dtSec;
     }
@@ -101,7 +109,24 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
       prevX, prevY, x: player.x, y: player.y,
       elevation: player.elevation, canClimb,
     }, platforms);
-    if (newElevation !== player.elevation) player.elevation = newElevation;
+    if (newElevation !== player.elevation) {
+      // Climb fatigue (docs/design/dynamic-combat.md §Monk climb fatigue):
+      // climbing UP over a perimeter WALL (the segment intersects a perimeter
+      // rect — step-gap crossings don't) on a floor deeper than the player's
+      // climb level emits a fatigue event; the room applies the condition.
+      if (newElevation === 1 && player.elevation === 0
+          && isLineBlocked(prevX, prevY, player.x, player.y, platformPerimeters)) {
+        const deficit = (state.floor ?? 1) - getClimbLevel(player);
+        if (deficit > 0) {
+          events.push({
+            sessionId,
+            type: 'climb_fatigue',
+            durationMs: Math.min(CLIMB_FATIGUE_MAX_MS, deficit * CLIMB_FATIGUE_MS_PER_FLOOR_DEFICIT),
+          });
+        }
+      }
+      player.elevation = newElevation;
+    }
 
     player.x = clamp(player.x, bounds.minX, bounds.maxX);
     player.y = clamp(player.y, bounds.minY, bounds.maxY);
@@ -139,6 +164,8 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
     enemy.x = clamp(enemy.x, bounds.minX, bounds.maxX);
     enemy.y = clamp(enemy.y, bounds.minY, bounds.maxY);
   }
+
+  return events;
 }
 
 /**

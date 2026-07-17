@@ -47,6 +47,12 @@ export const CONDITION_DEFS = {
   dash: {
     mirrorField: 'dashRemainingMs',
   },
+  // Climb fatigue: applied when an underleveled climber scales a platform
+  // wall on a deep floor (docs/design/dynamic-combat.md §Monk climb fatigue).
+  // Speed multiplier is checked in MovementSystem.
+  climb_fatigue: {
+    mirrorField: 'climbFatigueRemainingMs',
+  },
 };
 
 const timerKey = (sessionId, conditionId) => `${sessionId}_${conditionId}`;

@@ -5,16 +5,21 @@ import {
   resolveAttack, applyDamage, rollDice,
   getModifier, getProficiencyBonus, pickAttackMode, sneakAttackEligibility,
 } from '../../shared/logic/combat.js';
-import { isLineBlocked } from '../../shared/logic/geometry.js';
+import { isLineBlocked, platformPerimeterRects } from '../../shared/logic/geometry.js';
+import { computeKnockbackPx, resolveKnockback } from '../../shared/logic/knockback.js';
 import {
   ATTACK_COOLDOWN_MS, MELEE_HIT_RANGE_PX, ADJACENT_FOE_PX, RAGE_DAMAGE_BONUS,
   KI_ABILITY_COST, OPEN_HAND_STAGGER_MS,
   SNEAK_ATTACK_DIE_SIDES, ALLY_ADJACENT_PX, CRIT_MULTIPLIER,
+  WALL_SLAM_DAMAGE_RATIO,
 } from '../../shared/data/constants.js';
 import { WEAPON_REGISTRY, UNARMED } from '../../shared/data/weapons/index.js';
 import { SHIELD_REGISTRY } from '../../shared/data/items/shields.js';
 import { CLASS_REGISTRY, DEFAULT_CLASS } from '../../shared/data/classes/index.js';
-import { getDerivedClassFeatures, getClassLevel, getGrantedFeatures, getSneakAttackDice } from '../../shared/logic/class-progression.js';
+import {
+  getDerivedClassFeatures, getClassLevel, getGrantedFeatures, getSneakAttackDice,
+  getKnockbackProfile,
+} from '../../shared/logic/class-progression.js';
 
 // Monk weapons: unarmed strikes and light/simple melee weapons per SRD.
 const MONK_WEAPON_IDS = new Set(['shortsword', 'dagger', 'handaxe', 'mace', 'unarmed', '']);
@@ -231,8 +236,13 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
       target.state.vy    = 0;
       player.kills += 1;
     }
+    // Knockback: melee hits shove; the killing blow doesn't (corpses stay put).
+    let kbTag = '';
+    if (mode === 'melee' && target.state.alive) {
+      kbTag = _applyKnockbackToEnemy(state, player, target.state, enemyDef, applied.finalDamage, geometry?.terrain);
+    }
     const tag = _damageTag(applied, result.crit);
-    logs.push(`${pLabel} → ${tLabel}: hit (${rollStr(result, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac}), ${mainDamage}${tag} ${weapon.damageType}${sneakTag}`);
+    logs.push(`${pLabel} → ${tLabel}: hit (${rollStr(result, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac}), ${mainDamage}${tag} ${weapon.damageType}${sneakTag}${kbTag}`);
   } else {
     logs.push(`${pLabel} → ${tLabel}: miss (${rollStr(result, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac})`);
   }
@@ -285,8 +295,12 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
         target.state.vy    = 0;
         player.kills += 1;
       }
+      let offKbTag = '';
+      if (target.state.alive) {
+        offKbTag = _applyKnockbackToEnemy(state, player, target.state, enemyDef, applied.finalDamage, geometry?.terrain);
+      }
       const tag = _damageTag(applied, offResult.crit);
-      logs.push(`${pLabel} [off] → ${tLabel}: hit (${rollStr(offResult, profBonus, offAbilMod, offAbilKey)} vs AC ${target.state.ac}), ${offRawDamage}${tag} ${offWeapon.damageType}${offSneakTag}`);
+      logs.push(`${pLabel} [off] → ${tLabel}: hit (${rollStr(offResult, profBonus, offAbilMod, offAbilKey)} vs AC ${target.state.ac}), ${offRawDamage}${tag} ${offWeapon.damageType}${offSneakTag}${offKbTag}`);
     } else {
       logs.push(`${pLabel} [off] → ${tLabel}: miss (${rollStr(offResult, profBonus, offAbilMod, offAbilKey)} vs AC ${target.state.ac})`);
     }
@@ -310,8 +324,12 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
         target.state.vy    = 0;
         player.kills += 1;
       }
+      let fzKbTag = '';
+      if (target.state.alive) {
+        fzKbTag = _applyKnockbackToEnemy(state, player, target.state, enemyDef, applied.finalDamage, geometry?.terrain);
+      }
       const tag = _damageTag(applied, fzResult.crit);
-      logs.push(`${pLabel} [frenzy] → ${tLabel}: hit (${rollStr(fzResult, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac}), ${fzResult.damage}${tag} ${weapon.damageType}`);
+      logs.push(`${pLabel} [frenzy] → ${tLabel}: hit (${rollStr(fzResult, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac}), ${fzResult.damage}${tag} ${weapon.damageType}${fzKbTag}`);
     } else {
       logs.push(`${pLabel} [frenzy] → ${tLabel}: miss (${rollStr(fzResult, profBonus, mainAbilMod, mainAbilKey)} vs AC ${target.state.ac})`);
     }
@@ -350,8 +368,12 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
         target.state.vy    = 0;
         player.kills += 1;
       }
+      let maKbTag = '';
+      if (target.state.alive) {
+        maKbTag = _applyKnockbackToEnemy(state, player, target.state, enemyDef, applied.finalDamage, geometry?.terrain);
+      }
       const tag = _damageTag(applied, maResult.crit);
-      logs.push(`${pLabel} [MA] → ${tLabel}: hit (${rollStr(maResult, profBonus, maAbilMod, maAbilKey)} vs AC ${target.state.ac}), ${maResult.damage}${tag} ${maWeapon.damageType}`);
+      logs.push(`${pLabel} [MA] → ${tLabel}: hit (${rollStr(maResult, profBonus, maAbilMod, maAbilKey)} vs AC ${target.state.ac}), ${maResult.damage}${tag} ${maWeapon.damageType}${maKbTag}`);
     } else {
       logs.push(`${pLabel} [MA] → ${tLabel}: miss (${rollStr(maResult, profBonus, maAbilMod, maAbilKey)} vs AC ${target.state.ac})`);
     }
@@ -373,6 +395,68 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
 
   player.attackCooldownMs = ATTACK_COOLDOWN_MS;
   return { hit: result.hit, crit: result.crit, damage: result.damage, targetId: target.id, logs, projectile };
+}
+
+/**
+ * Build the obstacle rects a knockback target collides with: walls + locked
+ * doors always; platform perimeter rects only when the target is at elevation
+ * 0 — knockback never shoves anyone UP a platform wall (climbing is
+ * voluntary), which is exactly what makes platform side-walls slammable.
+ * See docs/design/dynamic-combat.md §Pillar 1.
+ */
+function _knockbackObstacles(state, terrain, targetElevation) {
+  const rects = [...(terrain?.walls ?? [])];
+  if (state.doors) {
+    for (const [, door] of state.doors) {
+      if (door.locked) rects.push({ x: door.x, y: door.y, w: door.w, h: door.h });
+    }
+  }
+  if (targetElevation === 0) {
+    for (const p of terrain?.platforms ?? []) {
+      for (const r of platformPerimeterRects(p)) rects.push(r);
+    }
+  }
+  return rects;
+}
+
+/**
+ * Shove a just-hit enemy away from the attacking player (melee hits only).
+ * Mutates the enemy's position/elevation; a wall slam deals half again the
+ * hit's damage and can kill (credited to the attacker). Returns a combat-log
+ * suffix ('' when nothing notable happened).
+ */
+function _applyKnockbackToEnemy(state, player, targetState, enemyDef, damageDealt, terrain) {
+  const profile = getKnockbackProfile(player); // attacker side — shield irrelevant
+  const px = computeKnockbackPx({
+    attackerLevel:   player.level,
+    targetLevel:     enemyDef.level ?? 1,
+    bonusPx:         profile.bonusPx,
+    bonusClassLevel: profile.bonusClassLevel,
+  });
+  const kb = resolveKnockback({
+    fromX: player.x, fromY: player.y, target: targetState, distancePx: px,
+    obstacles: _knockbackObstacles(state, terrain, targetState.elevation),
+    platforms: terrain?.platforms ?? [],
+    bounds:    terrain?.bounds ?? null,
+  });
+  targetState.x = kb.x;
+  targetState.y = kb.y;
+  if (kb.elevation !== targetState.elevation) targetState.elevation = kb.elevation;
+  if (kb.wallSlam) {
+    const slam = Math.max(1, Math.floor(damageDealt * WALL_SLAM_DAMAGE_RATIO));
+    targetState.hp = Math.max(0, targetState.hp - slam);
+    let suffix = ` — slammed into the wall (+${slam})`;
+    if (targetState.hp <= 0) {
+      targetState.alive = false;
+      targetState.vx    = 0;
+      targetState.vy    = 0;
+      player.kills += 1;
+      suffix += ' — killed!';
+    }
+    return suffix;
+  }
+  if (kb.droppedElevation) return ' — knocked off the ledge!';
+  return '';
 }
 
 /**
@@ -403,7 +487,7 @@ function _anyOtherEnemyAdjacent(state, player, excludeTargetId) {
 /**
  * Enemy attacks the nearest living player. Returns { log }.
  */
-export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
+export function enemyAttack(state, enemyState, enemyDef, targetPlayer, terrain = null) {
   if (!enemyState.alive || !targetPlayer.alive) return { log: null };
   if (enemyState.attackCooldownMs > 0) return { log: null };
 
@@ -430,6 +514,7 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
 
   const result = resolveAttack({ attacker, target: playerToTarget(targetPlayer), weapon: null, sources });
 
+  let kbTag = '';
   if (result.hit) {
     const applied = applyDamage({
       target: playerToTarget(targetPlayer),
@@ -450,6 +535,46 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
       targetPlayer.vx = 0;
       targetPlayer.vy = 0;
     }
+
+    // Knockback: enemy melee hits shove the player. Fighter levels brace
+    // against it (more with a shield); the killing blow doesn't push.
+    if (targetPlayer.alive) {
+      const profile = getKnockbackProfile(targetPlayer, !!SHIELD_REGISTRY[targetPlayer.offhandId]);
+      const px = computeKnockbackPx({
+        attackerLevel:    enemyDef.level ?? 1,
+        targetLevel:      targetPlayer.level,
+        resistFraction:   profile.resistFraction,
+        resistClassLevel: profile.resistClassLevel,
+      });
+      const kb = resolveKnockback({
+        fromX: enemyState.x, fromY: enemyState.y, target: targetPlayer, distancePx: px,
+        obstacles: _knockbackObstacles(state, terrain, targetPlayer.elevation),
+        platforms: terrain?.platforms ?? [],
+        bounds:    terrain?.bounds ?? null,
+      });
+      targetPlayer.x = kb.x;
+      targetPlayer.y = kb.y;
+      if (kb.elevation !== targetPlayer.elevation) targetPlayer.elevation = kb.elevation;
+      if (kb.wallSlam) {
+        let slam = Math.max(1, Math.floor(applied.finalDamage * WALL_SLAM_DAMAGE_RATIO));
+        kbTag = ` — slammed into the wall (+${slam})`;
+        if (targetPlayer.tempHp > 0) {
+          const absorbed = Math.min(targetPlayer.tempHp, slam);
+          targetPlayer.tempHp -= absorbed;
+          slam -= absorbed;
+        }
+        targetPlayer.hp = Math.max(0, targetPlayer.hp - slam);
+        if (targetPlayer.hp <= 0) {
+          targetPlayer.hp = 0;
+          targetPlayer.alive = false;
+          targetPlayer.vx = 0;
+          targetPlayer.vy = 0;
+          kbTag += ' — down!';
+        }
+      } else if (kb.droppedElevation) {
+        kbTag = ' — knocked off the ledge!';
+      }
+    }
   }
 
   enemyState.attackCooldownMs = ATTACK_COOLDOWN_MS;
@@ -467,7 +592,7 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer) {
     dieLabel = `d20:${result.rawD20}`;
   }
   const log = result.hit
-    ? `${tLabel} → ${pLabel}: hit (${dieLabel}+${enemyDef.attackBonus}atk = ${result.roll} vs AC ${targetPlayer.ac}), ${result.damage} ${enemyDef.damageType}`
+    ? `${tLabel} → ${pLabel}: hit (${dieLabel}+${enemyDef.attackBonus}atk = ${result.roll} vs AC ${targetPlayer.ac}), ${result.damage} ${enemyDef.damageType}${kbTag}`
     : `${tLabel} → ${pLabel}: miss (${dieLabel}+${enemyDef.attackBonus}atk = ${result.roll} vs AC ${targetPlayer.ac})`;
 
   return { log };
@@ -513,7 +638,7 @@ export function applyActionSurge(state, sessionId) {
  * Returns { logs } on success, { denied } otherwise
  * ('no_ki' | 'no_target' | 'not_unarmored').
  */
-export function applyFlurryOfBlows(state, sessionId, enemyDefs = new Map()) {
+export function applyFlurryOfBlows(state, sessionId, enemyDefs = new Map(), terrain = null) {
   const player = state.players.get(sessionId);
   if (!player || !player.alive) return { denied: 'no_target' };
   if ((player.kiPoints ?? 0) < KI_ABILITY_COST) return { denied: 'no_ki' };
@@ -571,8 +696,12 @@ export function applyFlurryOfBlows(state, sessionId, enemyDefs = new Map()) {
         target.state.attackCooldownMs = Math.max(target.state.attackCooldownMs, OPEN_HAND_STAGGER_MS);
         staggerTag = ' — staggered!';
       }
+      let kbTag = '';
+      if (target.state.alive) {
+        kbTag = _applyKnockbackToEnemy(state, player, target.state, enemyDef, applied.finalDamage, terrain);
+      }
       const tag = _damageTag(applied, result.crit);
-      logs.push(`${pLabel} [flurry] → ${tLabel}: hit (${rollStr(result, profBonus, abilMod, abilKey)} vs AC ${target.state.ac}), ${result.damage}${tag} ${maWeapon.damageType}${staggerTag}`);
+      logs.push(`${pLabel} [flurry] → ${tLabel}: hit (${rollStr(result, profBonus, abilMod, abilKey)} vs AC ${target.state.ac}), ${result.damage}${tag} ${maWeapon.damageType}${staggerTag}${kbTag}`);
     } else {
       logs.push(`${pLabel} [flurry] → ${tLabel}: miss (${rollStr(result, profBonus, abilMod, abilKey)} vs AC ${target.state.ac})`);
     }

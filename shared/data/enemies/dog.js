@@ -92,4 +92,7 @@ export default {
 
   // Geometry: dogs can't climb platform perimeters — they must route to a step.
   canClimb: false,
+
+  // Knockback level scaling (docs/design/dynamic-combat.md §Pillar 1).
+  level: 1,
 };

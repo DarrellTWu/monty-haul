@@ -44,6 +44,21 @@ export const ADJACENT_FOE_PX = MELEE_HIT_RANGE_PX; // SRD "5 ft" adjacency for r
                                                     // disadvantage. Aliased so a future melee-reach
                                                     // tune doesn't silently change SRD semantics.
 
+// KNOCKBACK & POSITIONING — see docs/design/dynamic-combat.md §Pillar 1
+export const KNOCKBACK_BASE_PX                = 20;   // every melee hit pushes the target this far
+export const KNOCKBACK_BARBARIAN_PER_LEVEL_PX = 12;   // attacker bonus per Barbarian level
+export const KNOCKBACK_RESIST_PER_FIGHTER_LEVEL = 0.15; // push reduction per Fighter level
+export const KNOCKBACK_RESIST_SHIELD_BONUS    = 0.20; // extra reduction with a shield (Fighter levels required)
+export const KNOCKBACK_RESIST_CAP             = 0.80; // never fully immovable
+export const UNDERLEVEL_SCALE_FLOOR           = 0.4;  // bonuses dissipate to this when underleveled, never below
+export const WALL_SLAM_DAMAGE_RATIO           = 0.5;  // pinned target takes half again the hit's damage
+export const WALL_SLAM_MIN_INTENDED_PX        = 12;   // pushes smaller than this can't slam
+export const WALL_SLAM_BLOCKED_RATIO          = 0.5;  // slam when ≤ this fraction of the push landed
+export const KNOCKBACK_STEP_PX                = 8;    // swept-push sub-step (walls are thin — no tunneling)
+export const CLIMB_FATIGUE_MS_PER_FLOOR_DEFICIT = 1000; // slow per floor the climber is behind
+export const CLIMB_FATIGUE_SPEED_MULT         = 0.5;  // speed multiplier while climb-fatigued
+export const CLIMB_FATIGUE_MAX_MS             = 4000; // fatigue cap (splash-monk worst case)
+
 // ROGUE (levels 1–3) — see docs/design/skirmisher-progression.md
 export const SNEAK_ATTACK_DIE_SIDES = 6;            // Sneak Attack rolls d6s; count = ceil(rogue level / 2)
 export const ALLY_ADJACENT_PX = MELEE_HIT_RANGE_PX; // SRD "ally within 5 ft of the target" Sneak Attack leg
