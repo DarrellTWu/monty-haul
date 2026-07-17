@@ -1,7 +1,7 @@
 ---
 status: shipped
 updated: 2026-07-13
-purpose: Combat resolution (melee + ranged + advantage/disadvantage tri-state), target selection, class schema, levels 1–3 features, subclasses + emblem unlocks, loadout, ability scores, level-up / multiclass. Read when the task touches attacks, classes, or character creation.
+purpose: Combat resolution (melee + ranged + advantage/disadvantage tri-state), knockback & positioning, target selection, class schema, levels 1–3 features, subclasses + emblem unlocks, loadout, ability scores, level-up / multiclass. Read when the task touches attacks, classes, or character creation.
 ---
 
 # Combat, Classes, Loadout
@@ -106,6 +106,18 @@ Eligibility is the pure helper `sneakAttackEligibility(...)` in `shared/logic/co
 3. `skirmish` — Skirmisher subclass only: attacker and target are **both moving** (`vx`/`vy` non-zero at resolution tick), and no disadvantage. Works in melee and at range; long-range disadvantage therefore blocks it. Moving-window spec + 1–10 design: `docs/design/skirmisher-progression.md`.
 
 Frenzy and Martial Arts bonus attacks never carry sneak dice (once-per-event is consumed by main/offhand, and MA is unarmed anyway).
+
+## Knockback & Positioning (dynamic-combat Pillar 1)
+
+Every **melee** hit shoves the target away along the attacker→target line (ranged never pushes; the killing blow doesn't push — corpses stay lootable where they fell). Full design + tuning rationale: `docs/design/dynamic-combat.md`.
+
+- **Pure core**: `shared/logic/knockback.js` — `levelScale` (underlevel dissipation, floor `UNDERLEVEL_SCALE_FLOOR` 0.4), `computeKnockbackPx` (base `KNOCKBACK_BASE_PX` 20 scaled by attacker-total vs target level, + Barbarian bonus, − Fighter resist), `resolveKnockback` (swept push in `KNOCKBACK_STEP_PX` sub-steps — no tunneling through 2 px perimeter bands; elevation re-derived via `tryAutoClimb`; slam classification).
+- **Class profile**: `getKnockbackProfile(player, hasShield)` in `class-progression.js` — Barbarian `+12 px`/level push; Fighter `15%`/level resist `+20%` with shield (requires ≥1 Fighter level), capped 80%. Enemies contribute only their def `level` (goblin/dog 1, skeleton 2 — required on new stat blocks).
+- **Wall slam**: push pinned to ≤ `WALL_SLAM_BLOCKED_RATIO` (0.5) of intended (min intended 12 px) → bonus damage `floor(finalDamage × 0.5)` min 1, respects temp HP on players, can kill (attacker credited). Walls, locked doors, arena bounds, and platform side-walls (for elev-0 targets) all slam.
+- **Ledge drop**: elevated target pushed across the platform edge → elevation 0 → the attacker's subsequent hits get the existing high-ground advantage. Knockback never pushes anyone *up* a platform wall (perimeters are obstacles for every elev-0 target regardless of `canClimb`).
+- **Integration**: `CombatSystem._applyKnockbackToEnemy` fires at every melee hit site (main, offhand, frenzy, MA, flurry); `enemyAttack` shoves players symmetrically. Each hit in a multi-hit event pushes independently. `terrain` (`{walls, platforms, bounds}`) flows from `DungeonRoom._terrain()` into `playerAttack` (`geometry.terrain`), `applyFlurryOfBlows` (4th arg), and via `AISystem` into `enemyAttack` (5th arg). **No terrain → pushes still resolve, nothing slams** (how plain combat fixtures stay simple).
+- **Climb fatigue** (Monk scaling): see `geometry-elevation.md` §Elevation Transitions — `climb_fatigue` condition (mirror `climbFatigueRemainingMs`, HUD ring `CLB`), event emitted by `MovementSystem`, applied by `DungeonRoom._tick`.
+- Log surface: hit lines gain ` — slammed into the wall (+N)`, ` — knocked off the ledge!`, ` — killed!`/` — down!` suffixes.
 
 ## Attack Dispatch (`pickAttackMode`)
 - `pickAttackMode(weapon, distance)` in `shared/logic/combat.js` returns `'melee' | 'ranged' | 'thrown' | null`. Single source of truth for the dispatch branch in `playerAttack`.
