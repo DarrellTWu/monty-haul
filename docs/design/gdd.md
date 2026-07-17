@@ -19,10 +19,16 @@ The working title is a deliberate wink at tabletop culture. "Monty Haul" describ
 ## High Concept
 > **Elevator Pitch**
 > *Dark and Darker meets Hades, played with your D&D rulebook open. Every run is a fresh level-1 character dropped into a dungeon that wants to kill you — and so do the other players. Loot hard, level up floor by floor, and extract before someone takes your gold.*
+The play experience should embody the madcap, freewheeling, improvisational spirit of tabletop D&D — the table where the plan never survives and the best moments are invented mid-fight. The tonal touchstone is the action/adventure/comedy register of the recent D&D movie: dynamic action sequences that use and traverse the environment, fights that read as choreography rather than stat exchanges. Combat should never settle into stand-and-swing; see `dynamic-combat.md` for the two pillars that enforce this.
+
 ## Core Pillars
 -   Risk Calibration — Every decision is a risk/reward calculation: go deeper for better loot, but extraction gets harder.
 
 -   Mechanical Depth — SRD stats, saving throws, conditions, and class features create readable, skill-expressive combat translated into real-time play.
+
+-   Dynamic Movement & Positioning — Every hit moves someone. Knockback, wall slams, high ground, and climbing make position a resource as real as hit points; class kits interact with the shoving game in distinct ways. (See `dynamic-combat.md` — Pillar 1.)
+
+-   Environmental Improvisation — Dungeons are dense with interactable objects (torches, oil, clouds, furniture — Divinity: Original Sin register). Getting the positioning right pays off environmentally; the room itself is a weapon. (See `dynamic-combat.md` — Pillar 2, signposted.)
 
 -   Horizontal Progression — Gear unlocks build options, not just bigger numbers. Veterans have more choices, not guaranteed wins.
 
@@ -142,6 +148,20 @@ This translation preserves what makes D&D combat feel meaningful — the swing o
 
 > **The Attack Timer in Practice**
 > *The timer is visualised as a cooldown arc around the player character. When it fills, the attack is ready. Pressing Space fires the attack immediately — no windup animation that can be cancelled, no input buffering. The timer then resets. This is the game's heartbeat. All class features that grant additional attacks, bonus damage, or modified rolls key off this same event.*
+## Knockback & Positioning
+Combat is a shoving match as much as a dice exchange. By default, **every melee hit pushes the target back** along the attacker–target line. Three consequences make position matter:
+
+-   **Wall slams** — a target pushed into a wall (or pinned against one) takes half again the hit's damage. Corners are kill zones; open ground is safety.
+
+-   **Ledge drops** — a target pushed off a platform falls to low ground, handing the attacker high-ground advantage on every subsequent attack. Fighting on a platform edge is a gamble.
+
+-   **Class expression** — Barbarians push farther per hit (scaling with Barbarian levels); Fighters resist being pushed (scaling with Fighter levels, more with a shield); Monks own vertical traversal (climbing stays fast only if Monk levels keep pace with the floor); Rogues are already paid for movement by the Sneak Attack eligibility rules.
+
+Push and resist bonuses **dissipate when underleveled** against the opposing side — a level-1 Barbarian barely budges a level-3 enemy; a level-1 Fighter's brace is modest against a level-3 hit. The bonus never becomes useless, only diluted, so multiclass dabbling keeps some value without matching a dedicated build. Full rules, formulas, and tuning constants: `dynamic-combat.md` §Pillar 1.
+
+## Environmental Interaction (signpost)
+The second half of the dynamism vision: dungeons populated with significant interactable objects — torches to knock over, oil to ignite, effect clouds, furniture to shove people into and over — in the register of Divinity: Original Sin. This multiplies the positioning game: pushing an enemy is good, pushing them into the brazier is the play. **Design signposted, not yet specified** — see `dynamic-combat.md` §Pillar 2 for the current sketch; a dedicated design pass will follow.
+
 ## Action Economy Translation
 D&D's action/bonus action/reaction structure is translated per-action type. The translation is designed to preserve the strategic intent of each category without requiring turn management:
 
