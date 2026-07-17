@@ -181,5 +181,7 @@ section reserves the shape so Pillar 1 code leaves the right seams.
   art (objects need to read visually), floor-authoring builders (Sprint E) so objects
   are declared in floor data like chests/traps are today.
 
-A dedicated design doc (`environmental-gameplay.md`) will follow when this pillar is
-scheduled. Do not build object types speculatively before it exists.
+The dedicated design doc now exists: **`environmental-gameplay.md`** — object
+families, the element interaction matrix, biome catalog, engine sketch, and phasing
+(Waves E1–E3). This section stays as the pillar summary; that doc is canonical. Do
+not build object types before its open questions (⚑) are resolved with the designer.

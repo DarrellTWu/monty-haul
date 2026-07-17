@@ -39,6 +39,7 @@ purpose: Docs index. First stop for "which doc do I need?"
 > These describe scope larger than what is built. Use as design context, not binding spec.
 - [`design/gdd.md`](design/gdd.md) — Game design document, combat system, class roster, items
 - [`design/dynamic-combat.md`](design/dynamic-combat.md) — Dynamic-combat vision: Pillar 1 knockback/positioning (full spec) + Pillar 2 environmental gameplay (signpost)
+- [`design/environmental-gameplay.md`](design/environmental-gameplay.md) — Pillar 2 design: clouds/pools/hazards/breakables/set pieces, element matrix, biome catalog, phasing (collaboration draft — not scheduled)
 - [`design/gdd_crafting.md`](design/gdd_crafting.md) — Crafting & itemization GDD
 - Class progression proposals — 1–10 ability sequences per class/subclass pair (1–3 shipped; 4–10 design intent):
   [`design/champion-progression.md`](design/champion-progression.md) (Fighter — also canonical for the shared level-5 Extra Attack design) ·

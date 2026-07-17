@@ -139,7 +139,7 @@ Marked as **DEFERRED** in relevant agent-context docs. When you add code that ov
 
 - Debug Mode OFF (production gameplay path) — locked toggle, awaits matchmaking + production loot tuning. See `agent-context/hub-economy.md`.
 - Swashbuckler subclass (melee half of the Rogue pair) — Skirmisher shipped first. See `docs/design/gdd.md` §Rogue and `docs/design/skirmisher-progression.md`.
-- Environmental gameplay (dynamic-combat Pillar 2: torches, oil, clouds, pushable objects) — signposted only; do not build object types before its design pass. See `docs/design/dynamic-combat.md` §Pillar 2.
+- Environmental gameplay (dynamic-combat Pillar 2: torches, oil, clouds, breakables, set pieces) — designed, not scheduled; do not build object types before the ⚑ open questions in `docs/design/environmental-gameplay.md` are resolved.
 
 ## Keeping Docs Current
 After completing any task, flag to the user if the changes warrant updates. Triggers:
