@@ -89,6 +89,24 @@ cross-elevation pairs pass freely (the platform height separates them). Spawn
 pile-ups unstack automatically. PvP note: body-blocking doorways is now a real
 tactic — deliberate; watch for degenerate choke-camping in playtest.
 
+**Chokepoint widths (canonical authoring vocabulary).** With 16 px body radius, an
+opening's center corridor is `width − 32`; two bodies need 32 px of separation to
+pass abreast. That yields exactly two chokepoint grades, and floor authors should
+deploy both deliberately:
+
+| Grade | Opening | Center corridor | Behavior |
+|---|---|---|---|
+| **Double doorway** (the common case — current `DOOR_WIDTH` 80) | 80 px | 48 px | Two cooperating characters pass side-by-side (16 px slack). One blocker seals it **only from within ±8 px of the centerline** — blocking is an active, precise stance, and one knockback bump breaks the seal. |
+| **Single doorway / platform step** (steps are 48 px today: 2 × `STEP_HALF_WIDTH_PX`) | 48 px | 16 px | Strictly single-file. One body seals it **from any position inside** — no precision needed. Counterplay is eviction (knockback) or going around (climbers over the wall). |
+
+Single doorways don't exist in floor data yet — `DOOR_WIDTH` is a per-floor const.
+When the Sprint E floor builders land, door declarations should take a
+`single | double` width grade so authors place chokepoints intentionally: doubles as
+the default flow, singles where a floor wants a defensible bottleneck (extraction
+approaches, treasure vaults, boss antechambers). Pillar 1 knockback is the built-in
+counterplay to both grades — the system self-balances as long as authors don't chain
+singles back-to-back without a climbable flank.
+
 ### Monk climb fatigue
 
 Climbing a platform **wall** (perimeter crossing outside a step gap — steps never
