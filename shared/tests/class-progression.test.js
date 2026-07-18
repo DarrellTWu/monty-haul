@@ -11,7 +11,11 @@ import {
 } from '../logic/class-progression.js';
 import { CLASS_REGISTRY } from '../data/classes/index.js';
 import { ITEM_REGISTRY } from '../data/items/index.js';
-import { HP_MULTIPLIER, RAGE_USES } from '../data/constants.js';
+import {
+  HP_MULTIPLIER, RAGE_USES,
+  KNOCKBACK_BARBARIAN_PER_LEVEL_PX, KNOCKBACK_RESIST_PER_FIGHTER_LEVEL,
+  KNOCKBACK_RESIST_SHIELD_BONUS, KNOCKBACK_RESIST_CAP,
+} from '../data/constants.js';
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -277,18 +281,23 @@ test('getKnockbackProfile: barbarian levels drive the push bonus', () => {
   applyClassLevel(p, 'barbarian');
   applyClassLevel(p, 'barbarian');
   const prof = getKnockbackProfile(p);
-  assertEq(prof.bonusPx, 36, '3 × 12 px');
+  assertEq(prof.bonusPx, 3 * KNOCKBACK_BARBARIAN_PER_LEVEL_PX, '3 × per-level px');
   assertEq(prof.bonusClassLevel, 3);
   assertEq(prof.resistFraction, 0, 'no fighter levels → no resist');
 });
 
-test('getKnockbackProfile: fighter levels + shield drive the resist', () => {
+test('getKnockbackProfile: fighter levels + shield drive the resist (capped)', () => {
   const p = mkPlayer();
   applyClassLevel(p, 'fighter');
   applyClassLevel(p, 'fighter');
-  assertEq(getKnockbackProfile(p, false).resistFraction, 0.3, '2 × 0.15');
-  assertEq(getKnockbackProfile(p, true).resistFraction, 0.5, '+0.20 shield');
+  const bare = Math.min(KNOCKBACK_RESIST_CAP, 2 * KNOCKBACK_RESIST_PER_FIGHTER_LEVEL);
+  const shielded = Math.min(KNOCKBACK_RESIST_CAP, 2 * KNOCKBACK_RESIST_PER_FIGHTER_LEVEL + KNOCKBACK_RESIST_SHIELD_BONUS);
+  assertEq(getKnockbackProfile(p, false).resistFraction, bare);
+  assertEq(getKnockbackProfile(p, true).resistFraction, shielded);
   assertEq(getKnockbackProfile(p, true).resistClassLevel, 2);
+  // Fighter 3 + shield reaches the cap — the "next to immovable" target.
+  applyClassLevel(p, 'fighter');
+  assertEq(getKnockbackProfile(p, true).resistFraction, KNOCKBACK_RESIST_CAP);
 });
 
 test('getKnockbackProfile: shield alone grants nothing without fighter levels', () => {

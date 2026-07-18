@@ -15,6 +15,7 @@ import {
   pointInRect,
   platformPerimeterRects,
   circleOverlapsAny,
+  separateCircles,
 } from '../logic/geometry.js';
 import {
   ENTITY_RADIUS_PX, STEP_HALF_WIDTH_PX, PLATFORM_WALL_THICK_PX,
@@ -444,6 +445,42 @@ group('isLineBlocked', () => {
   test('multiple obstacles: first miss, second hit → true', () => {
     const miss = { x: 1000, y: 1000, w: 10, h: 10 };
     assert.equal(isLineBlocked(0, 0, 200, 200, [miss, losWall]), true);
+  });
+});
+
+// ─── separateCircles (entity body blocking) ──────────────────────────────────
+
+group('separateCircles', () => {
+  const R = ENTITY_RADIUS_PX; // 16 — min separation 32
+
+  test('non-overlapping circles → null', () => {
+    assert.equal(separateCircles({ x: 0, y: 0 }, { x: 2 * R, y: 0 }), null);
+    assert.equal(separateCircles({ x: 0, y: 0 }, { x: 100, y: 100 }), null);
+  });
+
+  test('overlap splits the penetration evenly along the center line', () => {
+    const sep = separateCircles({ x: 0, y: 0 }, { x: 20, y: 0 });
+    // penetration = 32 − 20 = 12 → 6 px each way
+    assert.equal(sep.ax, -6);
+    assert.equal(sep.bx, 26);
+    assert.equal(sep.ay, 0);
+    assert.equal(sep.by, 0);
+    assert.ok(Math.abs((sep.bx - sep.ax) - 2 * R) < 1e-9, 'exactly touching after split');
+  });
+
+  test('diagonal overlap separates along the diagonal', () => {
+    const sep = separateCircles({ x: 0, y: 0 }, { x: 10, y: 10 });
+    const dist = Math.hypot(sep.bx - sep.ax, sep.by - sep.ay);
+    assert.ok(Math.abs(dist - 2 * R) < 1e-9);
+    assert.ok(sep.ax < 0 && sep.ay < 0 && sep.bx > 10 && sep.by > 10, 'pushed apart on both axes');
+  });
+
+  test('exactly stacked centers separate deterministically on x', () => {
+    const sep = separateCircles({ x: 50, y: 50 }, { x: 50, y: 50 });
+    assert.equal(sep.ax, 50 - R);
+    assert.equal(sep.bx, 50 + R);
+    assert.equal(sep.ay, 50);
+    assert.equal(sep.by, 50);
   });
 });
 

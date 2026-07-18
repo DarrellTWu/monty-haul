@@ -70,11 +70,24 @@ The 0.4 floor is the "dissipated, not useless" guarantee: a splashed level alway
 keeps ≥40% of its knockback value. Dedicated 3-level investment against an even-level
 opponent keeps 100%.
 
-Worked examples (constants at current values):
-- Barbarian 3 hits a level-1 goblin: 20 + 12×3 = **56 px** — across most of a melee ring.
-- Barbarian 1 hits a level-3 enemy: 20×0.4 + 12×0.4 ≈ **13 px** — a stumble.
-- Level-3 enemy hits Fighter 3 + shield: 20 × (1 − 0.65) = **7 px** — braced.
-- Level-3 enemy hits Fighter 1 + shield: 20 × (1 − 0.35×0.4) = **17 px** — modest.
+Worked examples (constants at current values — retuned up after the first playtest,
+which read the original numbers as too subtle):
+- Barbarian 3 hits a level-1 goblin: 40 + 20×3 = **100 px** — a launch, 1.5 melee rings.
+- Barbarian 1 hits a level-3 enemy: (40 + 20) × 0.4 = **24 px** — a stumble.
+- Level-3 enemy hits Fighter 3 + shield: 40 × (1 − 0.95 cap) = **2 px** — next to immovable, the sword-and-board identity.
+- Level-3 enemy hits Fighter 3, no shield: 40 × (1 − 0.75) = **10 px** — braced.
+- Level-3 enemy hits Fighter 1 + shield: 40 × (1 − 0.5×0.4) = **32 px** — modest, per the underlevel rule.
+
+### Body blocking (entity collision)
+
+Living entities at the same elevation cannot overlap — characters are solid, so
+positioning can't be negated by walking through someone. Symmetric circle
+separation (radius `ENTITY_RADIUS_PX`) runs each tick after movement; separation
+respects walls (no squeezing anyone through geometry) and re-derives elevation if a
+jostle crosses a platform edge. Corpses don't block (looting walks over them);
+cross-elevation pairs pass freely (the platform height separates them). Spawn
+pile-ups unstack automatically. PvP note: body-blocking doorways is now a real
+tactic — deliberate; watch for degenerate choke-camping in playtest.
 
 ### Monk climb fatigue
 
@@ -91,11 +104,11 @@ fatigue (their `canClimb` is a def flag, not a skill).
 
 | Constant | Value | Feel target |
 |---|---|---|
-| `KNOCKBACK_BASE_PX` | 20 | Visible stumble, ~⅓ of melee ring (64) |
-| `KNOCKBACK_BARBARIAN_PER_LEVEL_PX` | 12 | Barb 3 ≈ full melee-ring eject |
-| `KNOCKBACK_RESIST_PER_FIGHTER_LEVEL` | 0.15 | Fighter 3 = 45% |
-| `KNOCKBACK_RESIST_SHIELD_BONUS` | 0.20 | Sword-and-board identity |
-| `KNOCKBACK_RESIST_CAP` | 0.80 | Never fully immovable |
+| `KNOCKBACK_BASE_PX` | 40 | Every hit visibly relocates the target (~⅔ melee ring) |
+| `KNOCKBACK_BARBARIAN_PER_LEVEL_PX` | 20 | Barb 3 = 100 px launch |
+| `KNOCKBACK_RESIST_PER_FIGHTER_LEVEL` | 0.25 | Fighter 3 = 75% bare |
+| `KNOCKBACK_RESIST_SHIELD_BONUS` | 0.25 | Fighter 3 + shield hits the cap |
+| `KNOCKBACK_RESIST_CAP` | 0.95 | "Next to immovable" — 2 px residual, never literal immunity |
 | `UNDERLEVEL_SCALE_FLOOR` | 0.4 | "Dissipated, not useless" |
 | `WALL_SLAM_DAMAGE_RATIO` | 0.5 | "Half again" per the pillar |
 | `WALL_SLAM_MIN_INTENDED_PX` | 12 | Tiny pushes can't slam |

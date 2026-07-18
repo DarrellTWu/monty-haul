@@ -26,6 +26,8 @@ Platforms = visual ground at elevation 1 + perimeter wall band with gaps at each
 ## Elevation Transitions
 `tryAutoClimb(entity, platforms)` reads the entity's movement segment and translates any inward perimeter crossing into elev `0 → 1`, any outward into `1 → 0`. The wall list itself gates *who* can cross (non-climbers blocked except at step gaps), so once an entity has crossed the perimeter the elevation toggle is unconditional.
 
+**Body blocking:** `separateCircles` (geometry.js) gives living same-elevation entities solid bodies — pairwise separation at the end of `MovementSystem.update`, wall-re-resolved so a jostle can't shove anyone through geometry (behavior details: `combat.md` §Knockback).
+
 Two other systems drive elevation through the same primitives:
 - **Knockback** (`shared/logic/knockback.js`) runs its displacement segment through `tryAutoClimb` — an elevated target shoved across the edge drops to ground. Knockback treats perimeters as obstacles for *all* elev-0 targets (nobody gets punched up a wall), which is what makes platform side-walls wall-slammable. Rules live in `combat.md` §Knockback.
 - **Climb fatigue** (`MovementSystem`): a player whose 0→1 crossing intersects a perimeter *wall* rect (not a step gap) on a floor deeper than their climb level (`getClimbLevel` — max level across canClimb classes) emits a `climb_fatigue` event; `DungeonRoom` applies the condition (50% speed, 1 s per floor of deficit, 4 s cap). Design: `design/dynamic-combat.md` §Monk climb fatigue.

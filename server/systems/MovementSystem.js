@@ -28,6 +28,7 @@ import {
 } from '../../shared/data/constants.js';
 import {
   resolveWallCollision, tryAutoClimb, platformPerimeterRects, isLineBlocked,
+  separateCircles,
 } from '../../shared/logic/geometry.js';
 import { getDerivedClassFeatures, getClimbLevel } from '../../shared/logic/class-progression.js';
 import { SHIELD_REGISTRY } from '../../shared/data/items/shields.js';
@@ -163,6 +164,52 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
 
     enemy.x = clamp(enemy.x, bounds.minX, bounds.maxX);
     enemy.y = clamp(enemy.y, bounds.minY, bounds.maxY);
+  }
+
+  // ── Entity separation (body blocking) ───────────────────────────────────────
+  // Living entities at the same elevation can't overlap: characters can't be
+  // walked through, so positioning holds. Symmetric pairwise push-apart, one
+  // pass per tick (deep knockback pile-ups relax over a few ticks), then wall
+  // re-resolution + bounds clamp for anything displaced, so separation never
+  // shoves an entity through geometry. Corpses don't block (looting walks over
+  // them). Cross-elevation pairs never collide — the platform height separates
+  // them; a nudge across a perimeter edge re-derives elevation via
+  // tryAutoClimb (silent — no climb-fatigue from being jostled).
+  const bodies = [];
+  for (const [, player] of state.players) {
+    if (!player.alive) continue;
+    bodies.push({ e: player, canClimb: getDerivedClassFeatures(player).canClimb });
+  }
+  for (const [id, enemy] of state.enemies) {
+    if (!enemy.alive) continue;
+    bodies.push({ e: enemy, canClimb: enemyDefs?.get(id)?.canClimb ?? false });
+  }
+  const preSep = bodies.map(b => ({ x: b.e.x, y: b.e.y }));
+  const displaced = new Set();
+  for (let i = 0; i < bodies.length; i++) {
+    for (let j = i + 1; j < bodies.length; j++) {
+      const A = bodies[i].e;
+      const B = bodies[j].e;
+      if (A.elevation !== B.elevation) continue;
+      const sep = separateCircles(A, B);
+      if (!sep) continue;
+      A.x = sep.ax; A.y = sep.ay;
+      B.x = sep.bx; B.y = sep.by;
+      displaced.add(i);
+      displaced.add(j);
+    }
+  }
+  for (const i of displaced) {
+    const { e, canClimb } = bodies[i];
+    const rects = buildObstacleRects(walls, lockedDoors, platformPerimeters, e.elevation, canClimb);
+    const resolved = resolveWallCollision({ x: e.x, y: e.y }, rects);
+    e.x = clamp(resolved.x, bounds.minX, bounds.maxX);
+    e.y = clamp(resolved.y, bounds.minY, bounds.maxY);
+    const newElevation = tryAutoClimb({
+      prevX: preSep[i].x, prevY: preSep[i].y, x: e.x, y: e.y,
+      elevation: e.elevation, canClimb,
+    }, platforms);
+    if (newElevation !== e.elevation) e.elevation = newElevation;
   }
 
   return events;

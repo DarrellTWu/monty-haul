@@ -45,11 +45,13 @@ export const ADJACENT_FOE_PX = MELEE_HIT_RANGE_PX; // SRD "5 ft" adjacency for r
                                                     // tune doesn't silently change SRD semantics.
 
 // KNOCKBACK & POSITIONING — see docs/design/dynamic-combat.md §Pillar 1
-export const KNOCKBACK_BASE_PX                = 20;   // every melee hit pushes the target this far
-export const KNOCKBACK_BARBARIAN_PER_LEVEL_PX = 12;   // attacker bonus per Barbarian level
-export const KNOCKBACK_RESIST_PER_FIGHTER_LEVEL = 0.15; // push reduction per Fighter level
-export const KNOCKBACK_RESIST_SHIELD_BONUS    = 0.20; // extra reduction with a shield (Fighter levels required)
-export const KNOCKBACK_RESIST_CAP             = 0.80; // never fully immovable
+// Retuned 2026-07-13 after first playtest: pushes read as dramatic, and a
+// leveled sword-and-board Fighter should feel next to immovable.
+export const KNOCKBACK_BASE_PX                = 40;   // every melee hit pushes the target this far
+export const KNOCKBACK_BARBARIAN_PER_LEVEL_PX = 20;   // attacker bonus per Barbarian level (barb 3 ≈ 100 px launch)
+export const KNOCKBACK_RESIST_PER_FIGHTER_LEVEL = 0.25; // push reduction per Fighter level
+export const KNOCKBACK_RESIST_SHIELD_BONUS    = 0.25; // extra reduction with a shield (Fighter levels required)
+export const KNOCKBACK_RESIST_CAP             = 0.95; // fighter 3 + shield caps here — braced, ~2 px residual
 export const UNDERLEVEL_SCALE_FLOOR           = 0.4;  // bonuses dissipate to this when underleveled, never below
 export const WALL_SLAM_DAMAGE_RATIO           = 0.5;  // pinned target takes half again the hit's damage
 export const WALL_SLAM_MIN_INTENDED_PX        = 12;   // pushes smaller than this can't slam

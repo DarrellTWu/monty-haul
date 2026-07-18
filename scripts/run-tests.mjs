@@ -21,6 +21,7 @@ const SUITES = [
   'server/tests/ranged-combat.test.js',
   'server/tests/sneak-attack.test.js',
   'server/tests/knockback-combat.test.js',
+  'server/tests/collision.test.js',
   'server/tests/payload-hardening.test.js',
   'server/tests/level-up-flow.test.js',
   'server/tests/auth.test.js',

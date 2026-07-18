@@ -262,6 +262,36 @@ export function tryAutoClimb(entity, platforms) {
 // ─── Geometric primitives ────────────────────────────────────────────────────
 
 /**
+ * Symmetric circle-circle separation for entity body blocking. If the two
+ * circles (shared `radius`) overlap, split the penetration evenly along the
+ * center line and return both corrected positions; null when not overlapping.
+ * Exactly-stacked centers (spawn pile-ups) separate along the x-axis
+ * deterministically.
+ *
+ * @param {{x:number,y:number}} a
+ * @param {{x:number,y:number}} b
+ * @param {number} [radius=ENTITY_RADIUS_PX]
+ * @returns {{ax:number,ay:number,bx:number,by:number}|null}
+ */
+export function separateCircles(a, b, radius = ENTITY_RADIUS_PX) {
+  const minDist = radius * 2;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist >= minDist) return null;
+  if (dist === 0) {
+    return { ax: a.x - minDist / 2, ay: a.y, bx: b.x + minDist / 2, by: b.y };
+  }
+  const half = (minDist - dist) / 2;
+  const ux = dx / dist;
+  const uy = dy / dist;
+  return {
+    ax: a.x - ux * half, ay: a.y - uy * half,
+    bx: b.x + ux * half, by: b.y + uy * half,
+  };
+}
+
+/**
  * Segment-vs-circle intersection. True iff any point of the segment from
  * (x1,y1) to (x2,y2) lies on or inside the circle of radius `r` at (cx,cy).
  *
