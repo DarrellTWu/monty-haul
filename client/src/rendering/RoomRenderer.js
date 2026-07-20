@@ -83,21 +83,28 @@ export function drawRoom(scene, floor) {
 
 /**
  * Paint the narrow climb-gradient band along all four perimeter edges of a
- * platform — a short low-color → high-color gradient straddling the edge.
- * Ramps paint over these at step gaps (drawn after), so the wall band's
- * "steep" read survives only where the surface really is a wall.
+ * platform — a short low-color → high-color gradient straddling the edge —
+ * plus a corner gradient tile at each platform corner, where the gradient
+ * runs diagonally (outer corner = low, inner = high) so the band turns the
+ * corner cleanly instead of seaming. Edge bands butt against the corner
+ * tiles rather than overlapping them. Ramps paint over these at step gaps
+ * (drawn after), so the wall band's "steep" read survives only where the
+ * surface really is a wall.
  */
 function drawClimbBands(gfx, platform, lowColor, highColor) {
   const half = CLIMB_BAND_DEPTH / 2;
+  const band = CLIMB_BAND_DEPTH;
   const { x, y, w, h } = platform;
-  // North edge: low ground above, platform below.
-  fillGradientRect(gfx, x - half, y - half, w + CLIMB_BAND_DEPTH, CLIMB_BAND_DEPTH, lowColor, highColor, 'down');
-  // South edge: platform above, low ground below.
-  fillGradientRect(gfx, x - half, y + h - half, w + CLIMB_BAND_DEPTH, CLIMB_BAND_DEPTH, lowColor, highColor, 'up');
-  // West edge: low ground left, platform right.
-  fillGradientRect(gfx, x - half, y - half, CLIMB_BAND_DEPTH, h + CLIMB_BAND_DEPTH, lowColor, highColor, 'right');
-  // East edge: platform left, low ground right.
-  fillGradientRect(gfx, x + w - half, y - half, CLIMB_BAND_DEPTH, h + CLIMB_BAND_DEPTH, lowColor, highColor, 'left');
+  // Edge bands, shortened by one corner tile at each end.
+  fillGradientRect(gfx, x + half, y - half,     w - band, band, lowColor, highColor, 'down'); // N
+  fillGradientRect(gfx, x + half, y + h - half, w - band, band, lowColor, highColor, 'up');   // S
+  fillGradientRect(gfx, x - half,     y + half, band, h - band, lowColor, highColor, 'right'); // W
+  fillGradientRect(gfx, x + w - half, y + half, band, h - band, lowColor, highColor, 'left');  // E
+  // Corner tiles (band × band squares centered on each platform corner).
+  fillCornerGradient(gfx, x - half,     y - half,     band, lowColor, highColor, 'nw');
+  fillCornerGradient(gfx, x + w - half, y - half,     band, lowColor, highColor, 'ne');
+  fillCornerGradient(gfx, x - half,     y + h - half, band, lowColor, highColor, 'sw');
+  fillCornerGradient(gfx, x + w - half, y + h - half, band, lowColor, highColor, 'se');
 }
 
 /**
@@ -141,6 +148,34 @@ function fillGradientRect(gfx, x, y, w, h, lowColor, highColor, towardHigh) {
   else if (towardHigh === 'right') gfx.fillGradientStyle(lowColor, highColor, lowColor, highColor, 1);
   else                             gfx.fillGradientStyle(highColor, lowColor, highColor, lowColor, 1);
   gfx.fillRect(x, y, w, h);
+}
+
+/**
+ * Corner gradient tile: a band × band square at a platform corner whose
+ * gradient runs diagonally — the outer corner point is the low color, the
+ * inner (platform) corner the high color. Phaser's fillGradientStyle only
+ * takes per-corner colors, so the two off-diagonal corners get the 50% blend,
+ * which renders as a clean diagonal ramp at this tile size.
+ * `corner` names which PLATFORM corner this tile sits on ('nw' → outer/low is
+ * the tile's top-left, inner/high its bottom-right, etc.).
+ */
+function fillCornerGradient(gfx, x, y, size, lowColor, highColor, corner) {
+  const mid = mixColor(lowColor, highColor, 0.5);
+  if (corner === 'nw')      gfx.fillGradientStyle(lowColor, mid, mid, highColor, 1);
+  else if (corner === 'ne') gfx.fillGradientStyle(mid, lowColor, highColor, mid, 1);
+  else if (corner === 'sw') gfx.fillGradientStyle(mid, highColor, lowColor, mid, 1);
+  else                      gfx.fillGradientStyle(highColor, mid, mid, lowColor, 1);
+  gfx.fillRect(x, y, size, size);
+}
+
+/** Linear RGB blend of two 0xRRGGBB colors; t = weight of `b`. */
+function mixColor(a, b, t) {
+  const ar = (a >> 16) & 0xff, ag = (a >> 8) & 0xff, ab = a & 0xff;
+  const br = (b >> 16) & 0xff, bg = (b >> 8) & 0xff, bb = b & 0xff;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return (r << 16) | (g << 8) | bl;
 }
 
 /**

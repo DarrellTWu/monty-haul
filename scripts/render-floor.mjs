@@ -36,7 +36,9 @@ function rect(x, y, w, h, fill, extra = '') {
   parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}" ${extra}/>`);
 }
 
-/** Gradient rect: towardHigh names the direction elevation increases. */
+/** Gradient rect: towardHigh names the direction elevation increases.
+ *  Corner directions (nw/ne/sw/se — the platform corner the tile sits on)
+ *  run the gradient diagonally: outer corner low → inner corner high. */
 function gradRect(x, y, w, h, low, high, towardHigh) {
   const id = `g${gradId++}`;
   const dir = {
@@ -44,6 +46,10 @@ function gradRect(x, y, w, h, low, high, towardHigh) {
     up:    'x1="0" y1="1" x2="0" y2="0"',
     right: 'x1="0" y1="0" x2="1" y2="0"',
     left:  'x1="1" y1="0" x2="0" y2="0"',
+    nw:    'x1="0" y1="0" x2="1" y2="1"',
+    ne:    'x1="1" y1="0" x2="0" y2="1"',
+    sw:    'x1="0" y1="1" x2="1" y2="0"',
+    se:    'x1="1" y1="1" x2="0" y2="0"',
   }[towardHigh];
   defs.push(`<linearGradient id="${id}" ${dir}><stop offset="0" stop-color="${low}"/><stop offset="1" stop-color="${high}"/></linearGradient>`);
   rect(x, y, w, h, `url(#${id})`);
@@ -65,10 +71,16 @@ for (const p of platforms) {
   const high = ELEVATION_COLORS[tier];
   rect(p.x, p.y, p.w, p.h, high);
   const hb = CLIMB_BAND / 2;
-  gradRect(p.x - hb, p.y - hb, p.w + CLIMB_BAND, CLIMB_BAND, low, high, 'down');   // N
-  gradRect(p.x - hb, p.y + p.h - hb, p.w + CLIMB_BAND, CLIMB_BAND, low, high, 'up'); // S
-  gradRect(p.x - hb, p.y - hb, CLIMB_BAND, p.h + CLIMB_BAND, low, high, 'right');  // W
-  gradRect(p.x + p.w - hb, p.y - hb, CLIMB_BAND, p.h + CLIMB_BAND, low, high, 'left'); // E
+  // Edge bands shortened by one corner tile at each end; corner tiles turn
+  // the gradient diagonally (mirrors RoomRenderer.drawClimbBands).
+  gradRect(p.x + hb, p.y - hb,       p.w - CLIMB_BAND, CLIMB_BAND, low, high, 'down'); // N
+  gradRect(p.x + hb, p.y + p.h - hb, p.w - CLIMB_BAND, CLIMB_BAND, low, high, 'up');   // S
+  gradRect(p.x - hb,       p.y + hb, CLIMB_BAND, p.h - CLIMB_BAND, low, high, 'right'); // W
+  gradRect(p.x + p.w - hb, p.y + hb, CLIMB_BAND, p.h - CLIMB_BAND, low, high, 'left');  // E
+  gradRect(p.x - hb,       p.y - hb,       CLIMB_BAND, CLIMB_BAND, low, high, 'nw');
+  gradRect(p.x + p.w - hb, p.y - hb,       CLIMB_BAND, CLIMB_BAND, low, high, 'ne');
+  gradRect(p.x - hb,       p.y + p.h - hb, CLIMB_BAND, CLIMB_BAND, low, high, 'sw');
+  gradRect(p.x + p.w - hb, p.y + p.h - hb, CLIMB_BAND, CLIMB_BAND, low, high, 'se');
   for (const s of p.steps ?? []) {
     const onN = s.y === p.y, onS = s.y === p.y + p.h, onE = s.x === p.x + p.w;
     if (onN)      gradRect(s.x - RAMP_W / 2, s.y - RAMP_D / 2, RAMP_W, RAMP_D, low, high, 'down');
