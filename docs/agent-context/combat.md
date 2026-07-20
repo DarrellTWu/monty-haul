@@ -88,7 +88,7 @@ Class default gear extracted at run-end enters the raider pack normally and trig
 - Advantage path: 2d20 keep higher; nat-1 only if both dice are 1; nat-20 if either die is 20.
 - Disadvantage path: 2d20 keep lower; nat-1 if either die is 1; nat-20 only if both are 20.
 - Sources are assembled where they're computed (no registry). Today's wired-up sources:
-  - **High-ground** advantage — `attacker.elevation === 1 && target.elevation === 0`. Player main/offhand/MA and enemy attacks all check this. Asymmetric: no reverse disadvantage. See `agent-context/geometry-elevation.md`.
+  - **High-ground** advantage — any elevation differential: `attacker.elevation > target.elevation` (three tiers exist — summit vs ground grants the same single advantage as one step up). Player main/offhand/MA and enemy attacks all check this. Asymmetric: no reverse disadvantage. See `agent-context/geometry-elevation.md`.
   - **Reckless** advantage — melee attacks while `'reckless'` is in the player's conditions (Barbarian 2 toggle); enemy attacks against a reckless player also gain advantage.
   - **Patient-defense** disadvantage — enemy attacks against a player with the `'patient_defense'` condition (Monk ki ability).
   - **Long-range** disadvantage — ranged attacks where distance > `weapon.range.normal` and ≤ `weapon.range.long`.

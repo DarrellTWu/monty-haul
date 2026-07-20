@@ -1,7 +1,7 @@
 ---
 status: shipped
-updated: 2026-05-17
-purpose: Walls, doors, platforms, rooms, steps, elevation, high-ground advantage, line of sight. Read when the task touches collision, navigation, terrain, or LoS.
+updated: 2026-07-13
+purpose: Walls, doors, platforms, rooms, steps, multi-level elevation, high-ground advantage, gradient climb visuals, line of sight. Read when the task touches collision, navigation, terrain, or LoS.
 ---
 
 # Dungeon Geometry & Elevation
@@ -15,29 +15,35 @@ Alongside `enemies/chests/traps/stairs`, each floor in `shared/data/floors/` dec
 - Doors populated into `state.doors` (synced MapSchema) so runtime lock state can mutate.
 - Rooms are AI-navigation hints (stashed in `_floorRooms`). Each room: `{ id, x, y, w, h, doors: [doorId...] }`. Rect is the room *interior* (not the wall band).
 
-## Platform Model
-Platforms = visual ground at elevation 1 + perimeter wall band with gaps at each step.
+## Platform Model (multi-level)
+Platforms = elevated ground (`elevation: 1..2`, default 1 when omitted) + perimeter wall band with gaps at each step. **Stacking convention:** a higher tier is declared as a rect fully inside its lower tier (elev-2 "summit" inside an elev-1 base — see floor 3's Mesa). Three tiers exist today (0 = ground); the model supports more.
 
-- `platformPerimeterRects(platform)` generates 8 thin wall segments (4 edges × 2 halves, split at step positions declared in `platform.steps`).
-- For elev-0 non-climbers: perimeter rects are **obstacles** (block movement except through step gaps).
-- For climbers and all elev-1 entities: perimeter rects are **NOT** in the obstacle list — they pass through freely.
+- `platformPerimeterRects(platform)` generates thin wall segments (4 edges, split at step positions declared in `platform.steps`).
+- A platform's perimeter rects are **obstacles for any non-climber whose elevation is below that platform's level**; climbers and entities at/above the level pass through freely (grouping lives in MovementSystem/AISystem `perimeterGroups`).
 - **There is no step circle.** The original radius-based step model was replaced because it caused oscillation when wall push-back trapped entities inside the circle. Steps are simply gaps in the perimeter wall now (`STEP_HALF_WIDTH_PX = 24`, total gap = 48 px).
+- Authoring: geometry sits on the `TILE_PX` (40 px) grid — tile-art prep; chokepoint widths (80/48) and step gaps are the sanctioned off-grid gameplay constants.
 
-## Elevation Transitions
-`tryAutoClimb(entity, platforms)` reads the entity's movement segment and translates any inward perimeter crossing into elev `0 → 1`, any outward into `1 → 0`. The wall list itself gates *who* can cross (non-climbers blocked except at step gaps), so once an entity has crossed the perimeter the elevation toggle is unconditional.
+## Elevation Transitions (positional model)
+**Elevation IS position**: `elevationAt(x, y, platforms)` returns the highest containing platform's level (0 on open ground). `tryAutoClimb(entity, platforms)` now simply derives elevation from the entity's resolved final position — the obstacle list is what *gates* who can get there (non-climbers blocked except at step gaps), so anyone whose position ends up inside a footprint has earned the level. This generalizes to stacked tiers and self-heals any elevation desync.
+
+## Climb Visuals (gradient tiles — RoomRenderer)
+Placeholder-art language for "can this surface be climbed," painted from floor data alone (`client/src/rendering/RoomRenderer.js`; `scripts/render-floor.mjs` mirrors it for SVG previews):
+- **Elevation color ladder** — one shade per tier (`ELEVATION_COLORS`), lighter = higher; stacked platforms paint lowest-first.
+- **Climb band** — a *narrow* (12 px) low→high gradient straddling every perimeter edge: short and steep, reads as "a monk could scale this, nobody strolls up it."
+- **Ramp strip** — the same gradient stretched wide and deep (48 × 32) at each step gap: reads as an accommodating slope anyone can walk. Ramps paint over the climb band, so the steep read survives only where the surface really is a wall.
 
 **Body blocking:** `separateCircles` (geometry.js) gives living same-elevation entities solid bodies — pairwise separation at the end of `MovementSystem.update`, wall-re-resolved so a jostle can't shove anyone through geometry (behavior details: `combat.md` §Knockback).
 
 Two other systems drive elevation through the same primitives:
-- **Knockback** (`shared/logic/knockback.js`) runs its displacement segment through `tryAutoClimb` — an elevated target shoved across the edge drops to ground. Knockback treats perimeters as obstacles for *all* elev-0 targets (nobody gets punched up a wall), which is what makes platform side-walls wall-slammable. Rules live in `combat.md` §Knockback.
-- **Climb fatigue** (`MovementSystem`): a player whose 0→1 crossing intersects a perimeter *wall* rect (not a step gap) on a floor deeper than their climb level (`getClimbLevel` — max level across canClimb classes) emits a `climb_fatigue` event; `DungeonRoom` applies the condition (50% speed, 1 s per floor of deficit, 4 s cap). Design: `design/dynamic-combat.md` §Monk climb fatigue.
+- **Knockback** (`shared/logic/knockback.js`) runs its displacement segment through `tryAutoClimb` — an elevated target shoved across an edge drops a tier. Knockback treats the perimeters of any platform *above* the target's elevation as obstacles (nobody gets punched up a wall), which is what makes platform side-walls wall-slammable. Rules live in `combat.md` §Knockback.
+- **Climb fatigue** (`MovementSystem`): a player whose upward crossing (any tier) intersects a perimeter *wall* rect (not a step gap) on a floor deeper than their climb level (`getClimbLevel` — max level across canClimb classes) emits a `climb_fatigue` event; `DungeonRoom` applies the condition (50% speed, 1 s per floor of deficit, 4 s cap). Design: `design/dynamic-combat.md` §Monk climb fatigue.
 
 ## Elevation Flow (causal chain — referenced in architecture review §3.3)
 1. **Seeding**: `DungeonRoom._spawnElevation(x, y)` checks platform rects at join + descend, sets `PlayerState.elevation` / `EnemyState.elevation`.
-2. **Mutation**: `MovementSystem.tryAutoClimb` flips elevation on perimeter crossing (each tick).
-3. **Gating**: Wall obstacle list excludes/includes perimeter rects based on `canClimb` + current elevation.
-4. **Visual**: `DungeonScene` reads elevation → render depth (ground=2, elevated=4; HP bar = entity depth + 1).
-5. **Combat**: `CombatSystem` computes `advantage = attacker.elev===1 && target.elev===0` (see `combat.md`).
+2. **Mutation**: `MovementSystem` re-derives elevation positionally via `tryAutoClimb`/`elevationAt` (each tick).
+3. **Gating**: Wall obstacle list includes the perimeter rects of platforms above the entity's elevation (unless `canClimb`).
+4. **Visual**: `DungeonScene` reads elevation → render depth (2 + 2×elevation; HP bar = entity depth + 1).
+5. **Combat**: `CombatSystem` grants high-ground advantage on any elevation differential (`attacker.elevation > target.elevation` — see `combat.md`).
 
 ## `canClimb`
 Class-level flag (Monk = true; Fighter/Barbarian = false) and enemy-def-level flag (Goblin = true; Dog/Skeleton = false). Read at call time from `CLASS_REGISTRY` / `enemyDefs`. **Not synced** — `canClimb` never changes during a run, so syncing it would be wasteful. Server pure-logic helpers (`resolveWallCollision`, `tryAutoClimb`) take a plain `canClimb: boolean` parameter, decoupling them from def lookup.

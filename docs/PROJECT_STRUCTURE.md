@@ -1,7 +1,7 @@
 ---
 status: shipped
 updated: 2026-07-13
-purpose: Canonical file-layout reference. Source of truth — CLAUDE.md and tech_spec.md link here, do not duplicate. Last bump: playtest tune (knockback distances up, fighter brace to 95% cap) + entity body blocking (separateCircles).
+purpose: Canonical file-layout reference. Source of truth — CLAUDE.md and tech_spec.md link here, do not duplicate. Last bump: third elevation (positional model), gradient climb tiles, floor 3 playground, render-floor preview script.
 ---
 
 # Project Structure (Actual)
@@ -72,17 +72,17 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `data/loot/tier1.js` | `LOOT_TABLE_REGISTRY` keyed by enemy id. Entries support literal ids + `@pool_name` (currently `@potion_any`). |
 | `data/crafting/benches.js` | `BENCH_REGISTRY` — six benches (forge, binder, artificer, apothecary, scriptorium, refinery). `status: 'open' \| 'planned'`. |
 | `data/crafting/recipes.js` | `RECIPE_REGISTRY` + `recipesForBench(benchId)`. Currently: Tan Hide (forge), Bone Brew (apothecary). |
-| `data/floors/{floor1,floor2,floor3,index}.js` | `FLOOR_REGISTRY`. Each floor: `{width, height, playerSpawn, enemies, chests, traps, stairs, walls, doors, platforms, rooms}`. Stairs/doors may carry `unlock: { kind }` (see `logic/unlock.js`). All floors tuned for combat testing — not final design. |
+| `data/floors/{floor1,floor2,floor3,index}.js` | `FLOOR_REGISTRY`. Each floor: `{width, height, playerSpawn, enemies, chests, traps, stairs, walls, doors, platforms, rooms}`. Platforms carry `elevation: 1..2` (stacked: higher tier declared inside lower). Stairs/doors may carry `unlock: { kind }` (see `logic/unlock.js`). Floor 3 is the elevation/geometry playground (Mesa, Terraces, Keep with 48px single door, Pillars) on the `TILE_PX` 40px authoring grid. All floors tuned for combat testing — not final design. |
 | `logic/combat.js` | `resolveAttack(...)` — accepts `sources: Array<{kind, reason}>` with SRD cancellation. `resolveRollMode(sources)` is the pure helper. `pickAttackMode(weapon, distance)` returns `'melee' \| 'ranged' \| 'thrown' \| null` — single source of truth for dispatch. `sneakAttackEligibility({weapon, rollMode, allyAdjacent, skirmish, attackerMoving, targetMoving})` → reason string or null. Result carries `rollMode`, `rollModeSources`, `advantageRolls: [kept, discarded]`. |
 | `logic/loot.js` | Pure `rollLoot(table, rng?)` → `{gold, items}`; `applyDeathLoot(enemies, rolledSet, registry, onDrop?, rng?)` — idempotent fresh-death loot resolution used by `DungeonRoom._tick`. `@potion_any` pool filters out `type==='extract'`. |
 | `logic/loot-window.js` | Pure container-lock protocol: `tryOpenContainer`, `tryCloseContainer`, `releaseLocksHeldBy`, `tickContainerLocks`, `tryTakeItem`, `tryTakeGold`, `tryDropItem`, `checkLootAccess`, `refreshSourceFlags`. |
-| `logic/geometry.js` | Pure geometry: `resolveWallCollision`, `circleOverlapsAny`, `isLineBlocked` (Liang-Barsky segment-vs-AABB; caller filters obstacles), `tryAutoClimb`, `platformPerimeterRects`, `separateCircles` (entity body blocking), `segmentIntersectsCircle`, `segmentPerimeterCrossing`, `pointInRect`. |
+| `logic/geometry.js` | Pure geometry: `resolveWallCollision`, `circleOverlapsAny`, `isLineBlocked` (Liang-Barsky segment-vs-AABB; caller filters obstacles), `elevationAt` (positional multi-level elevation), `tryAutoClimb` (derives from final position), `platformPerimeterRects`, `separateCircles` (entity body blocking), `segmentIntersectsCircle`, `segmentPerimeterCrossing`, `pointInRect`. |
 | `logic/character.js` | `validateAbilityScores(scores)` → `{ok}` or `{ok:false, error}`. Enforces six keys present, integer in `[SCORE_MIN, SCORE_MAX]`, point cost ≤ `POINT_BUY_BUDGET`. Used by HubScene (pre-submit) + DungeonRoom.onJoin (auth gate). `validateUsername(raw)` → `{ok, username}` (trim, non-empty, ≤ `USERNAME_MAX_LENGTH`, strings only) — one rule for login registration + rename (`playerStore.authenticate` / `renamePlayer`). |
 | `logic/equipment.js` | `equipItem(player, {itemId, slot?})`, `unequipItem(player, {slot})`, `recomputeStats(player)`. Owns SRD slot routing (auto-detect armor/shield/weapon, two-handed handling, shield + main-hand interactions) and the derived-stat hook called after any score or equipment change. AC consults `getDerivedClassFeatures(player).unarmoredDefense` so multiclass passives activate. |
 | `logic/class-progression.js` | Pure level-up + multiclass module. `applyClassLevel(player, classId)` is the only legal mutator of `classLevels` / `levelUpHistory` / `level` (invariant: `level === sum(classLevels.values)`); returns the new level's features + seeds resource pools. Helpers: `totalLevel`, `getClassLevel`, `getEligibleClassChoicesForLevelUp` (any class below cap 3), `getGrantedFeatures`, `getDerivedClassFeatures` (fightingStyle/unarmoredDefense/canClimb/dangerSense/unarmoredMovementFt/critRange/frenzy/openHandTechnique/skirmish), `getMaxLevelForClass`, `computeHpGainForLevel`, `getKiMax`, `getRageUsesMax`, `getSneakAttackDice`, `trySubclassUnlock`. |
 | `logic/unlock.js` | Data-driven stair/door unlock conditions: `UNLOCK_KINDS` ('enemies_cleared', 'never'), `isValidUnlock`, `startsLocked`, `shouldUnlock(unlock, ctx)`. Fail-closed on unknown kinds. |
 | `logic/knockback.js` | Pure knockback (dynamic-combat Pillar 1): `levelScale` (underlevel dissipation, floor 0.4), `computeKnockbackPx` (base + Barbarian bonus − Fighter resist), `resolveKnockback` (swept push vs obstacle rects + bounds, elevation via `tryAutoClimb`, wall-slam classification). |
-| `logic/validate-floors.js` | `validateFloorData(floorRegistry, { enemyTypes, isKnownItem })` → error strings. Run at server boot; suite in `tests/floors.test.js`. |
+| `logic/validate-floors.js` | `validateFloorData(floorRegistry, { enemyTypes, isKnownItem })` → error strings (incl. platform `elevation` must be integer ≥ 1). Run at server boot; suite in `tests/floors.test.js`. |
 | `logic/item-display.js` | Derived display layer over `ITEM_REGISTRY`. `getItemDisplay(id)`, `getArmorSlotDescription(def)`, `getStashOrder()`, `getStashSections()`. Six per-category formatters (weapon/armor/shield/consumable/material/emblem). All other display tables in client code reference these. |
 | `logic/conditions.js` | `CONDITION_DEFS` table (mirror field + optional `onExpire`/`onExpireLog` per condition) + `applyCondition`, `tickConditions`, `clearPlayerConditions`. Pure timer bookkeeping; caller owns the `Map<\`${sessionId}_${conditionId}\`, ms>` and broadcasts the returned log strings. Used by `DungeonRoom._useConsumable`, `_activateRage`, `_tickConditions`, `_longRest`. |
 | `types/{player,enemy,weapon}.js` | JSDoc `@typedef` shapes. |
@@ -96,6 +96,7 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 |---|---|
 | `run-tests.mjs` | Offline test runner (`npm run test:all`) — every suite below except the manual Supabase smokes. |
 | `balance-sim.mjs` | Deterministic Monte Carlo balance harness: every class × level 1–3 loadout vs every tier-1 enemy at pack sizes 1–3 (death %, cycles-to-clear, hit rates). `node scripts/balance-sim.mjs [--seed N] [--trials N]`. Model notes in the file header. |
+| `render-floor.mjs` | SVG floor preview from floor data alone (Sprint E's review loop, seeded early): elevation color ladder, climb-gradient bands, ramps, walls/doors, entity markers. `node scripts/render-floor.mjs <n> [out.svg]`. |
 
 ## Supabase (`supabase/migrations/`)
 
@@ -112,7 +113,7 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 |---|---|---|
 | `shared/tests/combat.test.js` | 59 | Advantage/disadvantage cancellation, `pickAttackMode` dispatch, expanded crit range (Champion 19 — crit-but-not-auto-hit), `resolveSave` advantage (Danger Sense), `sneakAttackEligibility` (weapon gate, three legs, disadvantage blocks, skirmish both-moving). |
 | `shared/tests/loot.test.js` | 38 | Includes `applyDeathLoot` idempotency + drop-callback coverage. |
-| `shared/tests/geometry.test.js` | 59 | AABB push-out, perimeter primitives, `tryAutoClimb`, `platformPerimeterRects`, `isLineBlocked`, `separateCircles`. |
+| `shared/tests/geometry.test.js` | 65 | AABB push-out, perimeter primitives, `tryAutoClimb`, `elevationAt` (stacked tiers), `platformPerimeterRects`, `isLineBlocked`, `separateCircles`. |
 | `shared/tests/character.test.js` | 16 | `validateAbilityScores` — shape, range, budget. `validateUsername` — trim, length bounds, non-string rejection. |
 | `shared/tests/equipment.test.js` | 14 | `equipItem`/`unequipItem`/`recomputeStats` — slot routing, two-handed, AC recompute. |
 | `shared/tests/conditions.test.js` | 18 | `applyCondition`/`tickConditions`/`clearPlayerConditions` — idempotency, mirror sync, expiry side effects, multi-player isolation. |
@@ -126,7 +127,7 @@ What exists today, by package. For target/planned architecture see `tech_spec.md
 | `server/tests/ranged-combat.test.js` | 25 | Ranged path: no-target denial, range gates, LoS, long-range + foe-adjacent disadvantage, advantage/disadvantage cancellation, projectile_fired emission, melee regression. |
 | `server/tests/sneak-attack.test.js` | 17 | Sneak Attack through `playerAttack`: skirmish both/one-moving, ally-adjacent, high-ground advantage, weapon + class gates, once-per-event across main+offhand, offhand fishing, ranged skirmish, long-range disadvantage block. |
 | `server/tests/knockback-combat.test.js` | 18 | Knockback through `playerAttack`/`enemyAttack`: base + barb-3 push distances, wall-slam bonus damage + log, killing blow doesn't push, ranged doesn't push, fighter+shield brace vs monk, climb-fatigue events (wall vs step, deficit duration, at-pace clean). |
-| `server/tests/collision.test.js` | 8 | Body blocking through `MovementSystem.update`: can't walk through enemies, stationary overlap resolves, spawn stacks unstack, corpses walkable, cross-elevation passes, separation respects walls. |
+| `server/tests/collision.test.js` | 9 | Body blocking through `MovementSystem.update`: can't walk through enemies, stationary overlap resolves, spawn stacks unstack, corpses walkable, cross-elevation passes (stacked-platform fixture), separation respects walls. |
 | `server/tests/payload-hardening.test.js` | 14 | Boots the real DungeonRoom, spies on `onUncaughtException`, fires hostile payload shapes at every registered message type; NaN-move gate, pendingLevelUp lock on `use_hotbar`, hotbar slot validation. |
 | `server/tests/level-up-flow.test.js` | 20 | Mirrors `choose_level_up` handler: pendingLevelUp gate, descend flips flag for alive only, unknown classId rejection, same-class re-level below cap + rejection at cap 3, multiclass HP+AC+history mutations, hotbar-full notify line, rage-pool init. |
 | `server/tests/auth.test.js` | 20 | Token issue/verify/expiry/tamper, `requireAuth` 401/403/next, scrypt hash/verify + malformed-hash safety. |
