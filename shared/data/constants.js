@@ -80,6 +80,10 @@ export const DASH_SPEED_MULTIPLIER       = 2.0; // Speed multiplier while Dashin
 export const LONGSTRIDER_SPEED_BONUS_PX  = 50;  // Longstrider +10 ft at 5 px/ft
 
 // GEOMETRY (walls, doors, platforms, steps)
+export const TILE_PX = 40; // Authoring grid (tile-art prep): floor geometry should sit on
+                            // multiples of this so future tile rendering maps 1:1 onto rects.
+                            // Chokepoint widths (DOOR 80/48) and step gaps are the sanctioned
+                            // off-grid exceptions — they're gameplay constants, not tiles.
 export const ENTITY_RADIUS_PX = 16; // Collision radius for players + enemies vs walls/doors/platforms.
                                      // Half of the visual sprite width — comfortably fits an 80 px door.
 export const STEP_HALF_WIDTH_PX  = 24; // Half-width of the step gap in a platform's perimeter wall.

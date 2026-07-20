@@ -8,19 +8,27 @@ const WALL = 40; // outer wall thickness in px; matches the server-side WALL con
 
 // Geometry palette — placeholder colors until tile art lands.
 // Walls and platforms are visually distinct: walls are dark *obstacles*,
-// platforms are differently-coloured *ground* indicating elevation 1.
-const COLOR_BASE_GROUND     = 0x2a2a3a;
-const COLOR_PLATFORM_GROUND = 0x3a3a4f;
-const COLOR_STEP_INNER      = 0x36364a;
-const COLOR_STEP_OUTER      = 0x30303d;
+// platforms are differently-coloured *ground*, one shade per elevation tier.
+// ELEVATION_COLORS is the ladder: index = elevation (0 = base ground).
+const ELEVATION_COLORS = [
+  0x2a2a3a, // elevation 0 — base ground
+  0x3a3a4f, // elevation 1 — platform
+  0x4d4d68, // elevation 2 — stacked summit (lighter = higher)
+];
 const COLOR_WALL_FILL       = 0x111118;
 const COLOR_WALL_BORDER     = 0x4a4a5a;
 const COLOR_DOOR_UNLOCKED   = 0x4a4a5a;
 const COLOR_DOOR_LOCKED     = 0x111118;
 
-// Step transition strip — visual size at each step location.
-const STEP_STRIP_WIDTH = 48; // length parallel to the platform edge
-const STEP_STRIP_DEPTH = 24; // perpendicular to the edge (split half/half)
+// Climbable-surface gradient bands ("gradient tiles"). The climb band along a
+// platform's perimeter walls is deliberately NARROW — a short, steep gradient
+// from the lower tier's color to the platform's color that reads as "a wall a
+// monk could scale, not a slope anyone strolls up." Ramps (steps) use the
+// same gradient stretched DEEPER, so they read as accommodating: anyone can
+// walk a ramp.
+const CLIMB_BAND_DEPTH = 12; // perpendicular to the edge, straddling it 6/6
+const RAMP_STRIP_WIDTH = 48; // length parallel to the platform edge (matches the step gap)
+const RAMP_STRIP_DEPTH = 32; // perpendicular — gentle, walkable read (split half/half)
 
 /**
  * Draw a floor's static geometry (base ground, outer walls, platforms, step
@@ -37,7 +45,7 @@ export function drawRoom(scene, floor) {
   const gfx = scene.add.graphics();
 
   // Outer wall band (frames the playable area).
-  gfx.fillStyle(COLOR_BASE_GROUND);
+  gfx.fillStyle(ELEVATION_COLORS[0]);
   gfx.fillRect(WALL, WALL, width - WALL * 2, height - WALL * 2);
   gfx.fillStyle(COLOR_WALL_FILL);
   gfx.fillRect(0, 0, width, WALL);
@@ -47,12 +55,18 @@ export function drawRoom(scene, floor) {
   gfx.lineStyle(2, 0x5555aa);
   gfx.strokeRect(WALL, WALL, width - WALL * 2, height - WALL * 2);
 
-  // Platform ground tint (painted OVER the base ground).
-  for (const platform of floor.platforms ?? []) {
-    gfx.fillStyle(COLOR_PLATFORM_GROUND);
+  // Platform ground tint (painted OVER the base ground), lowest tier first so
+  // stacked summits (elev-2 inside elev-1) paint on top. Each platform then
+  // gets its climb-gradient perimeter bands, and ramps paint over those.
+  const platforms = [...(floor.platforms ?? [])]
+    .sort((a, b) => (a.elevation ?? 1) - (b.elevation ?? 1));
+  for (const platform of platforms) {
+    const tier = Math.min(platform.elevation ?? 1, ELEVATION_COLORS.length - 1);
+    gfx.fillStyle(ELEVATION_COLORS[tier]);
     gfx.fillRect(platform.x, platform.y, platform.w, platform.h);
+    drawClimbBands(gfx, platform, ELEVATION_COLORS[tier - 1], ELEVATION_COLORS[tier]);
     for (const step of platform.steps ?? []) {
-      drawStepStrip(gfx, platform, step);
+      drawRampStrip(gfx, platform, step, ELEVATION_COLORS[tier - 1], ELEVATION_COLORS[tier]);
     }
   }
 
@@ -68,40 +82,65 @@ export function drawRoom(scene, floor) {
 }
 
 /**
- * Paint a step transition strip centered on the step location. Half the strip
- * sits inside the platform (brighter tint), half outside (dimmer). Orientation
- * is derived from which platform edge the step is on.
+ * Paint the narrow climb-gradient band along all four perimeter edges of a
+ * platform — a short low-color → high-color gradient straddling the edge.
+ * Ramps paint over these at step gaps (drawn after), so the wall band's
+ * "steep" read survives only where the surface really is a wall.
  */
-function drawStepStrip(gfx, platform, step) {
+function drawClimbBands(gfx, platform, lowColor, highColor) {
+  const half = CLIMB_BAND_DEPTH / 2;
+  const { x, y, w, h } = platform;
+  // North edge: low ground above, platform below.
+  fillGradientRect(gfx, x - half, y - half, w + CLIMB_BAND_DEPTH, CLIMB_BAND_DEPTH, lowColor, highColor, 'down');
+  // South edge: platform above, low ground below.
+  fillGradientRect(gfx, x - half, y + h - half, w + CLIMB_BAND_DEPTH, CLIMB_BAND_DEPTH, lowColor, highColor, 'up');
+  // West edge: low ground left, platform right.
+  fillGradientRect(gfx, x - half, y - half, CLIMB_BAND_DEPTH, h + CLIMB_BAND_DEPTH, lowColor, highColor, 'right');
+  // East edge: platform left, low ground right.
+  fillGradientRect(gfx, x + w - half, y - half, CLIMB_BAND_DEPTH, h + CLIMB_BAND_DEPTH, lowColor, highColor, 'left');
+}
+
+/**
+ * Paint a ramp (step) transition strip centered on the step location — the
+ * same low→high gradient as the climb band, but stretched over a deeper strip
+ * so it reads as a walkable slope rather than a scalable wall. Orientation is
+ * derived from which platform edge the step is on.
+ */
+function drawRampStrip(gfx, platform, step, lowColor, highColor) {
   const onN = step.y === platform.y;
   const onS = step.y === platform.y + platform.h;
   const onE = step.x === platform.x + platform.w;
   const onW = step.x === platform.x;
 
-  const halfStripDepth = STEP_STRIP_DEPTH / 2;
-  const halfStripWidth = STEP_STRIP_WIDTH / 2;
+  const halfD = RAMP_STRIP_DEPTH / 2;
+  const halfW = RAMP_STRIP_WIDTH / 2;
 
   if (onN) {
-    gfx.fillStyle(COLOR_STEP_INNER);
-    gfx.fillRect(step.x - halfStripWidth, step.y, STEP_STRIP_WIDTH, halfStripDepth);
-    gfx.fillStyle(COLOR_STEP_OUTER);
-    gfx.fillRect(step.x - halfStripWidth, step.y - halfStripDepth, STEP_STRIP_WIDTH, halfStripDepth);
+    fillGradientRect(gfx, step.x - halfW, step.y - halfD, RAMP_STRIP_WIDTH, RAMP_STRIP_DEPTH, lowColor, highColor, 'down');
   } else if (onS) {
-    gfx.fillStyle(COLOR_STEP_INNER);
-    gfx.fillRect(step.x - halfStripWidth, step.y - halfStripDepth, STEP_STRIP_WIDTH, halfStripDepth);
-    gfx.fillStyle(COLOR_STEP_OUTER);
-    gfx.fillRect(step.x - halfStripWidth, step.y, STEP_STRIP_WIDTH, halfStripDepth);
+    fillGradientRect(gfx, step.x - halfW, step.y - halfD, RAMP_STRIP_WIDTH, RAMP_STRIP_DEPTH, lowColor, highColor, 'up');
   } else if (onE) {
-    gfx.fillStyle(COLOR_STEP_INNER);
-    gfx.fillRect(step.x - halfStripDepth, step.y - halfStripWidth, halfStripDepth, STEP_STRIP_WIDTH);
-    gfx.fillStyle(COLOR_STEP_OUTER);
-    gfx.fillRect(step.x, step.y - halfStripWidth, halfStripDepth, STEP_STRIP_WIDTH);
+    fillGradientRect(gfx, step.x - halfD, step.y - halfW, RAMP_STRIP_DEPTH, RAMP_STRIP_WIDTH, lowColor, highColor, 'left');
   } else if (onW) {
-    gfx.fillStyle(COLOR_STEP_INNER);
-    gfx.fillRect(step.x, step.y - halfStripWidth, halfStripDepth, STEP_STRIP_WIDTH);
-    gfx.fillStyle(COLOR_STEP_OUTER);
-    gfx.fillRect(step.x - halfStripDepth, step.y - halfStripWidth, halfStripDepth, STEP_STRIP_WIDTH);
+    fillGradientRect(gfx, step.x - halfD, step.y - halfW, RAMP_STRIP_DEPTH, RAMP_STRIP_WIDTH, lowColor, highColor, 'right');
   }
+}
+
+/**
+ * Fill a rect with a linear low→high gradient. `towardHigh` names the
+ * direction in which elevation increases across the rect:
+ *   'down'  — high color at the bottom (north edges)
+ *   'up'    — high color at the top (south edges)
+ *   'right' — high color at the right (west edges)
+ *   'left'  — high color at the left (east edges)
+ * Phaser's fillGradientStyle takes corner colors (TL, TR, BL, BR).
+ */
+function fillGradientRect(gfx, x, y, w, h, lowColor, highColor, towardHigh) {
+  if (towardHigh === 'down')       gfx.fillGradientStyle(lowColor, lowColor, highColor, highColor, 1);
+  else if (towardHigh === 'up')    gfx.fillGradientStyle(highColor, highColor, lowColor, lowColor, 1);
+  else if (towardHigh === 'right') gfx.fillGradientStyle(lowColor, highColor, lowColor, highColor, 1);
+  else                             gfx.fillGradientStyle(highColor, lowColor, highColor, lowColor, 1);
+  gfx.fillRect(x, y, w, h);
 }
 
 /**
