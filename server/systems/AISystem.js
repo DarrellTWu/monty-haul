@@ -44,12 +44,12 @@ export function update(state, dt, enemyDefs, melee, geometry = null) {
     }
   }
 
-  // Platform perimeter wall segments (with step gaps). Shared across all
-  // elev-0 non-climbers — non-climbers see them as obstacles; climbers and
-  // elev-1 entities do not.
-  const platformPerimeters = [];
+  // Platform perimeter wall segments (with step gaps), grouped per platform
+  // with its elevation — a perimeter blocks a non-climber whose elevation is
+  // below that platform's level.
+  const perimeterGroups = [];
   for (const p of platforms) {
-    for (const r of platformPerimeterRects(p)) platformPerimeters.push(r);
+    perimeterGroups.push({ elevation: p.elevation ?? 1, rects: platformPerimeterRects(p) });
   }
 
   for (const [id, enemy] of state.enemies) {
@@ -106,8 +106,11 @@ export function update(state, dt, enemyDefs, melee, geometry = null) {
     const obstacles = [];
     for (const w of walls)        obstacles.push(w);
     for (const d of lockedDoors)  obstacles.push(d);
-    if (enemy.elevation === 0 && !canClimb) {
-      for (const r of platformPerimeters) obstacles.push(r);
+    if (!canClimb) {
+      for (const group of perimeterGroups) {
+        if (enemy.elevation >= group.elevation) continue;
+        for (const r of group.rects) obstacles.push(r);
+      }
     }
 
     applySlidingVelocity(enemy, dvx, dvy, dt, obstacles);
@@ -150,24 +153,34 @@ function selectTargetPosition(enemy, player, platforms, rooms, stateDoors, canCl
   }
 
   // ── Elevation routing ────────────────────────────────────────────────────
-  if (enemy.elevation === player.elevation || canClimb) {
+  if (enemy.elevation >= player.elevation || canClimb) {
+    // Same level, or the enemy is above the target: pursue directly (descent
+    // needs no step — walking off any edge drops). Climbers always go direct.
     return { x: player.x, y: player.y };
   }
-  if (enemy.elevation === 0 && player.elevation === 1) {
-    const platform = findPlatformContaining(player, platforms);
-    if (!platform) return { x: player.x, y: player.y };
-    const step = nearestStep(enemy, platform);
-    return step ? { x: step.x, y: step.y } : { x: player.x, y: player.y };
-  }
-  // Enemy elev 1, target elev 0: walk off any edge (no step needed for descent).
-  return { x: player.x, y: player.y };
+  // Enemy below the target: route to the nearest step of the next platform
+  // tier up toward the target. With stacked platforms (elev-2 inside elev-1)
+  // this climbs one level per routing pass — first the outer platform's step,
+  // then, once elevated, the inner one's.
+  const platform = findNextPlatformUp(enemy, player, platforms);
+  if (!platform) return { x: player.x, y: player.y };
+  const step = nearestStep(enemy, platform);
+  return step ? { x: step.x, y: step.y } : { x: player.x, y: player.y };
 }
 
-function findPlatformContaining(point, platforms) {
+/**
+ * Among platforms containing the target with elevation above the enemy's,
+ * pick the lowest tier — the enemy's next climb toward a stacked summit.
+ */
+function findNextPlatformUp(enemy, target, platforms) {
+  let best = null;
   for (const p of platforms) {
-    if (pointInRect(point.x, point.y, p)) return p;
+    const pe = p.elevation ?? 1;
+    if (pe <= enemy.elevation) continue;
+    if (!pointInRect(target.x, target.y, p)) continue;
+    if (!best || pe < (best.elevation ?? 1)) best = p;
   }
-  return null;
+  return best;
 }
 
 function findRoomContaining(point, rooms) {

@@ -50,8 +50,8 @@ const EXTRACT_ACK_TIMEOUT_MS = 8000;
 //   ground-level entities (elevation 0):           2
 //   elevated entities (elevation 1):               4
 //   HP bars:                                       entity depth + 1
+// Entity depth = DEPTH_GROUND_ENTITY + 2 × elevation (elev 0 → 2, 1 → 4, 2 → 6).
 const DEPTH_GROUND_ENTITY = 2;
-const DEPTH_ELEVATED_ENTITY = 4;
 
 export class DungeonScene extends Phaser.Scene {
   constructor() {
@@ -306,7 +306,7 @@ export class DungeonScene extends Phaser.Scene {
       this._updateHpBar(gfx.hpBar, player.x, player.y, player.hp, player.maxHp);
       // Layer above platform tint when elevated, so the player visually sits
       // "on top of" the platform rather than being absorbed into its colour.
-      const depth = player.elevation === 1 ? DEPTH_ELEVATED_ENTITY : DEPTH_GROUND_ENTITY;
+      const depth = DEPTH_GROUND_ENTITY + 2 * (player.elevation ?? 0);
       gfx.circle.setDepth(depth);
       gfx.hpBar.setDepth(depth + 1);
       if (sessionId === this._room.sessionId) {
@@ -379,7 +379,7 @@ export class DungeonScene extends Phaser.Scene {
         this._updateHpBar(gfx.hpBar, enemy.x, enemy.y, enemy.hp, enemy.maxHp);
         gfx.lootHint.setVisible(false);
       }
-      const depth = enemy.elevation === 1 ? DEPTH_ELEVATED_ENTITY : DEPTH_GROUND_ENTITY;
+      const depth = DEPTH_GROUND_ENTITY + 2 * (enemy.elevation ?? 0);
       gfx.circle.setDepth(depth);
       gfx.hpBar.setDepth(depth + 1);
     }
@@ -613,7 +613,7 @@ export class DungeonScene extends Phaser.Scene {
     ring.clear();
     ring.lineStyle(2, 0xffff44, 1);
     ring.strokeCircle(enemy.x, enemy.y, ENEMY_RADIUS + 4);
-    ring.setDepth(enemy.elevation === 1 ? DEPTH_ELEVATED_ENTITY + 1 : DEPTH_GROUND_ENTITY + 1);
+    ring.setDepth(DEPTH_GROUND_ENTITY + 2 * (enemy.elevation ?? 0) + 1);
     ring.setVisible(true);
   }
 

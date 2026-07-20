@@ -118,6 +118,9 @@ export function validateFloorData(floorRegistry, { enemyTypes, isKnownItem }) {
     for (const p of floor.platforms ?? []) {
       checkId('platform', p.id);
       if (!isRect(p)) err(floorNum, `platform "${p.id}" must be a rect { x, y, w, h } with positive size`);
+      if (p.elevation !== undefined && !(Number.isInteger(p.elevation) && p.elevation >= 1)) {
+        err(floorNum, `platform "${p.id}" elevation must be an integer ≥ 1 (got ${p.elevation})`);
+      }
       for (const st of p.steps ?? []) {
         checkId('step', st.id);
         if (!isPoint(st)) err(floorNum, `step "${st.id}" needs numeric x/y`);

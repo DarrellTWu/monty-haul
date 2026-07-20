@@ -10,6 +10,7 @@ import {
   resolveWallCollision,
   isLineBlocked,
   tryAutoClimb,
+  elevationAt,
   segmentIntersectsCircle,
   segmentPerimeterCrossing,
   pointInRect,
@@ -445,6 +446,47 @@ group('isLineBlocked', () => {
   test('multiple obstacles: first miss, second hit → true', () => {
     const miss = { x: 1000, y: 1000, w: 10, h: 10 };
     assert.equal(isLineBlocked(0, 0, 200, 200, [miss, losWall]), true);
+  });
+});
+
+// ─── elevationAt (multi-level positional elevation) ──────────────────────────
+
+group('elevationAt', () => {
+  // Stacked: an elev-2 mesa inside an elev-1 platform.
+  const lower = { x: 100, y: 100, w: 400, h: 400, elevation: 1 };
+  const upper = { x: 200, y: 200, w: 160, h: 160, elevation: 2 };
+  const stack = [lower, upper];
+
+  test('open ground → 0', () => {
+    assert.equal(elevationAt(50, 50, stack), 0);
+  });
+
+  test('on the lower tier only → 1', () => {
+    assert.equal(elevationAt(150, 150, stack), 1);
+  });
+
+  test('on the stacked summit → 2', () => {
+    assert.equal(elevationAt(280, 280, stack), 2);
+  });
+
+  test('platform without explicit elevation defaults to 1', () => {
+    assert.equal(elevationAt(150, 150, [{ x: 100, y: 100, w: 100, h: 100 }]), 1);
+  });
+
+  test('tryAutoClimb derives from final position (walk off the summit → 1)', () => {
+    const elev = tryAutoClimb(
+      { prevX: 280, prevY: 280, x: 180, y: 180, elevation: 2 },
+      stack,
+    );
+    assert.equal(elev, 1);
+  });
+
+  test('tryAutoClimb: climb the summit wall from tier 1 → 2', () => {
+    const elev = tryAutoClimb(
+      { prevX: 190, prevY: 280, x: 210, y: 280, elevation: 1 },
+      stack,
+    );
+    assert.equal(elev, 2);
   });
 });
 

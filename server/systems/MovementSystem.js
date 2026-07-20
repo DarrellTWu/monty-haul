@@ -60,12 +60,17 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
     }
   }
 
-  // Platform perimeter walls (with step gaps). Shared across all elev-0
-  // non-climbers; built once per tick. Climbers and elev-1 entities don't
-  // see these — the perimeter is transparent to them.
-  const platformPerimeters = [];
+  // Platform perimeter walls (with step gaps), grouped per platform with its
+  // elevation: the perimeter of platform P blocks an entity below P's level
+  // (unless it climbs); entities at/above P's level see it as transparent.
+  // Built once per tick. `allPerimeterRects` is the flat list used for
+  // climb-fatigue segment checks.
+  const perimeterGroups = [];
+  const allPerimeterRects = [];
   for (const p of platforms) {
-    for (const r of platformPerimeterRects(p)) platformPerimeters.push(r);
+    const rects = platformPerimeterRects(p);
+    perimeterGroups.push({ elevation: p.elevation ?? 1, rects });
+    for (const r of rects) allPerimeterRects.push(r);
   }
 
   // ── Players ────────────────────────────────────────────────────────────────
@@ -101,7 +106,7 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
     }
 
     const canClimb = derived.canClimb;
-    const rects = buildObstacleRects(walls, lockedDoors, platformPerimeters, player.elevation, canClimb);
+    const rects = buildObstacleRects(walls, lockedDoors, perimeterGroups, player.elevation, canClimb);
     const resolved = resolveWallCollision({ x: player.x, y: player.y }, rects);
     player.x = resolved.x;
     player.y = resolved.y;
@@ -115,8 +120,9 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
       // climbing UP over a perimeter WALL (the segment intersects a perimeter
       // rect — step-gap crossings don't) on a floor deeper than the player's
       // climb level emits a fatigue event; the room applies the condition.
-      if (newElevation === 1 && player.elevation === 0
-          && isLineBlocked(prevX, prevY, player.x, player.y, platformPerimeters)) {
+      // Applies to any upward transition (0→1, 1→2).
+      if (newElevation > player.elevation
+          && isLineBlocked(prevX, prevY, player.x, player.y, allPerimeterRects)) {
         const deficit = (state.floor ?? 1) - getClimbLevel(player);
         if (deficit > 0) {
           events.push({
@@ -151,7 +157,7 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
     }
 
     const canClimb = enemyDefs?.get(id)?.canClimb ?? false;
-    const rects = buildObstacleRects(walls, lockedDoors, platformPerimeters, enemy.elevation, canClimb);
+    const rects = buildObstacleRects(walls, lockedDoors, perimeterGroups, enemy.elevation, canClimb);
     const resolved = resolveWallCollision({ x: enemy.x, y: enemy.y }, rects);
     enemy.x = resolved.x;
     enemy.y = resolved.y;
@@ -201,7 +207,7 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
   }
   for (const i of displaced) {
     const { e, canClimb } = bodies[i];
-    const rects = buildObstacleRects(walls, lockedDoors, platformPerimeters, e.elevation, canClimb);
+    const rects = buildObstacleRects(walls, lockedDoors, perimeterGroups, e.elevation, canClimb);
     const resolved = resolveWallCollision({ x: e.x, y: e.y }, rects);
     e.x = clamp(resolved.x, bounds.minX, bounds.maxX);
     e.y = clamp(resolved.y, bounds.minY, bounds.maxY);
@@ -219,16 +225,20 @@ export function update(state, dt, bounds, geometry = null, enemyDefs = null) {
  * Assemble the obstacle rect list for one entity this tick.
  *
  * Walls + locked doors are always obstacles. Platform perimeters (thin wall
- * bands with gaps at each step) are obstacles only for an elev-0 non-climber.
- * Climbers and elev-1 entities see the perimeter as transparent — they walk
- * freely, and `tryAutoClimb` updates their elevation when they actually cross.
+ * bands with gaps at each step) block a non-climber whose elevation is below
+ * that platform's level. Climbers and entities at/above the platform's level
+ * see the perimeter as transparent — they walk freely, and `tryAutoClimb`
+ * updates their elevation when they actually cross.
  */
-function buildObstacleRects(walls, lockedDoors, platformPerimeters, elevation, canClimb) {
+function buildObstacleRects(walls, lockedDoors, perimeterGroups, elevation, canClimb) {
   const rects = [];
   for (const w of walls) rects.push(w);
   for (const d of lockedDoors) rects.push(d);
-  if (elevation === 0 && !canClimb) {
-    for (const r of platformPerimeters) rects.push(r);
+  if (!canClimb) {
+    for (const group of perimeterGroups) {
+      if (elevation >= group.elevation) continue;
+      for (const r of group.rects) rects.push(r);
+    }
   }
   return rects;
 }

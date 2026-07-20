@@ -100,13 +100,19 @@ console.log('\nCorpses are walkable');
 // ── 5. Cross-elevation pairs do not collide ──────────────────────────────────
 console.log('\nDifferent elevations pass freely');
 {
+  // Elevation is positional: tier-1 base under both, tier-2 summit under only
+  // one. Both are monks (climbers) so the summit perimeter doesn't shove the
+  // lower one — this isolates the collision rule from wall gating.
+  const base   = { x: 0, y: 0, w: 300, h: 300, elevation: 1 };
+  const summit = { x: 104, y: 80, w: 40, h: 40, elevation: 2 };
   const state = new GameState();
-  const ground = mkPlayer({ x: 100, y: 100, elevation: 0 });
-  const high   = mkPlayer({ x: 110, y: 100, elevation: 1 });
-  state.players.set('A', ground);
-  state.players.set('B', high);
-  run(state, { ticks: 5 });
-  check('no separation across elevations', dist(ground, high) < MIN_SEP);
+  const lower = mkPlayer({ x: 100, y: 100, elevation: 1, classId: 'monk' });
+  const upper = mkPlayer({ x: 110, y: 100, elevation: 2, classId: 'monk' });
+  state.players.set('A', lower);
+  state.players.set('B', upper);
+  run(state, { geometry: { walls: [], platforms: [base, summit] }, ticks: 5 });
+  check('elevations derived as 1 and 2', lower.elevation === 1 && upper.elevation === 2);
+  check('no separation across elevations', dist(lower, upper) < MIN_SEP);
 }
 
 // ── 6. Separation never pushes through a wall ────────────────────────────────

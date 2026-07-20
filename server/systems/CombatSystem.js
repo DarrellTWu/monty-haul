@@ -181,7 +181,7 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
   // Source assembly: high-ground advantage (any mode), reckless advantage
   // (melee only — SRD), long-range and foe-adjacent disadvantage (ranged only).
   const sources = [];
-  if (player.elevation === 1 && target.state.elevation === 0) {
+  if (player.elevation > target.state.elevation) {
     sources.push({ kind: 'advantage', reason: 'high-ground' });
   }
   if (mode === 'melee' && player.conditions.includes('reckless')) {
@@ -399,10 +399,11 @@ export function playerAttack(state, sessionId, enemyDefs = new Map(), targetId =
 
 /**
  * Build the obstacle rects a knockback target collides with: walls + locked
- * doors always; platform perimeter rects only when the target is at elevation
- * 0 — knockback never shoves anyone UP a platform wall (climbing is
+ * doors always; the perimeter rects of any platform ABOVE the target's
+ * elevation — knockback never shoves anyone UP a platform wall (climbing is
  * voluntary), which is exactly what makes platform side-walls slammable.
- * See docs/design/dynamic-combat.md §Pillar 1.
+ * Edges at/below the target's level stay transparent so pushes can drop
+ * targets off ledges. See docs/design/dynamic-combat.md §Pillar 1.
  */
 function _knockbackObstacles(state, terrain, targetElevation) {
   const rects = [...(terrain?.walls ?? [])];
@@ -411,10 +412,9 @@ function _knockbackObstacles(state, terrain, targetElevation) {
       if (door.locked) rects.push({ x: door.x, y: door.y, w: door.w, h: door.h });
     }
   }
-  if (targetElevation === 0) {
-    for (const p of terrain?.platforms ?? []) {
-      for (const r of platformPerimeterRects(p)) rects.push(r);
-    }
+  for (const p of terrain?.platforms ?? []) {
+    if ((p.elevation ?? 1) <= targetElevation) continue;
+    for (const r of platformPerimeterRects(p)) rects.push(r);
   }
   return rects;
 }
@@ -502,7 +502,7 @@ export function enemyAttack(state, enemyState, enemyDef, targetPlayer, terrain =
   // Reckless Attack: attacks against a reckless player have advantage (SRD).
   // Patient Defense: attacks against a dodging monk have disadvantage.
   const sources = [];
-  if (enemyState.elevation === 1 && targetPlayer.elevation === 0) {
+  if (enemyState.elevation > targetPlayer.elevation) {
     sources.push({ kind: 'advantage', reason: 'high-ground' });
   }
   if (targetPlayer.conditions?.includes('reckless')) {
@@ -670,7 +670,7 @@ export function applyFlurryOfBlows(state, sessionId, enemyDefs = new Map(), terr
   const abilKey   = dexMod > strMod ? 'dex' : 'str';
 
   const sources = [];
-  if (player.elevation === 1 && target.state.elevation === 0) {
+  if (player.elevation > target.state.elevation) {
     sources.push({ kind: 'advantage', reason: 'high-ground' });
   }
 

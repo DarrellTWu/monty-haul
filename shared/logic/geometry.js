@@ -224,39 +224,46 @@ function splitEdgeWithGaps(start, end, gapCenters, gapHalfWidth) {
 // ─── Auto-climb (perimeter-driven elevation transitions) ─────────────────────
 
 /**
- * Apply perimeter-based elevation transitions for one entity's movement
- * segment. With the perimeter-walls-with-gaps model, the wall list itself
- * gates *who* can cross — anyone who actually crosses the perimeter has
- * earned the elevation change. So this function is simple:
+ * Elevation at a point: the highest `elevation` among platforms whose rect
+ * contains (x, y) — platforms without an explicit elevation count as 1 — or
+ * 0 on open ground. In the 2D top-down model, standing inside a platform
+ * footprint IS standing on it; stacked platforms (an elev-2 rect inside an
+ * elev-1 rect) resolve to the top surface.
  *
- *   - segment crosses perimeter inward,  entity is elev 0  → elev 1
- *   - segment crosses perimeter outward, entity is elev 1  → elev 0
- *   - everything else: no change
+ * @param {number} x
+ * @param {number} y
+ * @param {Array<{x:number,y:number,w:number,h:number,elevation?:number}>} platforms
+ * @returns {number}
+ */
+export function elevationAt(x, y, platforms) {
+  let elevation = 0;
+  for (const p of platforms) {
+    const pe = p.elevation ?? 1;
+    if (pe > elevation && pointInRect(x, y, p)) elevation = pe;
+  }
+  return elevation;
+}
+
+/**
+ * Derive an entity's elevation after a movement segment. With the
+ * perimeter-walls-with-gaps model, the obstacle list itself gates *who* can
+ * cross an edge — anyone whose resolved position ends up inside a platform
+ * footprint has earned the elevation. So elevation is purely positional:
+ * `elevationAt(x, y)` of the final position. This generalizes to any number
+ * of stacked elevation levels and self-heals any elevation desync.
  *
- * Position is NOT modified — traversal stays continuous along the original
- * segment. The caller updates the entity's elevation field from the return
- * value.
- *
- * Note: `canClimb` no longer influences this function. The obstacle-rect
- * builder is responsible for letting climbers through the perimeter; once
- * they're across, this function elevates them just like a non-climber that
- * passed through a step gap.
+ * The signature keeps `prevX/prevY/elevation` for callers that also reason
+ * about the segment (climb-fatigue detection compares old vs new elevation
+ * and tests the segment against perimeter walls); this function ignores them.
  *
  * @param {{
  *   prevX:number, prevY:number, x:number, y:number, elevation:number,
  * }} entity
- * @param {Array<{x:number,y:number,w:number,h:number}>} platforms
+ * @param {Array<{x:number,y:number,w:number,h:number,elevation?:number}>} platforms
  * @returns {number} new elevation
  */
 export function tryAutoClimb(entity, platforms) {
-  let { elevation } = entity;
-  const { prevX, prevY, x, y } = entity;
-  for (const platform of platforms) {
-    const crossing = segmentPerimeterCrossing(prevX, prevY, x, y, platform);
-    if (crossing === 'inward'  && elevation === 0) elevation = 1;
-    else if (crossing === 'outward' && elevation === 1) elevation = 0;
-  }
-  return elevation;
+  return elevationAt(entity.x, entity.y, platforms);
 }
 
 // ─── Geometric primitives ────────────────────────────────────────────────────
